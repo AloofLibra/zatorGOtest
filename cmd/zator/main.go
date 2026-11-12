@@ -138,6 +138,7 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "zator установлен в %s\n", a.Paths.ZatorRoot)
+	_ = a.InstallSelfBinary()
 	if *withZapret {
 		fmt.Fprintln(stdout, "загрузка zapret2...")
 		zver := *zapretVer
@@ -155,9 +156,17 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		if res != nil {
 			fmt.Fprintf(stdout, "zapret2 %s (%s) → %s\n", res.Version, res.Source, res.Root)
 		}
+	} else if !*skipService {
+		// Только Web UI / автозагрузка без переустановки zapret2.
+		if err := a.StartServices(context.Background(), app.BootstrapOptions{}); err != nil {
+			fmt.Fprintf(stderr, "автозапуск: %v\n", err)
+			return 1
+		}
 	}
 	fmt.Fprintf(stdout, "Web UI: %s\n", a.WebUIURL(""))
-	fmt.Fprintln(stdout, "Запуск панели: zator webui")
+	if !*skipService {
+		fmt.Fprintln(stdout, "Службы zapret2 и Web UI поставлены в автозагрузку и запущены.")
+	}
 	return 0
 }
 

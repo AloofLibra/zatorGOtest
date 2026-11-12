@@ -61,6 +61,10 @@ func (a *App) syncAssets() error {
 	if err := copyFS(uiembed.Orchestra(), filepath.Join(a.Paths.ExtraStratsDir, "cache", "orchestra")); err != nil {
 		return fmt.Errorf("распаковка orchestra: %w", err)
 	}
+	// config.default ждёт /opt/zator/lua/locked.lua
+	if data, err := fs.ReadFile(uiembed.Orchestra(), "locked.lua"); err == nil {
+		_ = os.WriteFile(filepath.Join(a.Paths.LuaDir, "locked.lua"), data, 0o644)
+	}
 	if err := copyFSKeepExisting(uiembed.Lists(), a.Paths.ListsDir); err != nil {
 		return fmt.Errorf("распаковка lists: %w", err)
 	}

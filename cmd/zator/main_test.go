@@ -50,7 +50,7 @@ func TestDefaultNotInstalled(t *testing.T) {
 
 func TestInstallStatusUninstall(t *testing.T) {
 	setupEnv(t)
-	if code, _, errOut := runCmd(t, "install", "-port", "18080", "-zapret=false"); code != 0 {
+	if code, _, errOut := runCmd(t, "install", "-port", "18080", "-zapret=false", "-skip-service"); code != 0 {
 		t.Fatalf("install: %d %s", code, errOut)
 	}
 	code, out, _ := runCmd(t)
@@ -77,7 +77,7 @@ func TestInstallInvalidSource(t *testing.T) {
 
 func TestWebHandlerServesAPIAndStatic(t *testing.T) {
 	setupEnv(t)
-	if code, _, errOut := runCmd(t, "install", "-port", "18081", "-zapret=false"); code != 0 {
+	if code, _, errOut := runCmd(t, "install", "-port", "18081", "-zapret=false", "-skip-service"); code != 0 {
 		t.Fatalf("install: %d %s", code, errOut)
 	}
 	a, err := app.Load()

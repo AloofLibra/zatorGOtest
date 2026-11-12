@@ -81,7 +81,7 @@ func New(zatorRoot, zapretRoot string) Paths {
 		WebUIDir:     filepath.Join(zatorRoot, "webui"),
 		LuaDir:       filepath.Join(zatorRoot, "lua"),
 		ListsDir:     filepath.Join(zatorRoot, "lists"),
-		FakeDir:      filepath.Join(zatorRoot, "fake"),
+		FakeDir:      filepath.Join(zatorRoot, "files", "fake"),
 		DataDir:      filepath.Join(zatorRoot, "data"),
 		StateDir:     stateDir,
 		ConfigDir:    configDir,

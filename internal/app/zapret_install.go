@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/AloofLibra/zator/internal/service"
 	"github.com/AloofLibra/zator/internal/uiembed"
 	"github.com/AloofLibra/zator/internal/zapret"
 )
@@ -27,7 +26,8 @@ type InstallZapretOptions struct {
 }
 
 // InstallZapret скачивает бинарники zapret2 своим установщиком (без
-// install_easy.sh), кладёт config.default при отсутствии config и ставит службу.
+// install_easy.sh), кладёт config.default при отсутствии config и
+// автоматически ставит/запускает zapret2 + Web UI.
 func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*zapret.Result, error) {
 	if err := a.Paths.EnsureDirs(); err != nil {
 		return nil, err
@@ -57,7 +57,6 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 		if err := a.seedZapretConfig(data); err != nil {
 			return res, err
 		}
-		// Также кладём копию шаблона рядом с config.
 		_ = os.WriteFile(filepath.Join(a.Paths.ZapretRoot, "config.default"), data, 0o644)
 	}
 	if err := a.syncAssets(); err != nil {
@@ -66,16 +65,8 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 	if opts.SkipService {
 		return res, nil
 	}
-	mgr, err := service.New(service.Config{Paths: a.Paths, Platform: a.Platform})
-	if err != nil {
-		return res, fmt.Errorf("служба zapret2: %w", err)
-	}
-	if err := mgr.Install(cctx, service.UnitZapret2); err != nil {
-		return res, fmt.Errorf("установка службы zapret2: %w", err)
-	}
-	if err := mgr.Restart(cctx, service.UnitZapret2); err != nil {
-		// На Windows/без root restart может не сработать — не валим всю установку.
-		return res, fmt.Errorf("zapret2 установлен, но запуск службы не удался: %w", err)
+	if err := a.StartServices(cctx, BootstrapOptions{}); err != nil {
+		return res, fmt.Errorf("автозапуск служб: %w", err)
 	}
 	return res, nil
 }

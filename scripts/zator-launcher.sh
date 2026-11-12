@@ -86,9 +86,13 @@ mv -f "$tmp" "$install_dir/zator"
 trap - EXIT INT HUP
 
 if [ ! -f "$ZATOR_ROOT/config/zator.json" ]; then
-  echo "zator-launcher: первичная установка..."
+  echo "zator-launcher: первичная установка (zapret2 + Web UI в автозагрузку)..."
   "$install_dir/zator" install "$@" || die "install завершился с ошибкой"
+else
+  # Обновление бинарника на месте — перезапуск служб.
+  "$install_dir/zator" install -zapret=false "$@" || true
 fi
 
-echo "zator-launcher: запуск Web UI"
-exec "$install_dir/zator" webui "$@"
+echo "zator-launcher: статус"
+"$install_dir/zator" status || true
+echo "zator-launcher: готово (Web UI в автозагрузке, порт 17682)"
