@@ -126,7 +126,7 @@ func DownloadAndInstall(ctx context.Context, opts Options) (*Result, error) {
 	if !opts.Source.Valid() {
 		return nil, fmt.Errorf("zapret: неизвестный источник %q", opts.Source)
 	}
-	ver, err := NormalizeVersion(opts.Source, opts.Version)
+	ver, err := ResolveVersion(ctx, opts.Source, opts.Version, nil)
 	if err != nil {
 		return nil, err
 	}

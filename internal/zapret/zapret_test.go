@@ -115,7 +115,7 @@ func TestDefaults(t *testing.T) {
 	if DefaultSource != SourceFork {
 		t.Fatal("источник по умолчанию должен быть форк")
 	}
-	if DefaultVer != "0.8.2" {
+	if DefaultVer != "1.0.7-reasm-fix" {
 		t.Fatalf("DefaultVer = %s", DefaultVer)
 	}
 	if s, err := ParseSource(""); err != nil || s != SourceFork {
@@ -130,7 +130,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestNormalizeVersion(t *testing.T) {
-	if v, err := NormalizeVersion(SourceOfficial, ""); err != nil || v != DefaultVer {
+	if v, err := NormalizeVersion(SourceOfficial, ""); err != nil || v != DefaultVersion(SourceOfficial) {
 		t.Fatal(v, err)
 	}
 	if v, err := NormalizeVersion(SourceOfficial, "v1.0.5.1"); err != nil || v != "1.0.5.1" {
@@ -179,6 +179,7 @@ func TestDownloadAndInstall(t *testing.T) {
 	res, err := DownloadAndInstall(context.Background(), Options{
 		Root:        root,
 		Arch:        platform.ArchX86_64,
+		Version:     ver,
 		ReleaseBase: srv.URL,
 		Client:      fastClient(),
 		Logf:        func(f string, a ...any) { logs = append(logs, f) },
@@ -254,7 +255,8 @@ func TestInstallSkipAndForce(t *testing.T) {
 	ver := "0.8.2"
 	var hits int32
 	srv := newServer(t, ver, buildArchive(t, "zapret2-v"+ver), false, &hits)
-	opts := Options{Root: filepath.Join(t.TempDir(), "z"), Arch: platform.ArchARM64, ReleaseBase: srv.URL, Client: fastClient()}
+	opts := Options{Root: filepath.Join(t.TempDir(), "z"), Arch: platform.ArchARM64, Version: ver,
+		ReleaseBase: srv.URL, Client: fastClient()}
 
 	if _, err := DownloadAndInstall(context.Background(), opts); err != nil {
 		t.Fatal(err)
@@ -282,7 +284,8 @@ func TestInstallPreservesUserFilesAndReplacesBinaries(t *testing.T) {
 	os.WriteFile(filepath.Join(root, "binaries", "linux-mipsel", "nfqws2"), []byte("old"), 0o755)
 	os.WriteFile(filepath.Join(root, "config"), []byte("USER=1"), 0o644)
 
-	_, err := DownloadAndInstall(context.Background(), Options{Root: root, Arch: platform.ArchX86_64, ReleaseBase: srv.URL, Client: fastClient()})
+	_, err := DownloadAndInstall(context.Background(), Options{Root: root, Arch: platform.ArchX86_64, Version: ver,
+		ReleaseBase: srv.URL, Client: fastClient()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +301,8 @@ func TestInstallIncludeLua(t *testing.T) {
 	ver := "0.8.2"
 	srv := newServer(t, ver, buildArchive(t, "zapret2-v"+ver), false, nil)
 	root := filepath.Join(t.TempDir(), "z")
-	_, err := DownloadAndInstall(context.Background(), Options{Root: root, Arch: platform.ArchX86_64, ReleaseBase: srv.URL, Client: fastClient(), IncludeLua: true})
+	_, err := DownloadAndInstall(context.Background(), Options{Root: root, Arch: platform.ArchX86_64, Version: ver,
+		ReleaseBase: srv.URL, Client: fastClient(), IncludeLua: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,6 +322,7 @@ func TestInstallMirrorFallback(t *testing.T) {
 		Root:        filepath.Join(t.TempDir(), "z"),
 		Arch:        platform.ArchX86_64,
 		Source:      SourceOfficial,
+		Version:     ver,
 		ReleaseBase: dead.URL,
 		MirrorBase:  mirror.URL,
 		Client:      fastClient(),
@@ -334,6 +339,7 @@ func TestInstallMirrorFallback(t *testing.T) {
 	_, err = DownloadAndInstall(context.Background(), Options{
 		Root:        filepath.Join(t.TempDir(), "z2"),
 		Arch:        platform.ArchX86_64,
+		Version:     ver,
 		ReleaseBase: dead.URL,
 		Client:      c,
 	})
@@ -347,7 +353,8 @@ func TestInstallErrors(t *testing.T) {
 	good := buildArchive(t, "zapret2-v"+ver)
 	ctx := context.Background()
 	base := func(srv *httptest.Server, arch platform.Arch) Options {
-		return Options{Root: filepath.Join(t.TempDir(), "z"), Arch: arch, ReleaseBase: srv.URL, Client: fastClient()}
+		return Options{Root: filepath.Join(t.TempDir(), "z"), Arch: arch, Version: ver,
+			ReleaseBase: srv.URL, Client: fastClient()}
 	}
 
 	t.Run("sha mismatch", func(t *testing.T) {
@@ -432,7 +439,8 @@ func TestInstallWrapperOpenWRTEmbedded(t *testing.T) {
 	p := paths.New(filepath.Join(t.TempDir(), "zator"), zr)
 	plat := platform.Platform{Kind: platform.KindOpenWRT, Arch: platform.ArchARM64, InitSystem: platform.InitProcd}
 
-	res, err := Install(context.Background(), p, plat, Options{ReleaseBase: srv.URL, Client: fastClient()})
+	res, err := Install(context.Background(), p, plat, Options{Version: ver,
+		ReleaseBase: srv.URL, Client: fastClient()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,12 +453,14 @@ func TestInstallWrapperOpenWRTEmbedded(t *testing.T) {
 
 	// На VPS — стандартный вариант, который сервер не отдаёт.
 	vps := platform.Platform{Kind: platform.KindVPS, Arch: platform.ArchARM64}
-	if _, err := Install(context.Background(), paths.New(t.TempDir(), filepath.Join(t.TempDir(), "z")), vps, Options{ReleaseBase: srv.URL, Client: fastClient()}); err == nil {
+	if _, err := Install(context.Background(), paths.New(t.TempDir(), filepath.Join(t.TempDir(), "z")), vps, Options{Version: ver,
+		ReleaseBase: srv.URL, Client: fastClient()}); err == nil {
 		t.Fatal("ожидалась ошибка: стандартного архива нет")
 	}
 	// Явный вариант перекрывает автоопределение.
 	if _, err := Install(context.Background(), paths.New(t.TempDir(), filepath.Join(t.TempDir(), "z")), vps,
-		Options{ReleaseBase: srv.URL, Client: fastClient(), Variant: VariantOpenWRTEmbedded}); err != nil {
+		Options{Version: ver,
+			ReleaseBase: srv.URL, Client: fastClient(), Variant: VariantOpenWRTEmbedded}); err != nil {
 		t.Fatal(err)
 	}
 }

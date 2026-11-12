@@ -110,6 +110,7 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	mirror := fs.String("mirror", "", "зеркало для загрузок")
 	source := fs.String("source", "", "источник zapret: official|fork")
 	withZapret := fs.Bool("zapret", true, "скачать и установить zapret2")
+	zapretVer := fs.String("zapret-version", "", "версия zapret2 (пусто = latest с GitHub)")
 	skipService := fs.Bool("skip-service", false, "не ставить systemd/procd службу")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -139,8 +140,13 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "zator установлен в %s\n", a.Paths.ZatorRoot)
 	if *withZapret {
 		fmt.Fprintln(stdout, "загрузка zapret2...")
+		zver := *zapretVer
+		if zver == "" {
+			zver = "latest"
+		}
 		res, err := a.InstallZapret(context.Background(), app.InstallZapretOptions{
 			SkipService: *skipService,
+			Version:     zver,
 		})
 		if err != nil {
 			fmt.Fprintf(stderr, "zapret2: %v\n", err)
