@@ -185,24 +185,34 @@ func (b entwareBackend) install(ctx context.Context, u Unit) error {
 	d := b.m.templateData(u)
 	script := b.m.initScriptFor(u)
 	d.InitScript = filepath.ToSlash(script)
-	content, err := RenderSysV(d)
-	if err != nil {
-		return err
-	}
 	scriptOnDisk := script
 	if u != UnitZapret2 {
 		scriptOnDisk = b.m.sys(script)
 	}
-	if err := b.m.writeFile(scriptOnDisk, content, 0o755); err != nil {
+	// zapret2: не затирать апстримный/Entware init (deployEntwareInit уже положил
+	// оверрайд). RenderSysV — только запасной вариант, если скрипта ещё нет.
+	if u == UnitZapret2 {
+		if _, err := os.Stat(scriptOnDisk); err != nil {
+			content, err := RenderSysV(d)
+			if err != nil {
+				return err
+			}
+			if err := b.m.writeFile(scriptOnDisk, content, 0o755); err != nil {
+				return err
+			}
+		} else if err := os.Chmod(scriptOnDisk, 0o755); err != nil {
+			return fmt.Errorf("service: %w", err)
+		}
+		if err := b.linkS90(scriptOnDisk); err != nil {
+			return err
+		}
+		return b.installHook(d)
+	}
+	content, err := RenderSysV(d)
+	if err != nil {
 		return err
 	}
-	if u != UnitZapret2 {
-		return nil
-	}
-	if err := b.linkS90(scriptOnDisk); err != nil {
-		return err
-	}
-	return b.installHook(d)
+	return b.m.writeFile(scriptOnDisk, content, 0o755)
 }
 
 // linkS90 создаёт /opt/etc/init.d/S90-zapret2 → init-скрипт (копия, если

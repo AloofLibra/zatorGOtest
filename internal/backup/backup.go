@@ -729,7 +729,6 @@ func (m *Manager) destFor(name string) string {
 		return filepath.Join(m.Paths.StateOrchestraDir(), filepath.FromSlash(strings.TrimPrefix(name, entryOrch+"/")))
 	// Раскладка shell-версии.
 	case strings.HasPrefix(name, "extra_strats/cache/orchestra/"):
-		// shell-раскладка совпадает с текущим StateOrchestraDir.
 		return filepath.Join(m.Paths.StateOrchestraDir(), filepath.FromSlash(strings.TrimPrefix(name, "extra_strats/cache/orchestra/")))
 	case name == "extra_strats/TCP_Custom.txt" || name == "extra_strats/TCP_RKN_domains_by_substring.txt":
 		return filepath.Join(m.Paths.ListsDir, path.Base(name))

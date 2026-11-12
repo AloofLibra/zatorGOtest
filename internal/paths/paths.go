@@ -81,7 +81,7 @@ func New(zatorRoot, zapretRoot string) Paths {
 		WebUIDir:     filepath.Join(zatorRoot, "webui"),
 		LuaDir:       filepath.Join(zatorRoot, "lua"),
 		ListsDir:     filepath.Join(zatorRoot, "lists"),
-		FakeDir:      filepath.Join(zatorRoot, "fake"),
+		FakeDir:      filepath.Join(zatorRoot, "files", "fake"),
 		DataDir:      filepath.Join(zatorRoot, "data"),
 		StateDir:     stateDir,
 		ConfigDir:    configDir,
@@ -93,9 +93,8 @@ func New(zatorRoot, zapretRoot string) Paths {
 		ZapretConfig: filepath.Join(zapretRoot, "config"),
 		ZatorConfig:  filepath.Join(configDir, ConfigFileName),
 
-		// Lua locked.lua и Go Store читают локи из extra_strats/cache/orchestra.
-		LockedTSV:       filepath.Join(zatorRoot, "extra_strats", "cache", "orchestra", "locked.tsv"),
-		LockedManualTSV: filepath.Join(zatorRoot, "extra_strats", "cache", "orchestra", "locked.manual.tsv"),
+		LockedTSV:       filepath.Join(stateDir, "orchestra", "locked.tsv"),
+		LockedManualTSV: filepath.Join(stateDir, "orchestra", "locked.manual.tsv"),
 		HistoryTSV:      filepath.Join(stateDir, "orchestra", "history.tsv"),
 		FailedTSV:       filepath.Join(stateDir, "orchestra", "failed.tsv"),
 	}
@@ -110,13 +109,8 @@ func FromEnv() Paths {
 // Default возвращает раскладку по умолчанию (с учётом переменных окружения).
 func Default() Paths { return FromEnv() }
 
-// StateOrchestraDir — каталог локов/override для Lua и Go (extra_strats/cache/orchestra).
+// StateOrchestraDir возвращает каталог состояния orchestra.
 func (p Paths) StateOrchestraDir() string {
-	return filepath.Join(p.ExtraStratsDir, "cache", "orchestra")
-}
-
-// HistoryOrchestraDir — каталог history/failed (не читается Lua locked.lua).
-func (p Paths) HistoryOrchestraDir() string {
 	return filepath.Join(p.StateDir, "orchestra")
 }
 
@@ -124,8 +118,7 @@ func (p Paths) HistoryOrchestraDir() string {
 func (p Paths) Dirs() []string {
 	return []string{
 		p.ZatorRoot, p.BinDir, p.WebUIDir, p.LuaDir, p.ListsDir, p.FakeDir,
-		p.DataDir, p.StateDir, p.HistoryOrchestraDir(), p.StateOrchestraDir(),
-		p.ConfigDir, p.OrchestraDir, p.ExtraStratsDir,
+		p.DataDir, p.StateDir, p.StateOrchestraDir(), p.ConfigDir, p.OrchestraDir, p.ExtraStratsDir,
 	}
 }
 

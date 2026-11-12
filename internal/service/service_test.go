@@ -427,9 +427,22 @@ func TestEntwareKeeneticInstall(t *testing.T) {
 
 	script := filepath.Join(e.p.ZapretRoot, "init.d", "sysv", "zapret2")
 	body := readFile(t, script)
+	// Нет заранее положенного апстримного init — пишется запасной RenderSysV.
 	if !strings.Contains(body, "PIDFILE=/opt/var/run/zapret2.pid") {
 		t.Errorf("скрипт zapret2:\n%s", body)
 	}
+	// Повторная установка не должна затирать существующий init.
+	marker := "#!/bin/sh\n# upstream-keep\nstart(){ :; }\n"
+	if err := os.WriteFile(script, []byte(marker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Install(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, script); got != marker {
+		t.Fatalf("init zapret2 перезаписан:\n%s", got)
+	}
+	body = marker
 	// S90-симлинк (или копия) указывает на init-скрипт.
 	link := filepath.Join(e.root, "opt", "etc", "init.d", "S90-zapret2")
 	if got := readFile(t, link); got != body {

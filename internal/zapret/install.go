@@ -208,11 +208,16 @@ func DownloadAndInstall(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	stage := filepath.Join(work, "stage")
+	// Lua/common/init.d нужны для запуска nfqws2 и firewall (не только бинарники).
+	includeLua := opts.IncludeLua
+	if !includeLua {
+		includeLua = true // по умолчанию всегда тянем upstream lua
+	}
 	err = fetch.SafeUntarFiltered(archive, stage, func(name string, mode os.FileMode) (string, bool) {
 		if mode.IsDir() || !mode.IsRegular() {
 			return "", false
 		}
-		return stageRel(name, archDir, opts.IncludeLua)
+		return stageRel(name, archDir, includeLua)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("zapret: распаковка: %w", err)
@@ -274,12 +279,28 @@ func stageRel(name, archDir string, lua bool) (string, bool) {
 	if d, b, ok := splitBinaryEntry(name); ok && d == archDir {
 		return path.Join("binaries", archDir, b), true
 	}
-	if lua {
-		parts := strings.Split(name, "/")
-		for i, p := range parts {
-			if p == "lua" && i <= 1 && len(parts) > i+1 {
-				return path.Join(parts[i:]...), true
-			}
+	parts := strings.Split(name, "/")
+	// Срезаем возможный верхний каталог zapret2-vX/
+	start := 0
+	if len(parts) > 1 && strings.HasPrefix(parts[0], "zapret2") {
+		start = 1
+	}
+	if start >= len(parts) {
+		return "", false
+	}
+	top := parts[start]
+	switch top {
+	case "lua":
+		if !lua || len(parts) <= start+1 {
+			return "", false
+		}
+		return path.Join(parts[start:]...), true
+	case "common", "init.d", "ipset":
+		return path.Join(parts[start:]...), true
+	case "files":
+		// files/fake из апстрима — запасной набор блобов
+		if len(parts) > start+1 && parts[start+1] == "fake" {
+			return path.Join(parts[start:]...), true
 		}
 	}
 	return "", false
@@ -291,7 +312,7 @@ func commit(root, stage, archDir string, lua bool) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("zapret: %w", err)
 	}
-	groups := []string{"binaries"}
+	groups := []string{"binaries", "common", "init.d", "ipset", "files"}
 	if lua {
 		groups = append(groups, "lua")
 	}

@@ -14,15 +14,12 @@ func TestNewDefaults(t *testing.T) {
 	if p.ZapretConfig != filepath.Join(filepath.Clean(DefaultZapretRoot), "config") {
 		t.Errorf("ZapretConfig = %q", p.ZapretConfig)
 	}
-	if want := filepath.Join(p.ExtraStratsDir, "cache", "orchestra", "locked.tsv"); p.LockedTSV != want {
+	if want := filepath.Join(p.StateDir, "orchestra", "locked.tsv"); p.LockedTSV != want {
 		t.Errorf("LockedTSV = %q, want %q", p.LockedTSV, want)
 	}
 	// locked.manual.tsv (точка, не дефис) — как в orchestra и Lua.
-	if want := filepath.Join(p.ExtraStratsDir, "cache", "orchestra", "locked.manual.tsv"); p.LockedManualTSV != want {
+	if want := filepath.Join(p.StateDir, "orchestra", "locked.manual.tsv"); p.LockedManualTSV != want {
 		t.Errorf("LockedManualTSV = %q, want %q", p.LockedManualTSV, want)
-	}
-	if p.StateOrchestraDir() != filepath.Join(p.ExtraStratsDir, "cache", "orchestra") {
-		t.Errorf("StateOrchestraDir = %q", p.StateOrchestraDir())
 	}
 	if want := filepath.Join(p.ConfigDir, "zator.json"); p.ZatorConfig != want {
 		t.Errorf("ZatorConfig = %q, want %q", p.ZatorConfig, want)

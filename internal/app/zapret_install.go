@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -20,8 +21,8 @@ type InstallZapretOptions struct {
 	Timeout     time.Duration
 }
 
-// InstallZapret скачивает latest zapret2 (или указанную версию), готовит
-// runtime и автоматически ставит/запускает службы zapret2 + Web UI.
+// InstallZapret скачивает последнюю (или указанную) сборку zapret2, раскладывает
+// runtime (bin/common/init.d/lua), ставит config и поднимает службы zapret2+Web UI.
 func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*zapret.Result, error) {
 	if err := a.Paths.EnsureDirs(); err != nil {
 		return nil, err
@@ -36,15 +37,20 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 	if err != nil {
 		src = zapret.DefaultSource
 	}
-	ver := opts.Version
-	if ver == "" {
-		ver = "latest"
+	force := opts.Force
+	// Старые установки могли положить только binaries без init.d/common —
+	// тогда nfqws2 не поднимается. Переустанавливаем runtime.
+	if !force {
+		fn := filepath.Join(a.Paths.ZapretRoot, "init.d", "sysv", "functions")
+		if _, err := os.Stat(fn); err != nil {
+			force = true
+		}
 	}
 	zopts := zapret.Options{
 		Source:     src,
-		Version:    ver,
-		Force:      opts.Force,
-		IncludeLua: true, // upstream lua-desync (zapret-lib.lua и т.п.) нужен nfqws2
+		Version:    opts.Version,
+		Force:      force,
+		IncludeLua: true,
 		MirrorBase: a.Config.Mirror,
 	}
 	res, err := zapret.Install(cctx, a.Paths, a.Platform, zopts)
@@ -52,13 +58,16 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 		return res, err
 	}
 	if data, err := uiembed.ConfigDefault(); err == nil {
+		_ = os.WriteFile(filepath.Join(a.Paths.ZapretRoot, "config.default"), data, 0o644)
 		if err := a.seedZapretConfig(data); err != nil {
 			return res, err
 		}
-		_ = os.WriteFile(filepath.Join(a.Paths.ZapretRoot, "config.default"), data, 0o644)
 	}
 	if err := a.syncAssets(); err != nil {
 		return res, fmt.Errorf("ресурсы zator: %w", err)
+	}
+	if err := a.deployEntwareInit(); err != nil {
+		return res, err
 	}
 	if opts.SkipService {
 		if _, err := a.PrepareZapretRuntime(); err != nil {
@@ -66,8 +75,27 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 		}
 		return res, nil
 	}
-	if err := a.StartServices(cctx, BootstrapOptions{SkipService: false}); err != nil {
-		return res, fmt.Errorf("автозапуск: %w", err)
+	if err := a.StartServices(cctx, BootstrapOptions{}); err != nil {
+		return res, err
 	}
 	return res, nil
+}
+
+// deployEntwareInit подменяет init-скрипт zapret2 оверрайдом Keenetic/Entware
+// (если он встроен в бинарник). Апстримный init.d остаётся в каталоге;
+// оверрайд использует те же functions из EXEDIR.
+func (a *App) deployEntwareInit() error {
+	src := uiembed.Init()
+	data, err := fs.ReadFile(src, "entware/zapret")
+	if err != nil {
+		return nil
+	}
+	dst := filepath.Join(a.Paths.ZapretRoot, "init.d", "sysv", "zapret2")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, data, 0o755); err != nil {
+		return fmt.Errorf("Entware init: %w", err)
+	}
+	return nil
 }

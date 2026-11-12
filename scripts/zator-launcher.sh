@@ -1,6 +1,5 @@
 #!/bin/sh
-# zator-launcher — bootstrap из репозитория Koviand/zatorGOtest.
-# Ставит бинарник zator, затем install (zapret2=latest + автозапуск служб).
+# zator-launcher — минимальный bootstrap: определяет arch, качает бинарник, запускает.
 set -eu
 
 ZATOR_OWNER="${ZATOR_OWNER:-Koviand}"
@@ -25,7 +24,8 @@ detect_arch() {
     mips64) echo mips64 ;;
     mipsel|mipsle) echo mipsel ;;
     mips) echo mips ;;
-    ppc|ppc32|ppc64|ppc64le) echo ppc ;;
+    ppc|ppc32) echo ppc ;;
+    ppc64|ppc64le) echo ppc ;;
     riscv64) echo riscv64 ;;
     *)
       if grep -qiE 'lexra|rlx' /proc/cpuinfo 2>/dev/null; then
@@ -49,6 +49,8 @@ download() {
   fi
 }
 
+# GitHub: latest → /releases/latest/download/<file>
+#         tag    → /releases/download/<tag>/<file>
 asset_url() {
   asset="$1"
   if [ -n "$ZATOR_MIRROR" ]; then
@@ -75,6 +77,7 @@ tmp="$install_dir/.${asset}.$$"
 trap 'rm -f "$tmp"' EXIT INT HUP
 
 url=$(asset_url "$asset")
+
 echo "zator-launcher: arch=${arch}"
 echo "zator-launcher: download ${url}"
 download "$url" "$tmp" || die "не удалось скачать ${url}"
@@ -82,14 +85,16 @@ chmod 755 "$tmp"
 mv -f "$tmp" "$install_dir/zator"
 trap - EXIT INT HUP
 
-echo "zator-launcher: установка / обновление (zapret2=latest, автозапуск)..."
-"$install_dir/zator" install -zapret=true -zapret-version latest "$@" || die "install завершился с ошибкой"
+echo "zator-launcher: установка / обновление (zapret2 latest + автозапуск)..."
+"$install_dir/zator" install "$@" || die "install завершился с ошибкой"
 
-# На Entware init может не держать webui в foreground — поднимаем демоном при необходимости.
-if ! pidof zator >/dev/null 2>&1; then
-  nohup "$install_dir/zator" webui >/tmp/zator-webui.log 2>&1 &
-fi
-
+# Службы zapret2 и Web UI поднимает сам install. Не держим webui
+# в foreground, чтобы не конфликтовать с S92/systemd.
 echo "zator-launcher: готово"
-"$install_dir/zator" status || true
+if [ -f "$ZATOR_ROOT/config/zator.json" ]; then
+  port=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$ZATOR_ROOT/config/zator.json" 2>/dev/null | head -n1)
+fi
+port="${port:-17682}"
+echo "zator-launcher: Web UI → http://$(hostname -I 2>/dev/null | awk '{print $1}'):${port}/"
+echo "zator-launcher: (или http://<IP роутера>:${port}/)"
 exit 0
