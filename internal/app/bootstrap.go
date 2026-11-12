@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -152,6 +153,11 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 		// не фатально на Windows-сборочной машине
 		_ = err
 	}
+	// На Windows службы роутера недоступны — только подготовка runtime (для тестов/сборки).
+	if runtime.GOOS == "windows" {
+		_, _ = a.PrepareZapretRuntime()
+		return nil
+	}
 	fwHook, err := a.PrepareZapretRuntime()
 	if err != nil {
 		return err
@@ -162,13 +168,13 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 			qnum = v
 		}
 	}
+	_ = qnum // номер очереди уже в nfqws2.args (--qnum=)
 	mgr, err := service.New(service.Config{
 		Paths:    a.Paths,
 		Platform: a.Platform,
 		FWHook:   fwHook,
 		ZatorBin: filepath.Join(a.Paths.BinDir, "zator"),
 		ArgsFile: filepath.Join(a.Paths.ZapretRoot, "nfqws2.args"),
-		QNum:     qnum,
 	})
 	if err != nil {
 		return fmt.Errorf("службы: %w", err)

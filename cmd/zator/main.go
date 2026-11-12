@@ -29,10 +29,11 @@ const usage = `zator — управление zapret2 через Web UI
 Команды:
   version     показать версию
   status      показать состояние установки и платформу
-  install     установить zator (каталоги, Web UI, конфигурация)
-  update      обновить встроенные ресурсы
+  install     установить zator + latest zapret2 и автозапустить службы
+  start       подготовить runtime и запустить zapret2 + Web UI
+  update      обновить встроенные ресурсы / релизы
   uninstall   удалить zator (-y без подтверждения)
-  webui       запустить Web UI (порт по умолчанию 17682)
+  webui       запустить только Web UI (порт по умолчанию 17682)
   serve       синоним webui
   help        эта справка
 `
@@ -54,6 +55,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(stdout, stderr)
 	case "install":
 		return cmdInstall(rest, stdout, stderr)
+	case "start":
+		return cmdStart(rest, stdout, stderr)
 	case "update":
 		return cmdUpdate(stdout, stderr)
 	case "uninstall":
@@ -138,9 +141,8 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "zator установлен в %s\n", a.Paths.ZatorRoot)
-	_ = a.InstallSelfBinary()
 	if *withZapret {
-		fmt.Fprintln(stdout, "загрузка zapret2...")
+		fmt.Fprintln(stdout, "загрузка zapret2 (latest)...")
 		zver := *zapretVer
 		if zver == "" {
 			zver = "latest"
@@ -150,23 +152,44 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 			Version:     zver,
 		})
 		if err != nil {
-			fmt.Fprintf(stderr, "zapret2: %v\n", err)
+			fmt.Fprintf(stderr, "zapret2/автозапуск: %v\n", err)
 			return 1
 		}
 		if res != nil {
 			fmt.Fprintf(stdout, "zapret2 %s (%s) → %s\n", res.Version, res.Source, res.Root)
 		}
 	} else if !*skipService {
-		// Только Web UI / автозагрузка без переустановки zapret2.
 		if err := a.StartServices(context.Background(), app.BootstrapOptions{}); err != nil {
 			fmt.Fprintf(stderr, "автозапуск: %v\n", err)
 			return 1
 		}
 	}
+	_ = a.Load()
 	fmt.Fprintf(stdout, "Web UI: %s\n", a.WebUIURL(""))
-	if !*skipService {
-		fmt.Fprintln(stdout, "Службы zapret2 и Web UI поставлены в автозагрузку и запущены.")
+	fmt.Fprintln(stdout, "службы zapret2 и Web UI запущены автоматически")
+	return 0
+}
+
+func cmdStart(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("start", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
+	a, err := app.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "ошибка конфигурации: %v\n", err)
+		return 1
+	}
+	if !a.Installed() {
+		fmt.Fprintln(stderr, "zator не установлен; сначала: zator install")
+		return 1
+	}
+	if err := a.StartServices(context.Background(), app.BootstrapOptions{}); err != nil {
+		fmt.Fprintf(stderr, "запуск: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "службы запущены; Web UI: %s\n", a.WebUIURL(""))
 	return 0
 }
 

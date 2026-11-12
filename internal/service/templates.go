@@ -252,12 +252,7 @@ func (m *manager) templateData(u Unit) TemplateData {
 	switch u {
 	case UnitZapret2:
 		d.Description = "zapret2 (nfqws2)"
-		// nfqws2 требует --qnum в основном argv до разбора @file.
-		d.Command = []string{
-			slash(filepath.Join(m.cfg.Paths.ZapretRoot, "nfq2", "nfqws2")),
-			"--qnum=" + m.cfg.QNum,
-			"@" + slash(m.cfg.ArgsFile),
-		}
+		d.Command = []string{slash(filepath.Join(m.cfg.Paths.ZapretRoot, "nfq2", "nfqws2")), "@" + slash(m.cfg.ArgsFile)}
 		d.Start = 90
 	case UnitWebUI:
 		d.Description = "zator Web UI"

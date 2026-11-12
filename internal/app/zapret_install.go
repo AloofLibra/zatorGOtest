@@ -13,21 +13,15 @@ import (
 
 // InstallZapretOptions — параметры установки zapret2 поверх раскладки zator.
 type InstallZapretOptions struct {
-	// Force переустанавливает бинарники даже при совпадении версии.
-	Force bool
-	// Version — версия zapret2; пусто — DefaultVer.
-	Version string
-	// IncludeLua — распаковать upstream lua из архива zapret2.
-	IncludeLua bool
-	// SkipService — не ставить/запускать службу.
+	Force       bool
+	Version     string
+	IncludeLua  bool
 	SkipService bool
-	// Timeout — таймаут загрузки (по умолчанию 5 минут).
-	Timeout time.Duration
+	Timeout     time.Duration
 }
 
-// InstallZapret скачивает бинарники zapret2 своим установщиком (без
-// install_easy.sh), кладёт config.default при отсутствии config и
-// автоматически ставит/запускает zapret2 + Web UI.
+// InstallZapret скачивает latest zapret2 (или указанную версию), готовит
+// runtime и автоматически ставит/запускает службы zapret2 + Web UI.
 func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*zapret.Result, error) {
 	if err := a.Paths.EnsureDirs(); err != nil {
 		return nil, err
@@ -42,11 +36,15 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 	if err != nil {
 		src = zapret.DefaultSource
 	}
+	ver := opts.Version
+	if ver == "" {
+		ver = "latest"
+	}
 	zopts := zapret.Options{
 		Source:     src,
-		Version:    opts.Version,
+		Version:    ver,
 		Force:      opts.Force,
-		IncludeLua: opts.IncludeLua,
+		IncludeLua: true, // upstream lua-desync (zapret-lib.lua и т.п.) нужен nfqws2
 		MirrorBase: a.Config.Mirror,
 	}
 	res, err := zapret.Install(cctx, a.Paths, a.Platform, zopts)
@@ -63,10 +61,13 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 		return res, fmt.Errorf("ресурсы zator: %w", err)
 	}
 	if opts.SkipService {
+		if _, err := a.PrepareZapretRuntime(); err != nil {
+			return res, err
+		}
 		return res, nil
 	}
-	if err := a.StartServices(cctx, BootstrapOptions{}); err != nil {
-		return res, fmt.Errorf("автозапуск служб: %w", err)
+	if err := a.StartServices(cctx, BootstrapOptions{SkipService: false}); err != nil {
+		return res, fmt.Errorf("автозапуск: %w", err)
 	}
 	return res, nil
 }

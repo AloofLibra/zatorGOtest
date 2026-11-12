@@ -68,6 +68,9 @@ func Data() fs.FS { return mustSub(assets.Data, "data") }
 // Fake возвращает FS fake-блобов.
 func Fake() fs.FS { return mustSub(assets.Fake, "fake") }
 
+// ExtraStrats возвращает FS списков стратегий.
+func ExtraStrats() fs.FS { return mustSub(assets.ExtraStrats, "extra_strats") }
+
 func mustSub(root fs.FS, name string) fs.FS {
 	sub, err := fs.Sub(root, name)
 	if err != nil {

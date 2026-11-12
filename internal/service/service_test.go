@@ -170,7 +170,7 @@ func TestRenderSystemd(t *testing.T) {
 	args := filepath.ToSlash(filepath.Join(e.p.ZapretRoot, "nfqws2.args"))
 	for _, want := range []string{
 		"[Unit]", "Description=zapret2 (nfqws2)", "[Service]", "Type=simple",
-		"ExecStart=" + nfq + " --qnum=200 @" + args,
+		"ExecStart=" + nfq + " @" + args,
 		"ExecStartPre=-/opt/zapret2/fw.sh start",
 		"ExecStopPost=-/opt/zapret2/fw.sh stop",
 		"Restart=on-failure", "WantedBy=multi-user.target",

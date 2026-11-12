@@ -27,10 +27,15 @@ var Lua embed.FS
 //go:embed all:orchestra
 var Orchestra embed.FS
 
-// Lists — списки доменов/IP (без огромных внешних дампов).
+// Lists — списки доменов/IP.
 //
 //go:embed all:lists
 var Lists embed.FS
+
+// ExtraStrats — hostlist'ы стратегий (RKN/YT/Discord и т.п.).
+//
+//go:embed all:extra_strats
+var ExtraStrats embed.FS
 
 // Data — вспомогательные данные (провайдеры, seed и т.п.).
 //
