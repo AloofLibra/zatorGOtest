@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
@@ -155,12 +156,19 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 	if err != nil {
 		return err
 	}
+	qnum := "200"
+	if cfg, err := config.Load(a.Paths.ZapretConfig); err == nil {
+		if v := strings.TrimSpace(cfg.GetDefault("QNUM", "")); v != "" {
+			qnum = v
+		}
+	}
 	mgr, err := service.New(service.Config{
 		Paths:    a.Paths,
 		Platform: a.Platform,
 		FWHook:   fwHook,
 		ZatorBin: filepath.Join(a.Paths.BinDir, "zator"),
 		ArgsFile: filepath.Join(a.Paths.ZapretRoot, "nfqws2.args"),
+		QNum:     qnum,
 	})
 	if err != nil {
 		return fmt.Errorf("службы: %w", err)

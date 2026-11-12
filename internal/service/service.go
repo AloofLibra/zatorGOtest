@@ -145,6 +145,9 @@ type Config struct {
 	ZatorBin string
 	// ArgsFile — файл параметров nfqws2 (по умолчанию ZapretRoot/nfqws2.args).
 	ArgsFile string
+	// QNum — номер NFQUEUE для argv nfqws2 (должен быть до @argsfile;
+	// в @file один этот флаг nfqws2 не видит). По умолчанию "200".
+	QNum string
 	// FWHook — необязательный скрипт настройки межсетевого экрана
 	// (вызывается с аргументами start|stop|restart).
 	FWHook string
@@ -174,6 +177,9 @@ func New(cfg Config) (Controller, error) {
 	}
 	if cfg.ArgsFile == "" {
 		cfg.ArgsFile = filepath.Join(cfg.Paths.ZapretRoot, "nfqws2.args")
+	}
+	if cfg.QNum == "" {
+		cfg.QNum = "200"
 	}
 	if cfg.ProcRoot == "" {
 		cfg.ProcRoot = "/proc"
