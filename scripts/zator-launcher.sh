@@ -1,23 +1,17 @@
 #!/bin/sh
 # zator-launcher — минимальный bootstrap: определяет arch, качает бинарник, запускает.
-# Breaking change относительно старого z4r/z2r: новый URL и имя артефактов.
 set -eu
 
-ZATOR_OWNER="${ZATOR_OWNER:-AloofLibra}"
-ZATOR_REPO="${ZATOR_REPO:-zator}"
+ZATOR_OWNER="${ZATOR_OWNER:-Koviand}"
+ZATOR_REPO="${ZATOR_REPO:-zatorGOtest}"
 ZATOR_RELEASE="${ZATOR_RELEASE:-latest}"
 ZATOR_ROOT="${ZATOR_ROOT:-/opt/zator}"
 ZATOR_BIN_DIR="${ZATOR_BIN_DIR:-$ZATOR_ROOT/bin}"
 ZATOR_MIRROR="${ZATOR_MIRROR:-}"
-ZATOR_BASE_URL="${ZATOR_BASE_URL:-https://github.com/${ZATOR_OWNER}/${ZATOR_REPO}/releases/download}"
 
 umask 022
 
 die() { echo "zator-launcher: $*" >&2; exit 1; }
-
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "нужна утилита: $1"
-}
 
 detect_arch() {
   m=$(uname -m 2>/dev/null || echo unknown)
@@ -34,7 +28,6 @@ detect_arch() {
     ppc64|ppc64le) echo ppc ;;
     riscv64) echo riscv64 ;;
     *)
-      # Lexra / особые SoC Keenetic
       if grep -qiE 'lexra|rlx' /proc/cpuinfo 2>/dev/null; then
         echo lexra
       else
@@ -56,6 +49,26 @@ download() {
   fi
 }
 
+# GitHub: latest → /releases/latest/download/<file>
+#         tag    → /releases/download/<tag>/<file>
+asset_url() {
+  asset="$1"
+  if [ -n "$ZATOR_MIRROR" ]; then
+    printf '%s\n' "${ZATOR_MIRROR%/}/${asset}"
+    return
+  fi
+  if [ -n "${ZATOR_BASE_URL:-}" ]; then
+    printf '%s\n' "${ZATOR_BASE_URL%/}/${asset}"
+    return
+  fi
+  base="https://github.com/${ZATOR_OWNER}/${ZATOR_REPO}"
+  if [ "$ZATOR_RELEASE" = "latest" ]; then
+    printf '%s\n' "${base}/releases/latest/download/${asset}"
+  else
+    printf '%s\n' "${base}/releases/download/${ZATOR_RELEASE}/${asset}"
+  fi
+}
+
 arch=$(detect_arch)
 asset="zator-linux-${arch}"
 install_dir="$ZATOR_BIN_DIR"
@@ -63,11 +76,7 @@ mkdir -p "$install_dir"
 tmp="$install_dir/.${asset}.$$"
 trap 'rm -f "$tmp"' EXIT INT HUP
 
-if [ -n "$ZATOR_MIRROR" ]; then
-  url="${ZATOR_MIRROR%/}/${asset}"
-else
-  url="${ZATOR_BASE_URL%/}/${ZATOR_RELEASE}/${asset}"
-fi
+url=$(asset_url "$asset")
 
 echo "zator-launcher: arch=${arch}"
 echo "zator-launcher: download ${url}"
@@ -76,7 +85,6 @@ chmod 755 "$tmp"
 mv -f "$tmp" "$install_dir/zator"
 trap - EXIT INT HUP
 
-# Первый запуск: установка + подсказка Web UI.
 if [ ! -f "$ZATOR_ROOT/config/zator.json" ]; then
   echo "zator-launcher: первичная установка..."
   "$install_dir/zator" install "$@" || die "install завершился с ошибкой"
