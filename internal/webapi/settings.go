@@ -1,0 +1,297 @@
+package webapi
+
+import (
+	"context"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/deploy"
+	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/telemetry"
+)
+
+var (
+	tlsBlobFileRe = regexp.MustCompile(`^(tls_[A-Za-z0-9_.-]+\.bin|custom_tls\.bin)$`)
+	wgBlobFileRe  = regexp.MustCompile(`^wg_initial_fake_[A-Za-z0-9_.-]+\.bin$`)
+)
+
+const (
+	blobDefault = "fake_default_tls"
+	cliHint     = " Обновите конфиг через CLI (zator update) или Web UI."
+)
+
+// normSetting приводит имя настройки к каноничному виду.
+func normSetting(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.ReplaceAll(name, "-", "_")
+}
+
+// GET|POST /cgi-bin/settings.cgi
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, p params) {
+	if !requireMethod(w, r, http.MethodGet, http.MethodPost) {
+		return
+	}
+	if r.Method == http.MethodPost {
+		out, err := s.settingsPost(r, p)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	name := normSetting(p.Get("setting"))
+	if name == "supersweep" {
+		s.writeSupersweep(w)
+		return
+	}
+	cfg, _ := s.readConfig()
+	out, err := s.settingGet(r.Context(), cfg, name)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// settingGet возвращает полезную нагрузку настройки (GET settings.cgi?setting=name).
+func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) (any, error) {
+	switch normSetting(name) {
+	case "wg_blob":
+		return s.wgBlobGet(cfg), nil
+	case "wg_state":
+		return wgStateGet(cfg), nil
+	case "fallback", "fallback_state":
+		st := cfg.FallbackText()
+		return map[string]any{"state": st, "enabled": st == "включен"}, nil
+	case "udp_games", "udp_games_state":
+		st := cfg.UDPGamesText()
+		return map[string]any{"state": st, "enabled": st == "Включен"}, nil
+	case "wssize_ramp":
+		return s.wssizeGet(cfg), nil
+	case "auto_mode", "auto_mode_state":
+		st := cfg.AutoModeText()
+		return map[string]any{"state": st, "enabled": st == "включен"}, nil
+	case "hostlist", "hostlist_state":
+		st := cfg.HostlistText()
+		return map[string]any{"state": st, "auto": st == "авто"}, nil
+	case "rst_guard", "rst_guard_state":
+		st := cfg.RSTGuardText()
+		_, err := os.Stat(filepath.Join(s.paths.LuaDir, "rst-guard.lua"))
+		return map[string]any{"state": st, "enabled": st == "включен", "lua_available": err == nil}, nil
+	case "reasm", "reasm_state":
+		st := cfg.ReasmText()
+		return map[string]any{"state": st, "enabled": st == "включено"}, nil
+	case "quic443", "quic443_state":
+		st := cfg.QUIC443Text()
+		return map[string]any{"state": st, "enabled": st == "включены"}, nil
+	case "dns_desync", "dns_desync_state":
+		st := cfg.DNSDesyncText()
+		return map[string]any{"state": st, "enabled": st == "Включен"}, nil
+	case "ports":
+		return map[string]any{"tcp": cfg.PortsFor("tcp"), "udp": cfg.PortsFor("udp")}, nil
+	case "provider":
+		return map[string]any{"provider": s.providerText()}, nil
+	case "fwtype":
+		v := cfg.FWType()
+		return map[string]any{"state": v, "value": v}, nil
+	case "flowoffload":
+		v := cfg.FlowOffload()
+		return map[string]any{"state": v, "value": v}, nil
+	case "client_scope":
+		return s.scopesPayload(cfg), nil
+	case "update_check":
+		return s.updateCheck(), nil
+	case "recommendations":
+		return s.recommendations(), nil
+	}
+	return s.tlsBlobGet(cfg)
+}
+
+// listFake возвращает отсортированные имена файлов FakeDir, подходящих под re.
+func (s *Server) listFake(re *regexp.Regexp) []string {
+	entries, _ := os.ReadDir(s.paths.FakeDir)
+	out := []string{}
+	for _, e := range entries {
+		if !e.IsDir() && re.MatchString(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// blobDisplay переводит значение blob_override.tsv в вид контракта
+// (файлы слотов хранятся без расширения .bin).
+func blobDisplay(v string) string {
+	if v == "" || v == blobDefault {
+		return v
+	}
+	return v + ".bin"
+}
+
+func (s *Server) tlsBlobGet(cfg *config.Config) (any, error) {
+	blobs := map[string]string{}
+	modes := map[string]string{}
+	snis := map[string]string{}
+	sizes := map[string]string{}
+	blobMap, _ := s.store.OverrideMap(orchestra.OverrideBlob)
+	sniMap, _ := s.store.OverrideMap(orchestra.OverrideSNI)
+	sizeMap, _ := s.store.OverrideMap(orchestra.OverrideCloneSize)
+	for _, id := range orchestra.OverrideProfiles {
+		k := strconv.Itoa(id)
+		blobs[k] = blobDisplay(blobMap[k])
+		snis[k] = sniMap[k]
+		sizes[k] = sizeMap[k]
+		mode, err := s.store.GetFakeMode(k)
+		if err != nil {
+			mode = orchestra.ModeClassic
+		}
+		modes[k] = mode
+	}
+	return map[string]any{
+		"current_mode":    cfg.TLSBlobModeValue(),
+		"current_blob":    cfg.TLSBlobFile(),
+		"available_blobs": s.listFake(tlsBlobFileRe),
+		"profile_blobs":   blobs,
+		"profile_modes":   modes,
+		"profile_snis":    snis,
+		"profile_sizes":   sizes,
+	}, nil
+}
+
+func (s *Server) wgBlobGet(cfg *config.Config) any {
+	file, repeats := cfg.WireGuardBlob()
+	return map[string]any{
+		"current_blob":    file,
+		"current_repeats": repeats,
+		"available_blobs": s.listFake(wgBlobFileRe),
+	}
+}
+
+func wgStateGet(cfg *config.Config) any {
+	state := ""
+	switch cfg.WireGuardText() {
+	case "включено":
+		state = "1"
+	case "выключено":
+		state = "0"
+	}
+	return map[string]any{"state": state, "enabled": state == "1"}
+}
+
+func (s *Server) wssizeGet(cfg *config.Config) any {
+	scale, err := strconv.Atoi(cfg.GetDefault("Z2R_WSSIZE_RAMP_SCALE", "1"))
+	if err != nil {
+		scale = 1
+	}
+	mode := strings.ToLower(cfg.GetDefault("Z2R_WSSIZE_RAMP_MODE", "full"))
+	if mode != "lite" {
+		mode = "full"
+	}
+	ips := 0
+	if lines, err := readListLines(filepath.Join(s.paths.ListsDir, "googlevideo-ipv4.txt")); err == nil {
+		ips = len(listEntries(lines))
+	}
+	return map[string]any{
+		"enabled":                      cfg.GetDefault("Z2R_WSSIZE_RAMP_ENABLE", "0") == "1",
+		"mode":                         mode,
+		"scale":                        scale,
+		"googlevideo_ips":              ips,
+		"googlevideo_local_collection": "unsupported",
+	}
+}
+
+// updateCheck проверяет наличие обновлений через internal/deploy.
+func (s *Server) updateCheck() any {
+	out := map[string]any{
+		"update_available":  false,
+		"release":           "",
+		"latest_zator_date": "",
+		"latest_webui_date": "",
+		"checked_at":        s.now().Format("2006-01-02 15:04"),
+		"error":             "",
+	}
+	u := deploy.New(s.paths)
+	if deploy.DetectOffline(os.Getenv, "").Offline {
+		u.Offline = true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	res, err := u.CheckLatest(ctx)
+	if err != nil {
+		out["error"] = err.Error()
+		return out
+	}
+	out["update_available"] = res.UpdateAvailable()
+	if res.Latest != nil {
+		out["release"] = res.Latest.Release
+		out["latest_zator_date"] = res.Latest.ZatorDate
+		out["latest_webui_date"] = res.Latest.WebUIDate
+	}
+	if !res.CheckedAt.IsZero() {
+		out["checked_at"] = res.CheckedAt.Format("2006-01-02 15:04")
+	}
+	return out
+}
+
+// recommendations отдаёт подсказки стратегий из telemetry (кэш/сеть).
+func (s *Server) recommendations() any {
+	empty := func() map[string]any {
+		return map[string]any{
+			"samples": 0, "top": []any{}, "clone_recommended": false,
+			"classic_pct": nil, "clone_pct": nil,
+		}
+	}
+	profiles := map[string]any{"1": empty(), "2": empty(), "3": empty(), "4": empty()}
+	out := map[string]any{
+		"provider":     s.providerText(),
+		"samples":      0,
+		"minimum":      telemetry.MinSamples,
+		"generated_at": 0,
+		"status":       telemetry.StatusUnavailable,
+		"profiles":     profiles,
+	}
+	c := telemetry.New(s.paths)
+	ctx, cancel := context.WithTimeout(context.Background(), telemetry.RecsTimeout)
+	defer cancel()
+	rec, err := c.FetchRecommendations(ctx)
+	if err != nil || rec == nil {
+		if err != nil {
+			out["error"] = err.Error()
+		}
+		return out
+	}
+	out["provider"] = rec.Provider
+	out["samples"] = rec.Samples
+	out["generated_at"] = rec.GeneratedAt
+	out["status"] = rec.Status
+	for i := 1; i <= 4; i++ {
+		pr := rec.Profiles[i]
+		top := []any{}
+		for _, st := range rec.Top(i) {
+			top = append(top, map[string]any{
+				"strategy":    st.Strategy,
+				"success_pct": st.SuccessPct,
+				"samples":     st.Samples,
+				"mode":        st.Mode,
+			})
+		}
+		profiles[strconv.Itoa(i)] = map[string]any{
+			"samples":           pr.Samples,
+			"top":               top,
+			"clone_recommended": pr.CloneRecommended,
+			"classic_pct":       pr.ClassicPct,
+			"clone_pct":         pr.ClonePct,
+		}
+	}
+	out["profiles"] = profiles
+	return out
+}

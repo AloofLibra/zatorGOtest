@@ -1,0 +1,475 @@
+package webapi
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/AloofLibra/zator/internal/fsutil"
+	"github.com/AloofLibra/zator/internal/netcheck"
+	"github.com/AloofLibra/zator/internal/orchestra"
+)
+
+const (
+	listKindDomain    = "domain"
+	listKindSubstring = "substring"
+
+	autoHostlistMsg = "Автосбор списков включён: домены RKN zapret2 определяет автоматически. " +
+		"Выключите автосбор в настройках, чтобы пополнять список вручную."
+)
+
+// listDef описывает один из четырёх управляемых списков.
+type listDef struct {
+	name, title, description, kind string
+	file                           func(s *Server) string
+	custom                         bool
+}
+
+var domainLists = map[string]listDef{
+	"netrogat": {
+		name: "netrogat", title: "Исключения (netrogat.txt)", kind: listKindDomain,
+		description: "Домены, исключаемые из обработки zapret2 (--hostlist-exclude).",
+		file:        func(s *Server) string { return filepath.Join(s.paths.ListsDir, "netrogat.txt") },
+	},
+	"custom_rkn": {
+		name: "custom_rkn", title: "TCP_Custom (RKN-домены)", kind: listKindDomain, custom: true,
+		description: "Свои домены RKN с персональной стратегией (TCP_Custom.txt).",
+		file:        func(s *Server) string { return filepath.Join(s.paths.ExtraStratsDir, "TCP_Custom.txt") },
+	},
+	"substring": {
+		name: "substring", title: "Подстроки RKN (TCP_RKN_domains_by_substring.txt)", kind: listKindSubstring,
+		description: "Домены RKN, выбираемые по подстроке имени.",
+		file: func(s *Server) string {
+			return filepath.Join(s.paths.ExtraStratsDir, "TCP_RKN_domains_by_substring.txt")
+		},
+	},
+	"netrogat_substring": {
+		name: "netrogat_substring", title: "Исключения-подстроки (netrogat_substrings.txt)", kind: listKindSubstring,
+		description: "Подстроки имени, исключаемые из обработки (Lua exclude_substrings).",
+		file:        func(s *Server) string { return filepath.Join(s.paths.ListsDir, "netrogat_substrings.txt") },
+	},
+}
+
+// normalizeDomain приводит ввод к имени хоста: убирает схему, путь, порт,
+// ведущие «*.»/«.» и хвостовую точку; результат в нижнем регистре.
+func normalizeDomain(v string) (string, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+3:]
+	}
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.LastIndex(v, "@"); i >= 0 {
+		v = v[i+1:]
+	}
+	if i := strings.LastIndex(v, ":"); i >= 0 {
+		if _, err := strconv.Atoi(v[i+1:]); err == nil {
+			v = v[:i]
+		}
+	}
+	v = strings.TrimPrefix(v, "*.")
+	v = strings.Trim(v, ".")
+	if !strings.Contains(v, ".") || !netcheck.ValidDomain(v) {
+		return "", false
+	}
+	return v, true
+}
+
+// listNormalize нормализует значение по виду списка.
+func (d listDef) normalize(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if d.kind == listKindSubstring {
+		if v == "" {
+			return "", errf(http.StatusBadRequest, "Пустая подстрока")
+		}
+		return v, nil
+	}
+	if v == "" {
+		return "", errf(http.StatusBadRequest, "Не указан домен")
+	}
+	n, ok := normalizeDomain(v)
+	if !ok {
+		return "", errf(http.StatusBadRequest, "Некорректный домен: "+v)
+	}
+	return n, nil
+}
+
+func readListLines(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	text = strings.TrimSuffix(text, "\n")
+	if text == "" {
+		return nil, nil
+	}
+	return strings.Split(text, "\n"), nil
+}
+
+func writeListLines(path string, lines []string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data := ""
+	if len(lines) > 0 {
+		data = strings.Join(lines, "\n") + "\n"
+	}
+	return fsutil.AtomicWriteFile(path, []byte(data), 0o644)
+}
+
+func isEntry(line string) (string, bool) {
+	t := strings.TrimSpace(line)
+	if t == "" || strings.HasPrefix(t, "#") {
+		return "", false
+	}
+	return t, true
+}
+
+func listEntries(lines []string) []string {
+	var out []string
+	for _, ln := range lines {
+		if e, ok := isEntry(ln); ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func containsEntry(lines []string, v string) bool {
+	for _, e := range listEntries(lines) {
+		if e == v {
+			return true
+		}
+	}
+	return false
+}
+
+// customRknRestore возвращает в TCP_Custom домены, оставшиеся только в locked.tsv.
+func (s *Server) customRknRestore(path string, lines []string) ([]string, bool) {
+	recs, err := s.store.ListLocks(orchestra.ScopeDefault)
+	if err != nil {
+		return lines, false
+	}
+	changed := false
+	for _, r := range recs {
+		if !orchestra.IsCustomDomain(r.Profile) || containsEntry(lines, r.Profile) {
+			continue
+		}
+		lines = append(lines, r.Profile)
+		changed = true
+	}
+	if changed {
+		_ = writeListLines(path, lines)
+	}
+	return lines, changed
+}
+
+func (s *Server) customMax() int {
+	cfg, _ := s.readConfig()
+	if n := cfg.ProfileMaxStrategyOrDefault(3); n > 0 {
+		return n
+	}
+	return 19
+}
+
+// --- GET ---
+
+func (s *Server) domainsList(d listDef, scope string) (map[string]any, error) {
+	path := d.file(s)
+	lines, err := readListLines(path)
+	if err != nil {
+		return nil, err
+	}
+	if d.custom {
+		lines, _ = s.customRknRestore(path, lines)
+	}
+	items := []map[string]any{}
+	for _, e := range listEntries(lines) {
+		item := map[string]any{"value": e}
+		if d.custom {
+			n := 0
+			if st, err := s.store.GetLock(scope, e, "tls"); err == nil && !st.IsAuto() {
+				n = int(st)
+			}
+			item["strategy"] = n
+		}
+		items = append(items, item)
+	}
+	max := 0
+	if d.custom {
+		max = s.customMax()
+	}
+	return map[string]any{
+		"list": d.name, "title": d.title, "description": d.description, "kind": d.kind,
+		"is_custom_rkn": d.custom, "max_strategy": max, "items": items,
+	}, nil
+}
+
+// GET|POST /cgi-bin/domains.cgi
+func (s *Server) handleDomains(w http.ResponseWriter, r *http.Request, p params) {
+	if !requireMethod(w, r, http.MethodGet, http.MethodPost) {
+		return
+	}
+	d, ok := domainLists[p.Get("list")]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "Неизвестный список")
+		return
+	}
+	scope, err := scopeParam(p)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	s.listMu.Lock()
+	defer s.listMu.Unlock()
+	if r.Method == http.MethodGet {
+		v, err := s.domainsList(d, scope)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Не удалось прочитать список: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, v)
+		return
+	}
+	out, err := s.domainsAction(r, d, p, scope)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// autoGuard запрещает ручное пополнение RKN-списков при hostlist=авто.
+func (s *Server) autoGuard(d listDef) error {
+	if d.name != "custom_rkn" && d.name != "substring" {
+		return nil
+	}
+	cfg, _ := s.readConfig()
+	if cfg.HostlistAuto() {
+		return errf(http.StatusConflict, autoHostlistMsg)
+	}
+	return nil
+}
+
+func (s *Server) checkDomain(r *http.Request, domain string) netcheck.CheckResponse {
+	ctx, cancel := s.checkCtx(r)
+	defer cancel()
+	res := s.checker.CheckTarget(ctx, domain, "https://"+domain+"/")
+	return netcheck.CheckResponse{Results: []netcheck.TargetResult{res}}
+}
+
+func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope string) (map[string]any, error) {
+	path := d.file(s)
+	action := p.Get("action")
+	lines, err := readListLines(path)
+	if err != nil {
+		return nil, errf(http.StatusInternalServerError, "Не удалось прочитать список: "+err.Error())
+	}
+	if d.custom {
+		lines, _ = s.customRknRestore(path, lines)
+	}
+	save := func(l []string) error {
+		if err := writeListLines(path, l); err != nil {
+			return errf(http.StatusInternalServerError, "Не удалось записать список: "+err.Error())
+		}
+		return nil
+	}
+
+	switch action {
+	case "add":
+		value, err := d.normalize(p.Get("domain"))
+		if err != nil {
+			return nil, err
+		}
+		if err := s.autoGuard(d); err != nil {
+			return nil, err
+		}
+		if containsEntry(lines, value) {
+			out := map[string]any{"ok": true, "duplicate": true}
+			if d.custom {
+				out["check"] = s.checkDomain(r, value)
+			}
+			return out, nil
+		}
+		if err := save(append(lines, value)); err != nil {
+			return nil, err
+		}
+		out := map[string]any{"ok": true, "duplicate": false}
+		if d.custom {
+			out["check"] = s.checkDomain(r, value)
+		}
+		return out, nil
+
+	case "remove":
+		value, err := d.normalize(p.Get("domain"))
+		if err != nil {
+			return nil, err
+		}
+		var keep []string
+		for _, ln := range lines {
+			if e, ok := isEntry(ln); ok && e == value {
+				continue
+			}
+			keep = append(keep, ln)
+		}
+		if err := save(keep); err != nil {
+			return nil, err
+		}
+		if d.custom {
+			_ = s.store.ClearEverywhere(value, "tls")
+		}
+		return map[string]any{"ok": true}, nil
+
+	case "rename":
+		old, err := d.normalize(p.Get("domain"))
+		if err != nil {
+			return nil, err
+		}
+		next, err := d.normalize(p.Get("new_domain"))
+		if err != nil {
+			return nil, err
+		}
+		if !containsEntry(lines, old) {
+			return nil, errf(http.StatusBadRequest, "Записи нет в списке")
+		}
+		if old == next {
+			return map[string]any{"ok": true, "domain": old}, nil
+		}
+		if containsEntry(lines, next) {
+			return nil, errf(http.StatusConflict, "Запись "+next+" уже есть в списке")
+		}
+		out := make([]string, len(lines))
+		for i, ln := range lines {
+			if e, ok := isEntry(ln); ok && e == old {
+				out[i] = next
+			} else {
+				out[i] = ln
+			}
+		}
+		if err := save(out); err != nil {
+			return nil, err
+		}
+		if d.custom {
+			s.renameLocks(old, next)
+		}
+		return map[string]any{"ok": true, "domain": next}, nil
+
+	case "import":
+		if err := s.autoGuard(d); err != nil {
+			return nil, err
+		}
+		added, dups, skipped := 0, 0, 0
+		fields := strings.FieldsFunc(p.Raw("domain"), func(r rune) bool {
+			return r == '\n' || r == '\r' || r == '\t' || r == ' ' || r == ',' || r == ';'
+		})
+		for _, f := range fields {
+			if strings.HasPrefix(f, "#") {
+				continue
+			}
+			value, err := d.normalize(f)
+			if err != nil {
+				skipped++
+				continue
+			}
+			if containsEntry(lines, value) {
+				dups++
+				continue
+			}
+			lines = append(lines, value)
+			added++
+		}
+		if added > 0 {
+			if err := save(lines); err != nil {
+				return nil, err
+			}
+		}
+		return map[string]any{"ok": true, "added": added, "duplicates": dups, "skipped": skipped}, nil
+
+	case "clear":
+		entries := listEntries(lines)
+		if err := save(nil); err != nil {
+			return nil, err
+		}
+		if d.custom {
+			for _, e := range entries {
+				_ = s.store.ClearEverywhere(e, "tls")
+			}
+		}
+		return map[string]any{"ok": true, "cleared": len(entries)}, nil
+
+	case "set_strategy":
+		if !d.custom {
+			return nil, errf(http.StatusBadRequest, "Стратегия применяется только к TCP_Custom")
+		}
+		domain, err := d.normalize(p.Get("domain"))
+		if err != nil {
+			return nil, err
+		}
+		raw := p.Get("strategy")
+		if !strategyRe.MatchString(raw) {
+			return nil, errf(http.StatusBadRequest, "Некорректная стратегия")
+		}
+		if !containsEntry(lines, domain) {
+			return nil, errf(http.StatusBadRequest, "Домена нет в списке")
+		}
+		n, _ := strconv.Atoi(raw)
+		max := s.customMax()
+		if n < 1 || n > max {
+			return nil, errf(http.StatusBadRequest, fmt.Sprintf("Стратегия вне диапазона (1..%d)", max))
+		}
+		if err := s.store.SetLock(scope, domain, "tls", orchestra.Strategy(n)); err != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось сохранить стратегию: "+err.Error())
+		}
+		return map[string]any{"ok": true, "strategy": n, "check": s.checkDomain(r, domain)}, nil
+
+	case "clear_strategy":
+		if !d.custom {
+			return nil, errf(http.StatusBadRequest, "Стратегия применяется только к TCP_Custom")
+		}
+		domain, err := d.normalize(p.Get("domain"))
+		if err != nil {
+			return nil, err
+		}
+		if err := s.store.ClearLock(scope, domain, "tls"); err != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось сбросить стратегию: "+err.Error())
+		}
+		return map[string]any{"ok": true}, nil
+
+	case "check":
+		if !d.custom {
+			return nil, errf(http.StatusBadRequest, "Проверка применяется только к TCP_Custom")
+		}
+		domain, err := d.normalize(p.Get("domain"))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "check": s.checkDomain(r, domain)}, nil
+	}
+	return nil, errf(http.StatusBadRequest, "Неизвестное действие: "+action)
+}
+
+// renameLocks переносит фиксации домена (default и per-mark) на новое имя.
+func (s *Server) renameLocks(old, next string) {
+	scopes, err := s.store.ListScopes()
+	if err != nil {
+		return
+	}
+	for _, sc := range scopes {
+		st, err := s.store.GetLock(sc, old, "tls")
+		if err != nil || st.IsAuto() {
+			continue
+		}
+		_ = s.store.SetLock(sc, next, "tls", st)
+	}
+	_ = s.store.ClearEverywhere(old, "tls")
+}

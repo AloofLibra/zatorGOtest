@@ -1,0 +1,474 @@
+// Package zapret — загрузка и установка бинарников zapret2 (nfqws2, ip2net,
+// mdig) собственным установщиком, без install_easy.sh.
+package zapret
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+
+	"github.com/AloofLibra/zator/internal/fetch"
+	"github.com/AloofLibra/zator/internal/paths"
+	"github.com/AloofLibra/zator/internal/platform"
+)
+
+const (
+	// BinNfqws2 и далее — имена устанавливаемых бинарников.
+	BinNfqws2 = "nfqws2"
+	BinIP2Net = "ip2net"
+	BinMdig   = "mdig"
+
+	// VersionFile — файл-маркер установленной сборки в корне zapret2.
+	VersionFile = "zator-zapret.version"
+)
+
+// binLinks — расположение ссылок на бинарники в стандартной раскладке
+// zapret2 (nfq2/nfqws2, ip2net/ip2net, mdig/mdig).
+var binLinks = map[string]string{
+	BinNfqws2: "nfq2",
+	BinIP2Net: "ip2net",
+	BinMdig:   "mdig",
+}
+
+// Options — параметры установки.
+type Options struct {
+	// Root — каталог zapret2 (обязателен для DownloadAndInstall; Install
+	// подставляет paths.ZapretRoot).
+	Root string
+	// Arch — архитектура. Пусто — берётся из платформы.
+	Arch platform.Arch
+	// Source — источник; пусто — DefaultSource (форк).
+	Source Source
+	// Version — версия без префикса «v»; пусто — DefaultVer.
+	Version string
+	// Variant — вариант архива; пусто — выбирается по платформе.
+	Variant Variant
+	// OpenWRT — признак платформы OpenWRT для VariantAuto
+	// (Install выставляет сам).
+	OpenWRT bool
+
+	// ReleaseBase — переопределение базы релизов (<base>/v<ver>/<asset>).
+	ReleaseBase string
+	// MirrorBase — зеркало релизов (аналог ZAPRET2_RELEASE_MIRROR_BASE).
+	MirrorBase string
+	// SHA256 — ожидаемая контрольная сумма архива (необязательно).
+	SHA256 string
+
+	// IncludeLua — дополнительно распаковать lua/ из архива
+	// (zapret-lib.lua, zapret-antidpi.lua и т.д.).
+	IncludeLua bool
+	// Force — переустановить, даже если такая же сборка уже стоит.
+	Force bool
+
+	// Client — HTTP-клиент; nil — fetch.NewClient().
+	Client *fetch.Client
+	// TmpDir — каталог для временных файлов; пусто — рядом с Root.
+	TmpDir string
+	// Logf — необязательный журнал.
+	Logf func(format string, args ...any)
+}
+
+// Result — итог установки.
+type Result struct {
+	Root     string
+	Source   Source
+	Version  string
+	ArchDir  string            // например linux-arm64
+	URL      string            // адрес, указанный для загрузки (до зеркал)
+	Binaries map[string]string // имя → путь в Root/binaries/<arch>/
+	Missing  []string          // необязательные бинарники, которых нет в архиве
+	Skipped  bool              // такая же сборка уже установлена
+}
+
+// Install — точка входа для internal/app: устанавливает zapret2 в
+// p.ZapretRoot для платформы plat.
+func Install(ctx context.Context, p paths.Paths, plat platform.Platform, opts Options) (*Result, error) {
+	opts.Root = p.ZapretRoot
+	if opts.Arch == "" {
+		opts.Arch = plat.Arch
+	}
+	if opts.Variant == VariantAuto && plat.Kind == platform.KindOpenWRT {
+		opts.OpenWRT = true
+	}
+	return DownloadAndInstall(ctx, opts)
+}
+
+func (o *Options) logf(format string, args ...any) {
+	if o.Logf != nil {
+		o.Logf(format, args...)
+	}
+}
+
+func (o *Options) embedded() bool {
+	switch o.Variant {
+	case VariantOpenWRTEmbedded:
+		return true
+	case VariantStandard:
+		return false
+	}
+	return o.OpenWRT
+}
+
+// DownloadAndInstall скачивает архив релиза, извлекает nfqws2, ip2net и mdig
+// только для нужной архитектуры и создаёт минимальную раскладку в Root.
+func DownloadAndInstall(ctx context.Context, opts Options) (*Result, error) {
+	if strings.TrimSpace(opts.Root) == "" {
+		return nil, errors.New("zapret: не задан Root")
+	}
+	if opts.Source == "" {
+		opts.Source = DefaultSource
+	}
+	if !opts.Source.Valid() {
+		return nil, fmt.Errorf("zapret: неизвестный источник %q", opts.Source)
+	}
+	ver, err := NormalizeVersion(opts.Source, opts.Version)
+	if err != nil {
+		return nil, err
+	}
+	dirs, err := ArchDirs(opts.Arch)
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Clean(opts.Root)
+	embedded := opts.embedded()
+	url := ReleaseURL(opts.Source, opts.ReleaseBase, ver, embedded)
+
+	res := &Result{Root: root, Source: opts.Source, Version: ver, URL: url}
+
+	if !opts.Force {
+		if info, err := ReadInstalled(root); err == nil &&
+			info.Version == ver && info.Source == opts.Source && containsString(dirs, info.ArchDir) &&
+			fileExists(filepath.Join(root, "binaries", info.ArchDir, BinNfqws2)) {
+			res.ArchDir = info.ArchDir
+			res.Binaries = binaryPaths(root, info.ArchDir)
+			res.Skipped = true
+			opts.logf("zapret2 %s (%s) уже установлен", ver, info.ArchDir)
+			return res, nil
+		}
+	}
+
+	parent := filepath.Dir(root)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return nil, fmt.Errorf("zapret: %w", err)
+	}
+	tmpBase := opts.TmpDir
+	if tmpBase == "" {
+		tmpBase = parent
+	}
+	if err := os.MkdirAll(tmpBase, 0o755); err != nil {
+		return nil, fmt.Errorf("zapret: %w", err)
+	}
+	work, err := os.MkdirTemp(tmpBase, ".zapret2-install-")
+	if err != nil {
+		return nil, fmt.Errorf("zapret: %w", err)
+	}
+	defer os.RemoveAll(work)
+
+	client := opts.Client
+	if client == nil {
+		client = fetch.NewClient()
+	}
+	mirrorBase := opts.MirrorBase
+	if mirrorBase == "" {
+		mirrorBase = os.Getenv(EnvReleaseMirrorBase)
+	}
+	if mirrorBase != "" {
+		c := *client
+		c.Mirrors = append(append([]fetch.Mirror(nil), client.Mirrors...), fetch.ReleaseMirror(mirrorBase))
+		client = &c
+	}
+
+	archive := filepath.Join(work, AssetName(ver, embedded))
+	opts.logf("загрузка %s", url)
+	if err := client.Download(ctx, url, archive, opts.SHA256); err != nil {
+		return nil, fmt.Errorf("zapret: загрузка архива: %w", err)
+	}
+
+	names, err := fetch.ListTarGz(archive)
+	if err != nil {
+		return nil, fmt.Errorf("zapret: %w", err)
+	}
+	archDir, found := pickArchDir(names, dirs)
+	if archDir == "" {
+		return nil, fmt.Errorf("zapret: в архиве нет бинарников для %s (нужны %s)", opts.Arch, strings.Join(dirs, ", "))
+	}
+	if !found[BinNfqws2] {
+		return nil, fmt.Errorf("zapret: в binaries/%s нет %s", archDir, BinNfqws2)
+	}
+	res.ArchDir = archDir
+	for _, b := range []string{BinIP2Net, BinMdig} {
+		if !found[b] {
+			res.Missing = append(res.Missing, b)
+		}
+	}
+
+	stage := filepath.Join(work, "stage")
+	err = fetch.SafeUntarFiltered(archive, stage, func(name string, mode os.FileMode) (string, bool) {
+		if mode.IsDir() || !mode.IsRegular() {
+			return "", false
+		}
+		return stageRel(name, archDir, opts.IncludeLua)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("zapret: распаковка: %w", err)
+	}
+	if !fileExists(filepath.Join(stage, "binaries", archDir, BinNfqws2)) {
+		return nil, fmt.Errorf("zapret: %s не распакован", BinNfqws2)
+	}
+
+	if err := commit(root, stage, archDir, opts.IncludeLua); err != nil {
+		return nil, err
+	}
+	if err := ensureLayout(root); err != nil {
+		return nil, err
+	}
+	if err := linkBinaries(root, archDir); err != nil {
+		return nil, err
+	}
+	if err := writeInstalled(root, Installed{Version: ver, Source: opts.Source, ArchDir: archDir}); err != nil {
+		return nil, err
+	}
+	res.Binaries = binaryPaths(root, archDir)
+	opts.logf("zapret2 %s (%s) установлен в %s", ver, archDir, root)
+	return res, nil
+}
+
+// pickArchDir выбирает первый доступный каталог из candidates и возвращает
+// набор найденных в нём бинарников.
+func pickArchDir(names, candidates []string) (string, map[string]bool) {
+	for _, dir := range candidates {
+		found := map[string]bool{}
+		for _, n := range names {
+			if d, b, ok := splitBinaryEntry(n); ok && d == dir {
+				found[b] = true
+			}
+		}
+		if len(found) > 0 {
+			return dir, found
+		}
+	}
+	return "", nil
+}
+
+// splitBinaryEntry разбирает имя вида [<top>/]binaries/<dir>/<bin>.
+func splitBinaryEntry(name string) (dir, bin string, ok bool) {
+	parts := strings.Split(name, "/")
+	for i, p := range parts {
+		if p == "binaries" && len(parts) == i+3 && i <= 1 {
+			switch parts[i+2] {
+			case BinNfqws2, BinIP2Net, BinMdig:
+				return parts[i+1], parts[i+2], true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// stageRel — отображение записи архива в относительный путь внутри stage.
+func stageRel(name, archDir string, lua bool) (string, bool) {
+	if d, b, ok := splitBinaryEntry(name); ok && d == archDir {
+		return path.Join("binaries", archDir, b), true
+	}
+	if lua {
+		parts := strings.Split(name, "/")
+		for i, p := range parts {
+			if p == "lua" && i <= 1 && len(parts) > i+1 {
+				return path.Join(parts[i:]...), true
+			}
+		}
+	}
+	return "", false
+}
+
+// commit переносит распакованное из stage в root, заменяя только
+// binaries/ (и lua/ при IncludeLua); остальное содержимое root не трогает.
+func commit(root, stage, archDir string, lua bool) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("zapret: %w", err)
+	}
+	groups := []string{"binaries"}
+	if lua {
+		groups = append(groups, "lua")
+	}
+	for _, g := range groups {
+		src := filepath.Join(stage, g)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		dst := filepath.Join(root, g)
+		if err := os.RemoveAll(dst); err != nil {
+			return fmt.Errorf("zapret: %w", err)
+		}
+		if err := os.Rename(src, dst); err != nil {
+			if err := copyTree(src, dst); err != nil {
+				return fmt.Errorf("zapret: %w", err)
+			}
+		}
+	}
+	for _, name := range []string{BinNfqws2, BinIP2Net, BinMdig} {
+		p := filepath.Join(root, "binaries", archDir, name)
+		if fileExists(p) {
+			if err := os.Chmod(p, 0o755); err != nil {
+				return fmt.Errorf("zapret: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// ensureLayout создаёт минимальную раскладку каталогов zapret2.
+func ensureLayout(root string) error {
+	for _, d := range LayoutDirs(root) {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return fmt.Errorf("zapret: %w", err)
+		}
+	}
+	return nil
+}
+
+// LayoutDirs — каталоги минимальной раскладки zapret2.
+func LayoutDirs(root string) []string {
+	return []string{
+		root,
+		filepath.Join(root, "binaries"),
+		filepath.Join(root, "nfq2"),
+		filepath.Join(root, "ip2net"),
+		filepath.Join(root, "mdig"),
+		filepath.Join(root, "lua"),
+		filepath.Join(root, "ipset"),
+		filepath.Join(root, "files", "fake"),
+		filepath.Join(root, "init.d", "sysv", "custom.d"),
+		filepath.Join(root, "init.d", "openwrt", "custom.d"),
+	}
+}
+
+// linkBinaries создаёт nfq2/nfqws2, ip2net/ip2net, mdig/mdig как символические
+// ссылки на binaries/<arch>/..., а там, где ссылки недоступны, — копии.
+func linkBinaries(root, archDir string) error {
+	for bin, dir := range binLinks {
+		src := filepath.Join(root, "binaries", archDir, bin)
+		if !fileExists(src) {
+			continue
+		}
+		link := filepath.Join(root, dir, bin)
+		_ = os.Remove(link)
+		rel := filepath.Join("..", "binaries", archDir, bin)
+		if err := os.Symlink(rel, link); err == nil {
+			continue
+		}
+		if err := copyFile(src, link, 0o755); err != nil {
+			return fmt.Errorf("zapret: %w", err)
+		}
+	}
+	return nil
+}
+
+func binaryPaths(root, archDir string) map[string]string {
+	out := map[string]string{}
+	for _, b := range []string{BinNfqws2, BinIP2Net, BinMdig} {
+		p := filepath.Join(root, "binaries", archDir, b)
+		if fileExists(p) {
+			out[b] = p
+		}
+	}
+	return out
+}
+
+// Nfqws2Path возвращает путь к бинарнику nfqws2 в раскладке root
+// (через nfq2/nfqws2).
+func Nfqws2Path(root string) string { return filepath.Join(root, "nfq2", BinNfqws2) }
+
+// Installed — сведения об установленной сборке.
+type Installed struct {
+	Version string
+	Source  Source
+	ArchDir string
+}
+
+func writeInstalled(root string, in Installed) error {
+	body := fmt.Sprintf("version=%s\nsource=%s\narch=%s\n", in.Version, in.Source, in.ArchDir)
+	if err := os.WriteFile(filepath.Join(root, VersionFile), []byte(body), 0o644); err != nil {
+		return fmt.Errorf("zapret: %w", err)
+	}
+	return nil
+}
+
+// ReadInstalled читает маркер установленной сборки.
+func ReadInstalled(root string) (Installed, error) {
+	b, err := os.ReadFile(filepath.Join(root, VersionFile))
+	if err != nil {
+		return Installed{}, err
+	}
+	var in Installed
+	for _, line := range strings.Split(string(b), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "version":
+			in.Version = v
+		case "source":
+			in.Source = Source(v)
+		case "arch":
+			in.ArchDir = v
+		}
+	}
+	if in.Version == "" || in.ArchDir == "" {
+		return Installed{}, errors.New("zapret: повреждён файл версии")
+	}
+	return in, nil
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+func copyTree(src, dst string) error {
+	return filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		return copyFile(p, target, info.Mode().Perm())
+	})
+}

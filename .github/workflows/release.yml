@@ -1,0 +1,99 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (optional)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: arm
+            goarm: "7"
+            name: arm
+          - goarch: arm64
+            name: arm64
+          - goarch: mips
+            gomips: softfloat
+            name: mips
+          - goarch: mips64
+            gomips: softfloat
+            name: mips64
+          - goarch: mipsle
+            gomips: softfloat
+            name: mipsel
+          - goarch: mips64le
+            gomips: softfloat
+            name: mipsel64
+          - goarch: ppc64
+            name: ppc
+          - goarch: "386"
+            name: x86
+          - goarch: amd64
+            name: x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          GOMIPS: ${{ matrix.gomips }}
+        run: |
+          ver="${GITHUB_REF_NAME:-dev}"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X github.com/AloofLibra/zator.versionOverride=${ver}" \
+            -o "dist/zator-linux-${{ matrix.name }}" ./cmd/zator
+          sha256sum "dist/zator-linux-${{ matrix.name }}" | tee "dist/zator-linux-${{ matrix.name }}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zator-linux-${{ matrix.name }}
+          path: dist/*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Pack launcher
+        run: |
+          mkdir -p out
+          cp artifacts/zator-linux-* out/ 2>/dev/null || true
+          find artifacts -type f -name 'zator-linux-*' -exec cp {} out/ \;
+          ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true

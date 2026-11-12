@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master, "feat/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build sample arches
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/zator-amd64 ./cmd/zator
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/zator-arm64 ./cmd/zator
+          CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -o /tmp/zator-mipsel ./cmd/zator
