@@ -11,6 +11,7 @@ import (
 
 	"github.com/AloofLibra/zator/internal/deploy"
 	"github.com/AloofLibra/zator/internal/fsutil"
+	"github.com/AloofLibra/zator/internal/service"
 )
 
 const (
@@ -110,15 +111,37 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 	if err != nil {
 		return nil, errf(http.StatusBadGateway, "Обновление не удалось: "+err.Error())
 	}
-	out := map[string]any{"ok": true, "up_to_date": false, "installed": 0}
+	out := map[string]any{"ok": true, "up_to_date": false, "installed": 0, "restart_required": false}
+	installed := 0
+	upToDate := false
 	if rep != nil {
-		out["up_to_date"] = rep.UpToDate
+		upToDate = rep.UpToDate
+		out["up_to_date"] = upToDate
 		if rep.Apply != nil {
-			out["installed"] = rep.Apply.Installed
+			installed = rep.Apply.Installed
+			out["installed"] = installed
 		}
 		if rep.Check != nil && rep.Check.Latest != nil {
 			out["release"] = rep.Check.Latest.Release
 		}
 	}
+	if installed > 0 && !upToDate {
+		out["restart_required"] = true
+		s.scheduleWebUIRestart()
+		out["webui_restart_scheduled"] = true
+	}
 	return out, nil
+}
+
+// scheduleWebUIRestart — отложенный рестарт webui, чтобы ответ успел уйти клиенту.
+func (s *Server) scheduleWebUIRestart() {
+	if s.svc == nil {
+		return
+	}
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = s.svc.Restart(ctx, service.UnitWebUI)
+	}()
 }

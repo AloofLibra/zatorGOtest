@@ -22,3 +22,24 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/zator-amd64 ./cmd/zator
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/zator-arm64 ./cmd/zator
           CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -o /tmp/zator-mipsel ./cmd/zator
+
+  webui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: webui-src/package-lock.json
+      - name: Install webui deps
+        working-directory: webui-src
+        run: npm ci
+      - name: Typecheck
+        working-directory: webui-src
+        run: npm run check
+      - name: Build
+        working-directory: webui-src
+        run: npm run build
+      - name: Embedded assets match build
+        run: git diff --exit-code -- assets/webui

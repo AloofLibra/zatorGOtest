@@ -352,11 +352,22 @@ async function applyUpdates() {
   if (!ok) return
   try {
     await withBusy('upd-apply', async () => {
-      const res = await api<{ up_to_date?: boolean; installed?: number; release?: string }>(
+      const res = await api<{
+        up_to_date?: boolean
+        installed?: number
+        release?: string
+        restart_required?: boolean
+      }>(
         '/cgi-bin/settings.cgi',
         formBody({ setting: 'update_apply' }),
       )
-      showToast(res.up_to_date ? 'Уже актуально' : `Обновлено (файлов: ${res.installed ?? 0})`)
+      if (res.up_to_date) {
+        showToast('Уже актуально')
+      } else if (res.restart_required) {
+        showToast(`Обновлено (файлов: ${res.installed ?? 0}). Перезапуск WebUI…`)
+      } else {
+        showToast(`Обновлено (файлов: ${res.installed ?? 0})`)
+      }
       await fetchAndApplyState()
     })
   } catch (e) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { applySetting, clearLock, setLock, profileCheck } from '../api/endpoints'
 import type { ProfileInfo } from '../api/types'
@@ -27,6 +27,29 @@ const overrideDirty = ref<Record<string, boolean>>({})
 function draftText(profile: string): string {
   const v = draft.value[profile]
   return v === undefined || v === null ? '' : String(v).trim()
+}
+
+function lockText(p: ProfileInfo): string {
+  const lock = String(p.current_lock || 'auto')
+  return lock === 'auto' ? '' : lock
+}
+
+function draftDirty(p: ProfileInfo): boolean {
+  const id = String(p.profile)
+  const d = draftText(id)
+  if (!d) return false
+  return d !== lockText(p)
+}
+
+function focusProfilesFromQuery() {
+  const raw = String(route.query.focus || '').trim()
+  if (!raw) return
+  const ids = raw.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean)
+  const first = ids[0]
+  if (!first) return
+  nextTick(() => {
+    document.getElementById(`strategy-${first}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  })
 }
 
 function syncDraftFromLocks(list: ProfileInfo[] | undefined | null, force = false) {
@@ -58,13 +81,21 @@ watch(tlsBlobSettings, () => syncOverridesFromSettings(false), { immediate: true
 
 const scopeOptions = computed(() => scopes.value.scopes || ['default'])
 
-onMounted(() => {
+onMounted(async () => {
   const q = String(route.query.scope || '')
   if (q && q !== scope.value) {
     scope.value = q
-    refreshAll().catch((e) => showToast((e as Error).message, 'error'))
+    try {
+      await refreshAll()
+    } catch (e) {
+      showToast((e as Error).message, 'error')
+    }
   }
+  if (statusLoaded.value) focusProfilesFromQuery()
 })
+
+watch(statusLoaded, (ok) => { if (ok) focusProfilesFromQuery() })
+watch(() => route.query.focus, () => { if (statusLoaded.value) focusProfilesFromQuery() })
 
 async function changeScope(v: string) {
   scope.value = v || 'default'
@@ -247,7 +278,7 @@ async function saveCloneSize(profile: string) {
     <h2 class="section-title">Локи профилей</h2>
     <div v-if="!statusLoaded" class="loading">Загрузка…</div>
     <div v-else class="strategy-grid">
-      <article v-for="p in locks" :key="p.profile" class="strategy" :class="{ 'is-gated': gated(p) }">
+      <article :id="`strategy-${p.profile}`" v-for="p in locks" :key="p.profile" class="strategy" :class="{ 'is-gated': gated(p) }">
         <div>
           <h3>{{ p.profile }}. {{ p.label }}</h3>
           <p v-if="p.description" class="meta">{{ p.description }}</p>
@@ -276,6 +307,9 @@ async function saveCloneSize(profile: string) {
             :class="{ 'is-busy': busyButton === `check-${p.profile}` }"
             @click="check(String(p.profile), p)">Проверка</button>
         </div>
+        <p v-if="draftDirty(p)" class="panel-d" style="color:var(--warn);margin-top:0.35rem">
+          Черновик {{ draftText(String(p.profile)) }} ≠ lock {{ p.current_lock || 'auto' }} — нажмите «Зафиксировать».
+        </p>
         <CheckResults
           v-if="!gated(p) && strategyChecks[String(p.profile)]"
           class="inline-check"

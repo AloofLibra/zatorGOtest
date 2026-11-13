@@ -184,6 +184,39 @@ func TestDomainsCustomRKN(t *testing.T) {
 	}
 }
 
+func TestRenameLocksRollbackOnSetLockError(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	store := e.srv.Store()
+	if err := store.SetLock("default", "old.example", "tls", 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetLock("mark:1", "old.example", "tls", 5); err != nil {
+		t.Fatal(err)
+	}
+	// Конфликт на mark:1/next — SetLock упадёт после успешного default.
+	markPath, err := store.ScopePath("mark:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflict := "new.example\ttls\t1\nnew.example\ttls\t2\nold.example\ttls\t5\n"
+	if err := os.WriteFile(markPath, []byte(conflict), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.srv.renameLocks("old.example", "new.example"); err == nil {
+		t.Fatal("ожидалась ошибка SetLock")
+	}
+	if st, _ := store.GetLock("default", "old.example", "tls"); st != 3 {
+		t.Errorf("old default lock = %v, want 3", st)
+	}
+	if st, _ := store.GetLock("mark:1", "old.example", "tls"); st != 5 {
+		t.Errorf("old mark lock = %v, want 5", st)
+	}
+	if st, _ := store.GetLock("default", "new.example", "tls"); !st.IsAuto() {
+		t.Errorf("new default lock не откатан: %v", st)
+	}
+}
+
 func buildTar(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer

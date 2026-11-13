@@ -325,10 +325,13 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		if err := save(keep); err != nil {
 			return nil, err
 		}
+		out := map[string]any{"ok": true}
 		if d.custom {
-			_ = s.store.ClearEverywhere(value, "tls")
+			if err := s.store.ClearEverywhere(value, "tls"); err != nil {
+				out["warning"] = "Домен удалён из списка, но лок стратегии не снят: " + err.Error()
+			}
 		}
-		return map[string]any{"ok": true}, nil
+		return out, nil
 
 	case "rename":
 		old, err := d.normalize(p.Get("domain"))
@@ -406,12 +409,19 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		if err := save(nil); err != nil {
 			return nil, err
 		}
+		out := map[string]any{"ok": true, "cleared": len(entries)}
 		if d.custom {
+			var failed int
 			for _, e := range entries {
-				_ = s.store.ClearEverywhere(e, "tls")
+				if err := s.store.ClearEverywhere(e, "tls"); err != nil {
+					failed++
+				}
+			}
+			if failed > 0 {
+				out["warning"] = fmt.Sprintf("Список очищен, но не снято локов: %d", failed)
 			}
 		}
-		return map[string]any{"ok": true, "cleared": len(entries)}, nil
+		return out, nil
 
 	case "set_strategy":
 		if !d.custom {

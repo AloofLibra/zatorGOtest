@@ -144,6 +144,11 @@ func TestSetLockValidation(t *testing.T) {
 	wantError(t, resp, out, 400, "Некорректный профиль")
 	resp, out = e.post("/cgi-bin/clear-lock.cgi", "profile", "11")
 	wantError(t, resp, out, 400, "Не удалось определить протокол профиля")
+	// clear-lock тоже гейтится по режиму профиля.
+	resp, out = e.post("/cgi-bin/clear-lock.cgi", "profile", "8")
+	wantError(t, resp, out, 409, "Сначала включите безразборный режим")
+	resp, out = e.post("/cgi-bin/clear-lock.cgi", "profile", "7")
+	wantError(t, resp, out, 409, "Сначала включите игровой UDP")
 	// Ничего не должно быть записано.
 	if e.srv.Store().HasLocks() {
 		t.Error("после ошибок записаны локи")

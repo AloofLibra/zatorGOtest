@@ -323,10 +323,12 @@ func (s *Server) postTLSBlobProfile(r *http.Request, p params) (map[string]any, 
 		}
 		return nil, err
 	}
+	out := map[string]any{"ok": true, "restarted": s.maybeRestart(r.Context(), p), "restart_required": true}
 	if err := s.store.SetOverride(orchestra.OverrideBlob, profile, strings.TrimSuffix(v, ".bin")); err != nil {
-		return nil, err
+		// Конфиг уже с новым blob — не откатываем и не отдаём 500.
+		out["warning"] = "Конфиг обновлён, но override не сохранён: " + err.Error()
 	}
-	return map[string]any{"ok": true, "restarted": s.maybeRestart(r.Context(), p), "restart_required": true}, nil
+	return out, nil
 }
 
 func (s *Server) postFakeMode(_ *http.Request, p params) (map[string]any, error) {
@@ -558,7 +560,7 @@ func (s *Server) postClientScope(r *http.Request, p params) (map[string]any, err
 	}
 	shift, max := p.Get("client_scope_mark_shift"), p.Get("client_scope_mark_max")
 	if shift == "" {
-		shift = "0"
+		shift = "8"
 	}
 	if max == "" {
 		max = "255"

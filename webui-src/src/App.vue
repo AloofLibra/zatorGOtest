@@ -6,8 +6,8 @@ import { fetchAndApplyState } from './stores/state'
 import { statusLoaded } from './stores/status'
 import { showToast } from './stores/toast'
 import { theme, type ThemeMode } from './stores/theme'
-import ToastHost from './components/ToastHost.vue'
-import ConfirmDialog from './components/ConfirmDialog.vue'
+import ToastHost from './components/ui/ToastHost.vue'
+import ConfirmDialog from './components/ui/ConfirmDialog.vue'
 
 const route = useRoute()
 const tabs = [

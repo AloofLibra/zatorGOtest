@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { applySetting, registerStrategy, uploadBlob } from '../api/endpoints'
 import { gatedReason, isProfileGated } from '../gating'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { refreshTlsBlobSettings, refreshWgBlobSettings, tlsBlobSettings, wgBlobSettings } from '../stores/settings'
-import { fetchAndApplyState } from '../stores/state'
 import { locks, refreshAll, scope } from '../stores/status'
 import { restartSuffix, showToast } from '../stores/toast'
 
@@ -73,6 +72,18 @@ function onFile(ev: Event) {
   }
 }
 
+onMounted(async () => {
+  try {
+    await withBusy('manual-load', async () => {
+      await refreshAll()
+      await refreshTlsBlobSettings()
+      await refreshWgBlobSettings()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+})
+
 async function submitStrategy() {
   if (!desync.value.trim()) {
     showToast('Укажите строку desync', 'error')
@@ -97,7 +108,6 @@ async function submitStrategy() {
         warn ? 'error' : undefined,
       )
       await refreshAll()
-      await fetchAndApplyState()
     })
   } catch (e) {
     showToast((e as Error).message, 'error')

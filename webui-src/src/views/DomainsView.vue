@@ -37,6 +37,23 @@ watch(active, (name) => {
   if (!domainLists[name]) refreshDomainList(name)
 })
 
+watch(list, (payload) => {
+  if (!payload?.items) return
+  const next: Record<string, string> = { ...strategyDraft.value }
+  const alive = new Set(payload.items.map((i) => i.value))
+  for (const key of Object.keys(next)) {
+    if (!alive.has(key)) delete next[key]
+  }
+  for (const item of payload.items) {
+    if (next[item.value] === undefined) {
+      next[item.value] = item.strategy != null ? String(item.strategy) : ''
+    } else if (!String(next[item.value] ?? '').trim() && item.strategy != null) {
+      next[item.value] = String(item.strategy)
+    }
+  }
+  strategyDraft.value = next
+}, { deep: true, immediate: true })
+
 function go(name: DomainListName) {
   router.push(`/domains/${name}`)
 }
@@ -57,10 +74,20 @@ async function add() {
 }
 
 async function remove(domain: string) {
+  const ok = await confirmDialog({
+    title: 'Удалить запись?',
+    message: `Удалить «${domain}» из списка?`,
+    danger: true,
+  })
+  if (!ok) return
   try {
     await withBusy('domain-rm', async () => {
-      await domains.remove(active.value, domain)
+      const res = await domains.remove(active.value, domain)
+      delete strategyDraft.value[domain]
       await refreshDomainList(active.value)
+      const warn = String((res as { warning?: string }).warning || '')
+      if (warn) showToast(warn, 'error')
+      else showToast('Удалено')
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -102,6 +129,7 @@ async function setStrategy(domain: string) {
         strategyDraft.value[domain] = ''
       } else {
         await domains.set_strategy(domain, raw)
+        strategyDraft.value[domain] = raw
       }
       await refreshDomainList(active.value)
       showToast((!raw || raw === '0') ? `Стратегия снята с ${domain}` : `Стратегия ${raw} для ${domain}`)
@@ -120,10 +148,12 @@ async function clearAll() {
   if (!ok) return
   try {
     await withBusy('domain-clear', async () => {
-      await domains.clear(active.value)
+      const res = await domains.clear(active.value)
+      strategyDraft.value = {}
       await refreshDomainList(active.value)
+      const warn = String((res as { warning?: string }).warning || '')
+      showToast(warn || 'Список очищен', warn ? 'error' : undefined)
     })
-    showToast('Список очищен')
   } catch (e) {
     showToast((e as Error).message, 'error')
   }

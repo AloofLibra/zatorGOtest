@@ -108,15 +108,16 @@ func binaryAssetName() string {
 }
 
 // FindGitHubBinaryURL ищет URL zator-linux-<arch> в latest-релизе.
-func (u *Updater) FindGitHubBinaryURL(ctx context.Context) (tag, url string, size int64, err error) {
+// sha — hex из ассета SHA256SUMS (пусто, если файла нет в релизе).
+func (u *Updater) FindGitHubBinaryURL(ctx context.Context) (tag, url string, size int64, sha string, err error) {
 	if u.Offline {
-		return "", "", 0, ErrOffline
+		return "", "", 0, "", ErrOffline
 	}
 	owner, repo := ReleaseOwner(), ReleaseRepo()
 	api := strings.TrimRight(GitHubAPIBase, "/") + "/repos/" + owner + "/" + repo + "/releases/latest"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api, nil)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", fetch.DefaultUserAgent)
@@ -126,33 +127,87 @@ func (u *Updater) FindGitHubBinaryURL(ctx context.Context) (tag, url string, siz
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxLatestBytes+1))
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", 0, &fetch.HTTPError{URL: api, Status: resp.StatusCode}
+		return "", "", 0, "", &fetch.HTTPError{URL: api, Status: resp.StatusCode}
 	}
 	var rel ghRelease
 	if err := json.Unmarshal(body, &rel); err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
+	tag = strings.TrimSpace(rel.TagName)
 	want := binaryAssetName()
+	var sumsURL string
 	for _, a := range rel.Assets {
-		if a.Name == want && a.BrowserDownloadURL != "" {
-			return strings.TrimSpace(rel.TagName), a.BrowserDownloadURL, a.Size, nil
+		switch {
+		case a.Name == want && a.BrowserDownloadURL != "":
+			url, size = a.BrowserDownloadURL, a.Size
+		case a.Name == "SHA256SUMS" && a.BrowserDownloadURL != "":
+			sumsURL = a.BrowserDownloadURL
 		}
 	}
-	return strings.TrimSpace(rel.TagName), "", 0, fmt.Errorf("deploy: в релизе нет ассета %s", want)
+	if url == "" {
+		return tag, "", 0, "", fmt.Errorf("deploy: в релизе нет ассета %s", want)
+	}
+	if sumsURL != "" {
+		sha, _ = u.fetchAssetSHA256(ctx, sumsURL, want)
+	}
+	return tag, url, size, sha, nil
+}
+
+func (u *Updater) fetchAssetSHA256(ctx context.Context, sumsURL, wantName string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sumsURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", fetch.DefaultUserAgent)
+	client := u.fetcher().HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", &fetch.HTTPError{URL: sumsURL, Status: resp.StatusCode}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	return parseSHA256SUMS(body, wantName), nil
+}
+
+func parseSHA256SUMS(body []byte, wantName string) string {
+	for _, line := range strings.Split(string(body), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 {
+			continue
+		}
+		name := fields[len(fields)-1]
+		name = strings.TrimPrefix(name, "*") // binary mode marker
+		if name == wantName || filepath.Base(name) == wantName {
+			sum := strings.ToLower(fields[0])
+			if sha256Re.MatchString(sum) {
+				return sum
+			}
+		}
+	}
+	return ""
 }
 
 // ApplyGitHubBinary скачивает zator-linux-<arch>, заменяет бинарник и
 // запускает «zator install -zapret=false», чтобы подтянуть встроенные assets.
 func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, error) {
-	tag, link, size, err := u.FindGitHubBinaryURL(ctx)
+	tag, link, size, sha, err := u.FindGitHubBinaryURL(ctx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -164,7 +219,7 @@ func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, 
 		return nil, tag, err
 	}
 	dest := filepath.Join(dir, binaryAssetName())
-	if err := u.fetcher().Download(ctx, link, dest, ""); err != nil {
+	if err := u.fetcher().Download(ctx, link, dest, sha); err != nil {
 		return nil, tag, err
 	}
 	if size > 0 {
