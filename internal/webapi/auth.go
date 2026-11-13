@@ -8,19 +8,16 @@ import (
 
 func isPublicAuthPath(p string) bool {
 	switch p {
-	case "/api/login", "/cgi-bin/login.cgi":
+	case "/api/login", "/cgi-bin/login.cgi",
+		"/api/logout", "/cgi-bin/logout.cgi":
 		return true
 	default:
 		return false
 	}
 }
 
-// isStaticAsset — index/js/css/картинки SPA без auth (логин только во Vue).
-func isStaticAsset(p string) bool {
-	if p == "/" || p == "/index.html" {
-		return true
-	}
-	base := path.Base(p)
+// hasAssetExt — известные статические расширения SPA.
+func hasAssetExt(base string) bool {
 	switch {
 	case strings.HasSuffix(base, ".js"),
 		strings.HasSuffix(base, ".css"),
@@ -29,11 +26,36 @@ func isStaticAsset(p string) bool {
 		strings.HasSuffix(base, ".png"),
 		strings.HasSuffix(base, ".ico"),
 		strings.HasSuffix(base, ".woff"),
-		strings.HasSuffix(base, ".woff2"):
+		strings.HasSuffix(base, ".woff2"),
+		strings.HasSuffix(base, ".html"):
 		return true
 	default:
 		return false
 	}
+}
+
+// isAPIPath — защищённые JSON-эндпоинты (не SPA shell).
+func isAPIPath(p string) bool {
+	return strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/cgi-bin/")
+}
+
+// isStaticAsset — index/js/css/картинки и SPA deep-link без auth (логин только во Vue).
+func isStaticAsset(p string) bool {
+	if p == "/" || p == "/index.html" {
+		return true
+	}
+	if isAPIPath(p) {
+		return false
+	}
+	base := path.Base(p)
+	if hasAssetExt(base) {
+		return true
+	}
+	// Путь без «файлового» расширения → SPA fallback на index.html.
+	if !strings.Contains(base, ".") {
+		return true
+	}
+	return false
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
@@ -139,6 +161,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, _ params) 
 		writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
 		return
 	}
+	// Public: всегда чистим cookie, даже если сессия уже протухла.
 	_ = s.app.RotateSession()
 	_ = s.app.Save()
 	s.clearSessionCookie(w)

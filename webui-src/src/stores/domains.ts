@@ -25,15 +25,17 @@ export const expandedDomain = ref<string | null>(null)
 // обновление — кнопкой «Обновить» и точечно после мутаций
 export const domainsLoaded = ref(false)
 
-export async function refreshDomainList(name: DomainListName) {
+export async function refreshDomainList(name: DomainListName): Promise<boolean> {
   try {
     domainLists[name] = await fetchDomainsList(name)
+    return true
   } catch (error) {
     showToast((error as Error).message, 'error')
+    return false
   }
 }
 
 export async function refreshDomains() {
-  await Promise.all(DOMAIN_LISTS.map((name) => refreshDomainList(name)))
-  domainsLoaded.value = true
+  const results = await Promise.all(DOMAIN_LISTS.map((name) => refreshDomainList(name)))
+  domainsLoaded.value = results.some(Boolean)
 }

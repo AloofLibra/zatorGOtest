@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, formBody } from './api/client'
+import { logout as apiLogout } from './api/endpoints'
+import { clearLoginGate, forceLogin, needLogin } from './stores/auth'
 import { busyActive } from './stores/busy'
 import { fetchAndApplyState } from './stores/state'
 import { statusLoaded } from './stores/status'
@@ -25,10 +27,10 @@ const themes: { id: ThemeMode; label: string }[] = [
 ]
 const active = computed(() => String(route.name || 'status'))
 
-const needLogin = ref(false)
 const loginPass = ref('')
 const loginError = ref('')
 const loginBusy = ref(false)
+const logoutBusy = ref(false)
 
 function setTheme(mode: ThemeMode) {
   theme.value = mode
@@ -37,16 +39,16 @@ function setTheme(mode: ThemeMode) {
 async function bootstrap() {
   try {
     await fetchAndApplyState()
-    needLogin.value = false
+    clearLoginGate()
+    // statusLoaded / settingsLoaded выставляет fetchAndApplyState
   } catch (e) {
     const err = e as Error & { status?: number }
     if (err.status === 401) {
-      needLogin.value = true
+      forceLogin()
       return
     }
+    statusLoaded.value = false
     showToast(err.message, 'error')
-  } finally {
-    statusLoaded.value = !needLogin.value
   }
 }
 
@@ -56,13 +58,29 @@ async function submitLogin() {
   try {
     await api('/api/login', formBody({ password: loginPass.value }))
     loginPass.value = ''
-    needLogin.value = false
+    clearLoginGate()
     statusLoaded.value = false
     await bootstrap()
   } catch (e) {
     loginError.value = (e as Error).message
   } finally {
     loginBusy.value = false
+  }
+}
+
+async function logout() {
+  logoutBusy.value = true
+  try {
+    try {
+      await apiLogout()
+    } catch {
+      // даже при сетевой ошибке показываем логин; cookie сбросит public logout при повторе
+    }
+    forceLogin()
+    loginPass.value = ''
+    loginError.value = ''
+  } finally {
+    logoutBusy.value = false
   }
 }
 
@@ -113,6 +131,12 @@ onMounted(() => { void bootstrap() })
             >{{ t.label }}</button>
           </div>
         </div>
+        <button
+          type="button"
+          class="ghost logout-btn"
+          :disabled="logoutBusy || busyActive"
+          @click="logout"
+        >Выйти</button>
       </div>
     </aside>
     <main class="main">

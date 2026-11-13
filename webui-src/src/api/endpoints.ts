@@ -1,4 +1,4 @@
-import { api, formBody } from './client'
+import { api, downloadBlob, formBody } from './client'
 import type {
   ApplyResult, BackupsPayload, CheckPayload, DomainsImportResult, DomainsListPayload,
   FallbackSettings, ModeSettingData, PortInfo, PortsSettings, ProfileInfo, ProviderSettings,
@@ -182,6 +182,8 @@ export const domains = {
   clear_strategy: (domain: string) => domainsPost({ list: 'custom_rkn', action: 'clear_strategy', domain }),
 }
 
+export const logout = () => api<{ ok: boolean }>('/api/logout', formBody({}))
+
 export const fetchBackups = () => api<BackupsPayload>('/api/backups')
 
 export const backups = {
@@ -191,6 +193,10 @@ export const backups = {
     api<{ ok: boolean; name: string; files?: number; restarted?: boolean }>(
       '/api/backups', formBody({ action: 'restore', name, mode })),
   downloadUrl: (name: string) => `/api/backups?action=download&name=${encodeURIComponent(name)}`,
+  download: (name: string) => downloadBlob(
+    `/api/backups?action=download&name=${encodeURIComponent(name)}`,
+    name.endsWith('.tar') || name.endsWith('.tgz') || name.endsWith('.gz') ? name : `${name}.tar`,
+  ),
   upload: (file: File) => api<{ name: string }>(
     `/api/backups?action=upload&name=${encodeURIComponent(file.name)}`,
     { method: 'POST', headers: { 'Content-Type': 'application/x-tar' }, body: file }),

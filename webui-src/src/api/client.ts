@@ -1,9 +1,24 @@
+import { forceLogin } from '../stores/auth'
+
 export type ApiOptions = RequestInit & {
   /** Таймаут запроса; по умолчанию 120 с. 0 = без таймаута. */
   timeoutMs?: number
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000
+
+function isLoginPath(path: string): boolean {
+  return path === '/api/login' || path.startsWith('/api/login?')
+    || path === '/cgi-bin/login.cgi' || path.startsWith('/cgi-bin/login.cgi?')
+}
+
+/** Soft-error: 200 + error рядом с другими полями (update_check) — не throw. */
+function isBareErrorPayload(data: Record<string, unknown>): boolean {
+  if (!data || typeof data !== 'object') return false
+  if (typeof data.error !== 'string' || !data.error) return false
+  if ('ok' in data) return false
+  return Object.keys(data).every((k) => k === 'error')
+}
 
 export async function api<T = Record<string, unknown>>(path: string, options: ApiOptions = {}): Promise<T> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, signal: userSignal, ...rest } = options
@@ -24,6 +39,9 @@ export async function api<T = Record<string, unknown>>(path: string, options: Ap
     }
     if (!response.ok) {
       if (response.status === 401) {
+        if (!isLoginPath(path)) {
+          forceLogin()
+        }
         const err = new Error(String(data.error || 'Требуется авторизация')) as Error & { status?: number }
         err.status = 401
         throw err
@@ -34,8 +52,8 @@ export async function api<T = Record<string, unknown>>(path: string, options: Ap
     if (data && typeof data === 'object' && 'ok' in data && data.ok === false) {
       throw new Error(String(data.error || 'Операция не выполнена'))
     }
-    if (data && typeof data === 'object' && typeof data.error === 'string' && data.error && !('ok' in data)) {
-      throw new Error(data.error)
+    if (isBareErrorPayload(data)) {
+      throw new Error(String(data.error))
     }
     return data as T
   } catch (e) {
@@ -62,5 +80,35 @@ export function formBody(params: Record<string, string | number | boolean | unde
     method: 'POST' as const,
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(normalized),
+  }
+}
+
+/** Скачать бинарный ответ API (бэкапы) с cookie; при 401 → login. */
+export async function downloadBlob(path: string, filename: string): Promise<void> {
+  const response = await fetch(path)
+  if (response.status === 401) {
+    if (!isLoginPath(path)) forceLogin()
+    throw new Error('Требуется авторизация')
+  }
+  if (!response.ok) {
+    let msg = `HTTP ${response.status}`
+    try {
+      const data = await response.json() as { error?: string }
+      if (data.error) msg = data.error
+    } catch { /* binary or empty */ }
+    throw new Error(msg)
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  } finally {
+    URL.revokeObjectURL(url)
   }
 }

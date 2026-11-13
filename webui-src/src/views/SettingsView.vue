@@ -359,16 +359,28 @@ async function applyUpdates() {
         restart_required?: boolean
       }>(
         '/api/settings',
-        formBody({ setting: 'update_apply' }),
+        { ...formBody({ setting: 'update_apply' }), timeoutMs: 200_000 },
       )
       if (res.up_to_date) {
         showToast('Уже актуально')
+        await fetchAndApplyState()
       } else if (res.restart_required) {
+        // WebUI скоро перезапустится — не гоняем state поверх умирающего процесса.
         showToast(`Обновлено (файлов: ${res.installed ?? 0}). Перезапуск WebUI…`)
       } else {
         showToast(`Обновлено (файлов: ${res.installed ?? 0})`)
+        await fetchAndApplyState()
       }
-      await fetchAndApplyState()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function downloadBackup(name: string) {
+  try {
+    await withBusy('bak-dl', async () => {
+      await backupsApi.download(name)
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -581,8 +593,9 @@ onMounted(async () => {
               <div style="color:var(--muted);font-size:0.8rem">{{ b.date }} · {{ b.size ?? 0 }}</div>
             </div>
             <div class="row">
-              <a class="ghost" style="padding:0.5rem 0.8rem;border:1px solid var(--line);border-radius:10px"
-                :href="backupsApi.downloadUrl(b.name)">Скачать</a>
+              <button type="button" class="ghost" :disabled="busyActive"
+                :class="{ 'is-busy': busyButton === 'bak-dl' }"
+                @click="downloadBackup(b.name)">Скачать</button>
               <button type="button" class="primary" :disabled="busyActive"
                 :class="{ 'is-busy': busyButton === 'bak-restore' }"
                 @click="restoreBackup(b.name)">Восстановить</button>

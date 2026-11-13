@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -710,7 +711,11 @@ func TestKnownProvider(t *testing.T) {
 }
 
 func TestNoHardcodedTokenInSource(t *testing.T) {
-	data, err := os.ReadFile("telemetry.go")
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "telemetry.go"))
 	if err != nil {
 		t.Fatal(err)
 	}

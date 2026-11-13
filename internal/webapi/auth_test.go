@@ -68,6 +68,57 @@ func TestLoginLogoutAndMiddleware(t *testing.T) {
 		"Cookie": CookieName + "=" + cookie,
 	})
 	wantError(t, resp, out, http.StatusUnauthorized, "Требуется авторизация")
+
+	// SPA deep-link без cookie → HTML (Vue login), не JSON 401.
+	resp, body = e.do(http.MethodGet, "/settings/tls", nil, map[string]string{"Accept": "text/html"})
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "<html") {
+		t.Fatalf("SPA deep-link без auth: %d %s", resp.StatusCode, body[:min(80, len(body))])
+	}
+
+	// Logout без cookie всё равно чистит Set-Cookie (public).
+	resp, raw = e.do(http.MethodPost, "/api/logout", url.Values{}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("public logout: %d %s", resp.StatusCode, raw)
+	}
+	cleared := false
+	for _, c := range resp.Cookies() {
+		if c.Name == CookieName && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	// httptest может отдать MaxAge через Expires; также смотрим Set-Cookie заголовок.
+	if !cleared {
+		for _, h := range resp.Header.Values("Set-Cookie") {
+			if strings.Contains(h, CookieName+"=") && (strings.Contains(h, "Max-Age=0") || strings.Contains(strings.ToLower(h), "max-age=-1")) {
+				cleared = true
+			}
+		}
+	}
+	if !cleared {
+		t.Fatalf("logout без cookie не очистил сессию: %v", resp.Header.Values("Set-Cookie"))
+	}
+}
+
+func TestIsStaticAssetSPAPaths(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/", true},
+		{"/index.html", true},
+		{"/app.js", true},
+		{"/styles.css", true},
+		{"/settings/tls", true},
+		{"/strategies", true},
+		{"/api/status", false},
+		{"/cgi-bin/status.cgi", false},
+		{"/api/login", false}, // public, но не static
+	}
+	for _, tc := range cases {
+		if got := isStaticAsset(tc.path); got != tc.want {
+			t.Errorf("isStaticAsset(%q)=%v want %v", tc.path, got, tc.want)
+		}
+	}
 }
 
 func min(a, b int) int {
