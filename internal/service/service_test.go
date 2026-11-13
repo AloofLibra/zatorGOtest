@@ -481,7 +481,11 @@ func TestEntwareKeeneticInstall(t *testing.T) {
 	if err := c.Uninstall(ctx, UnitZapret2); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{script, link, filepath.Join(e.root, "opt", "etc", "ndm", "netfilter.d", "000-zapret2.sh")} {
+	// Upstream init в zapret2/ оставляем; снимаем только S90/ndm-хуки zator.
+	if _, err := os.Stat(script); err != nil {
+		t.Errorf("upstream init удалён: %v", err)
+	}
+	for _, p := range []string{link, filepath.Join(e.root, "opt", "etc", "ndm", "netfilter.d", "000-zapret2.sh")} {
 		if _, err := os.Lstat(p); !os.IsNotExist(err) {
 			t.Errorf("не удалён %s", p)
 		}
