@@ -118,7 +118,7 @@ async function clearAll() {
     <div class="page-head">
       <div>
         <h1>Домены</h1>
-        <p>Списки обхода и исключений — пункт 6 CLI.</p>
+        <p>Списки hostlist: исключения, custom RKN и подстроки. Переключайте вкладки ниже.</p>
       </div>
       <div class="actions">
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'domains-refresh' }"

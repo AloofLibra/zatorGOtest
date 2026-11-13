@@ -9,7 +9,8 @@
 // # Авторизация
 //
 // Если задан токен (поле token в zator.json или Options.Token), каждый запрос
-// (включая статику) должен нести его в одном из видов:
+// (включая статику) должен нести его в одном из видов. Пустой токен —
+// открытый доступ (так по умолчанию после установки):
 //
 //   - Authorization: Bearer <token>;
 //   - HTTP Basic (пароль или имя пользователя равны токену);
@@ -42,6 +43,7 @@ import (
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/paths"
+	"github.com/AloofLibra/zator/internal/provider"
 	"github.com/AloofLibra/zator/internal/service"
 	"github.com/AloofLibra/zator/internal/sweep"
 	"github.com/AloofLibra/zator/internal/uiembed"
@@ -92,6 +94,8 @@ type Options struct {
 	Checker NetChecker
 	// Sweeper — координатор суперавтопрогона. По умолчанию создаётся лениво.
 	Sweeper Sweeper
+	// Provider — детектор провайдера. По умолчанию provider.New(paths).
+	Provider *provider.Detector
 	// CheckTimeout ограничивает один запрос check.cgi (по умолчанию 2 минуты).
 	CheckTimeout time.Duration
 	// Now подменяет время (тесты).
@@ -100,16 +104,17 @@ type Options struct {
 
 // Server — HTTP-сервер API и статики Web UI.
 type Server struct {
-	app     *app.App
-	paths   paths.Paths
-	token   string
-	static  fs.FS
-	store   *orchestra.Store
-	svc     service.Manager
-	svcErr  error
-	checker NetChecker
-	timeout time.Duration
-	now     func() time.Time
+	app      *app.App
+	paths    paths.Paths
+	token    string
+	static   fs.FS
+	store    *orchestra.Store
+	svc      service.Manager
+	svcErr   error
+	checker  NetChecker
+	provider *provider.Detector
+	timeout  time.Duration
+	now      func() time.Time
 
 	cfgMu  sync.Mutex // сериализует изменения config
 	listMu sync.Mutex // сериализует изменения списков доменов
@@ -124,15 +129,16 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("webapi: не задан App")
 	}
 	s := &Server{
-		app:     opts.App,
-		paths:   opts.App.Paths,
-		token:   opts.Token,
-		static:  opts.Static,
-		svc:     opts.Service,
-		checker: opts.Checker,
-		timeout: opts.CheckTimeout,
-		now:     opts.Now,
-		sweeper: opts.Sweeper,
+		app:      opts.App,
+		paths:    opts.App.Paths,
+		token:    opts.Token,
+		static:   opts.Static,
+		svc:      opts.Service,
+		checker:  opts.Checker,
+		provider: opts.Provider,
+		timeout:  opts.CheckTimeout,
+		now:      opts.Now,
+		sweeper:  opts.Sweeper,
 	}
 	if s.token == "" {
 		s.token = opts.App.Config.Token
@@ -145,6 +151,9 @@ func New(opts Options) (*Server, error) {
 	}
 	if s.checker == nil {
 		s.checker = netcheck.NewChecker(netcheck.DefaultOptions())
+	}
+	if s.provider == nil {
+		s.provider = provider.New(s.paths)
 	}
 	if s.static == nil {
 		s.static = s.defaultStatic()

@@ -41,9 +41,12 @@ import (
 
 // Источники и настройки по умолчанию.
 const (
-	// DefaultOwner и DefaultRepo — репозиторий релизов.
-	DefaultOwner = "AloofLibra"
-	DefaultRepo  = "zator"
+	// DefaultOwner и DefaultRepo — репозиторий релизов ZatorGO.
+	DefaultOwner = "Koviand"
+	DefaultRepo  = "zatorGOtest"
+	// EnvOwner / EnvRepo переопределяют репозиторий релизов (как в лаунчере).
+	EnvOwner = "ZATOR_OWNER"
+	EnvRepo  = "ZATOR_REPO"
 	// EnvLatestURL переопределяет адрес latest.json.
 	EnvLatestURL = "ZATOR_LATEST_URL"
 	// ManifestRel — путь манифеста внутри архива.
@@ -67,8 +70,31 @@ const (
 	maxLatestBytes = 1 << 20
 )
 
-// DefaultLatestURL — адрес latest.json по умолчанию.
+// DefaultLatestURL — адрес latest.json по умолчанию (репозиторий Koviand/zatorGOtest).
 var DefaultLatestURL = fetch.GitHubReleaseURL(DefaultOwner, DefaultRepo, "latest", "latest.json")
+
+// ReleaseOwner / ReleaseRepo возвращают owner/repo релизов с учётом env.
+func ReleaseOwner() string {
+	if v := strings.TrimSpace(os.Getenv(EnvOwner)); v != "" {
+		return v
+	}
+	return DefaultOwner
+}
+
+func ReleaseRepo() string {
+	if v := strings.TrimSpace(os.Getenv(EnvRepo)); v != "" {
+		return v
+	}
+	return DefaultRepo
+}
+
+// LatestJSONURL — URL latest.json для текущего owner/repo (или ZATOR_LATEST_URL).
+func LatestJSONURL() string {
+	if v := strings.TrimSpace(os.Getenv(EnvLatestURL)); v != "" {
+		return v
+	}
+	return fetch.GitHubReleaseURL(ReleaseOwner(), ReleaseRepo(), "latest", "latest.json")
+}
 
 // Ошибки пакета.
 var (
@@ -195,18 +221,14 @@ type Updater struct {
 }
 
 // New создаёт обновлятор для раскладки p. Адрес latest.json берётся из
-// ZATOR_LATEST_URL, офлайн-флаг — из Z2R_OFFLINE.
+// ZATOR_LATEST_URL / ZATOR_OWNER+ZATOR_REPO, офлайн-флаг — из Z2R_OFFLINE.
 func New(p paths.Paths) *Updater {
-	u := &Updater{
+	return &Updater{
 		Paths:     p,
 		Fetch:     fetch.NewClient(),
-		LatestURL: DefaultLatestURL,
+		LatestURL: LatestJSONURL(),
 		Offline:   DetectOffline(os.Getenv, "").Offline,
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvLatestURL)); v != "" {
-		u.LatestURL = v
-	}
-	return u
 }
 
 func (u *Updater) now() time.Time {
@@ -227,7 +249,7 @@ func (u *Updater) latestURL() string {
 	if u.LatestURL != "" {
 		return u.LatestURL
 	}
-	return DefaultLatestURL
+	return LatestJSONURL()
 }
 
 func (u *Updater) webUIInstalled() bool {
@@ -296,7 +318,9 @@ func knownVersion(v string) bool {
 	return v != "" && v != "unknown" && v != "branch"
 }
 
-// FetchLatest скачивает и разбирает latest.json. В офлайн-режиме — ErrOffline.
+// FetchLatest скачивает и разбирает latest.json. Если ассета нет — fallback
+// на GitHub Releases API репозитория Koviand/zatorGOtest (или ZATOR_OWNER/REPO).
+// В офлайн-режиме — ErrOffline.
 func (u *Updater) FetchLatest(ctx context.Context) (*Latest, []byte, error) {
 	if u.Offline {
 		return nil, nil, ErrOffline
@@ -312,26 +336,32 @@ func (u *Updater) FetchLatest(ctx context.Context) (*Latest, []byte, error) {
 	tmpName := tmp.Name()
 	tmp.Close()
 	defer os.Remove(tmpName)
-	if err := u.fetcher().Download(ctx, u.latestURL(), tmpName, ""); err != nil {
-		return nil, nil, err
+	if err := u.fetcher().Download(ctx, u.latestURL(), tmpName, ""); err == nil {
+		f, err := os.Open(tmpName)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer f.Close()
+		data, err := io.ReadAll(io.LimitReader(f, maxLatestBytes+1))
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(data) > maxLatestBytes {
+			return nil, nil, fmt.Errorf("%w: слишком большой файл", ErrInvalidLatest)
+		}
+		l, err := ParseLatest(data)
+		if err != nil {
+			return nil, nil, err
+		}
+		return l, data, nil
 	}
-	f, err := os.Open(tmpName)
+	// Нет latest.json в релизе — берём тег из GitHub API своего репозитория.
+	l, err := u.FetchGitHubLatest(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxLatestBytes+1))
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(data) > maxLatestBytes {
-		return nil, nil, fmt.Errorf("%w: слишком большой файл", ErrInvalidLatest)
-	}
-	l, err := ParseLatest(data)
-	if err != nil {
-		return nil, nil, err
-	}
-	return l, data, nil
+	raw, _ := json.Marshal(l)
+	return l, raw, nil
 }
 
 // CheckLatest проверяет наличие обновления и кэширует latest.json.
@@ -344,10 +374,13 @@ func (u *Updater) CheckLatest(ctx context.Context) (*CheckResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Если version.env ещё нет — сравниваем с версией бинарника из status API
+	// через ZATOR_VERSION env / файл VERSION недоступен здесь; оставляем
+	// CompareLatest: без SHA и без версии обновиться предложит при любом релизе.
 	res := CompareLatest(cur, l, u.webUIInstalled())
 	res.CheckedAt = u.now()
-	if err := fsutil.AtomicWriteFile(filepath.Join(Dir(u.Paths), LatestCacheName), raw, 0o644); err != nil {
-		return &res, err
+	if len(raw) > 0 {
+		_ = fsutil.AtomicWriteFile(filepath.Join(Dir(u.Paths), LatestCacheName), raw, 0o644)
 	}
 	return &res, nil
 }
@@ -803,6 +836,18 @@ func (u *Updater) Run(ctx context.Context, opts RunOptions) (*Report, error) {
 	if !check.UpdateAvailable() && !opts.Force {
 		rep.UpToDate = true
 		return rep, nil
+	}
+	// Релиз без tar/latest.json (только zator-linux-*): обновляем бинарник с GitHub.
+	if check.Latest != nil {
+		if _, aerr := check.Latest.Asset(variant); aerr != nil {
+			ar, tag, berr := u.ApplyGitHubBinary(ctx)
+			if berr != nil {
+				return rep, berr
+			}
+			rep.Apply = ar
+			rep.Archive = tag
+			return rep, nil
+		}
 	}
 	archive, err := u.DownloadAsset(ctx, check.Latest, variant)
 	if err != nil {

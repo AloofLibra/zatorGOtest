@@ -243,7 +243,7 @@ func newWebHandler(a *app.App, stderr io.Writer) (http.Handler, error) {
 		return nil, err
 	}
 	if a.Config.Token == "" {
-		fmt.Fprintln(stderr, "предупреждение: токен не задан — API открыт без авторизации (режим разработки)")
+		fmt.Fprintln(stderr, "Web UI без токена (откройте URL как есть; для защиты задайте token в zator.json)")
 	}
 	return api.Handler(), nil
 }

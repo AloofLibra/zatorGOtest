@@ -22,13 +22,17 @@ const (
 	UnitZapret2 Unit = "zapret2"
 	// UnitWebUI — Web UI zator.
 	UnitWebUI Unit = "zator-webui"
+	// UnitValidator — watchdog circular_quality (strategy-validator.sh --daemon).
+	UnitValidator Unit = "zator-strategy-validator"
 )
 
 // Valid сообщает, известна ли служба.
-func (u Unit) Valid() bool { return u == UnitZapret2 || u == UnitWebUI }
+func (u Unit) Valid() bool {
+	return u == UnitZapret2 || u == UnitWebUI || u == UnitValidator
+}
 
 // Units — все управляемые службы.
-func Units() []Unit { return []Unit{UnitZapret2, UnitWebUI} }
+func Units() []Unit { return []Unit{UnitZapret2, UnitValidator, UnitWebUI} }
 
 // Backend — механизм управления службами.
 type Backend string
@@ -278,6 +282,8 @@ func (m *manager) Status(ctx context.Context, u Unit) (Status, error) {
 		match, pidofName = MatchNfqws2, "nfqws2"
 	case UnitWebUI:
 		match = MatchWebUI
+	case UnitValidator:
+		match = MatchValidator
 	}
 	pids, err := m.scan.Find(ctx, match, pidofName)
 	switch {

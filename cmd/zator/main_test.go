@@ -84,25 +84,22 @@ func TestWebHandlerServesAPIAndStatic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Config.Token == "" {
-		t.Fatal("install должен сгенерировать токен")
+	if a.Config.Token != "" {
+		t.Fatalf("install не должен генерировать токен, got %q", a.Config.Token)
 	}
 	var warn bytes.Buffer
 	h, err := newWebHandler(a, &warn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if warn.Len() != 0 {
-		t.Errorf("предупреждение при заданном токене: %q", warn.String())
+	if !strings.Contains(warn.String(), "без токена") {
+		t.Errorf("ожидалось сообщение об открытом доступе: %q", warn.String())
 	}
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
-	get := func(path, token string) (*http.Response, []byte) {
+	get := func(path string) (*http.Response, []byte) {
 		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
 		resp, err := ts.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -112,10 +109,7 @@ func TestWebHandlerServesAPIAndStatic(t *testing.T) {
 		return resp, b
 	}
 
-	if resp, _ := get("/cgi-bin/status.cgi", ""); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("без токена: %d", resp.StatusCode)
-	}
-	resp, body := get("/cgi-bin/status.cgi", a.Config.Token)
+	resp, body := get("/cgi-bin/status.cgi")
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
 		t.Fatalf("status.cgi: %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
@@ -123,10 +117,10 @@ func TestWebHandlerServesAPIAndStatic(t *testing.T) {
 	if err := json.Unmarshal(body, &st); err != nil || st["profiles"] == nil {
 		t.Errorf("status body: %v %s", err, body)
 	}
-	if resp, body := get("/", a.Config.Token); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "<html") {
+	if resp, body := get("/"); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "<html") {
 		t.Errorf("статика: %d", resp.StatusCode)
 	}
-	if resp, _ := get("/api/scopes", a.Config.Token); resp.StatusCode != http.StatusOK {
+	if resp, _ := get("/api/scopes"); resp.StatusCode != http.StatusOK {
 		t.Errorf("/api/scopes: %d", resp.StatusCode)
 	}
 }
@@ -141,7 +135,7 @@ func TestWebHandlerWarnsWithoutToken(t *testing.T) {
 	if _, err := newWebHandler(a, &warn); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(warn.String(), "токен не задан") {
-		t.Errorf("нет предупреждения: %q", warn.String())
+	if !strings.Contains(warn.String(), "без токена") {
+		t.Errorf("нет сообщения об открытом доступе: %q", warn.String())
 	}
 }

@@ -12,8 +12,8 @@ import (
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/firewall"
-	"github.com/AloofLibra/zator/internal/fsutil"
 	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/provider"
 )
 
 // postFn — обработчик POST settings.cgi; возвращает тело успешного ответа.
@@ -31,10 +31,8 @@ func init() {
 		"wg_repeats":       (*Server).postWGRepeats,
 		"ports_add":        (*Server).postPortsAdd,
 		"ports_remove":     (*Server).postPortsRemove,
-		"provider_set":     (*Server).postProviderSet,
-		"provider_redetect": func(*Server, *http.Request, params) (map[string]any, error) {
-			return nil, errf(http.StatusNotImplemented, "Автоопределение провайдера в этой сборке не реализовано; задайте провайдера вручную (provider_set)")
-		},
+		"provider_set":      (*Server).postProviderSet,
+		"provider_redetect": (*Server).postProviderRedetect,
 		"client_scope": (*Server).postClientScope,
 		"wssize_ramp":  (*Server).postWssizeRamp,
 		"supersweep":    (*Server).postSupersweep,
@@ -510,23 +508,38 @@ func (s *Server) postPortsRemove(r *http.Request, p params) (map[string]any, err
 // --- провайдер ---
 
 func (s *Server) postProviderSet(_ *http.Request, p params) (map[string]any, error) {
-	name := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(p.Get("name"))
-	city := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(p.Get("city"))
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, errf(http.StatusBadRequest, "Укажите название провайдера")
-	}
-	full := name
-	if c := strings.TrimSpace(city); c != "" {
-		full += " - " + c
-	}
-	if err := os.MkdirAll(s.paths.StateDir, 0o755); err != nil {
-		return nil, err
-	}
-	if err := fsutil.AtomicWriteFile(filepath.Join(s.paths.StateDir, providerFile), []byte(full+"\n"), 0o644); err != nil {
+	name := p.Get("name")
+	city := p.Get("city")
+	full, err := s.provider.Set(name, city)
+	if err != nil {
+		if errors.Is(err, provider.ErrEmpty) {
+			return nil, errf(http.StatusBadRequest, "Укажите название провайдера")
+		}
 		return nil, err
 	}
 	return map[string]any{"ok": true, "provider": full}, nil
+}
+
+func (s *Server) postProviderRedetect(r *http.Request, _ params) (map[string]any, error) {
+	res, err := s.provider.Redetect(r.Context())
+	if err != nil {
+		if errors.Is(err, provider.ErrNotDetected) {
+			return map[string]any{
+				"ok":       true,
+				"provider": provider.Unknown,
+				"warning":  "Не удалось определить провайдера",
+			}, nil
+		}
+		return nil, errf(http.StatusBadGateway, "Не удалось определить провайдера: "+err.Error())
+	}
+	return map[string]any{
+		"ok":       true,
+		"provider": res.Display,
+		"asn":      res.ASN,
+		"city":     res.City,
+		"brand":    res.Brand,
+		"source":   res.Source,
+	}, nil
 }
 
 // --- client scope ---

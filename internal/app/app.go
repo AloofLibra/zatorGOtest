@@ -147,6 +147,8 @@ func (a *App) Save() error {
 }
 
 // EnsureToken генерирует случайный токен, если он ещё не задан.
+// Вызывайте явно, когда нужна защита Web UI; установка по умолчанию
+// оставляет Token пустым (доступ без авторизации).
 func (a *App) EnsureToken() error {
 	if a.Config.Token != "" {
 		return nil
@@ -157,6 +159,11 @@ func (a *App) EnsureToken() error {
 	}
 	a.Config.Token = hex.EncodeToString(buf)
 	return nil
+}
+
+// ClearToken отключает авторизацию Web UI.
+func (a *App) ClearToken() {
+	a.Config.Token = ""
 }
 
 // WebUIURL возвращает URL Web UI (с токеном, если он задан).

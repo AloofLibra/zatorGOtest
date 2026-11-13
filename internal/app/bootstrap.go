@@ -180,7 +180,7 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 		return fmt.Errorf("службы: %w", err)
 	}
 
-	units := []service.Unit{service.UnitZapret2}
+	units := []service.Unit{service.UnitZapret2, service.UnitValidator}
 	if opts.webUI() {
 		units = append(units, service.UnitWebUI)
 	}

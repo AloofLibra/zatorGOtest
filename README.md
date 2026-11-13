@@ -13,12 +13,14 @@
 
 ```sh
 # на устройстве (роутер/VPS)
-curl -fsSL https://github.com/AloofLibra/zator/releases/latest/download/zator-launcher.sh -o zator-launcher.sh
+curl -fsSL https://github.com/Koviand/zatorGOtest/releases/latest/download/zator-launcher.sh -o zator-launcher.sh
 chmod +x zator-launcher.sh
 ./zator-launcher.sh
 ```
 
-Лаунчер определит архитектуру, скачает `zator-linux-<arch>`, выполнит `zator install` и поднимет Web UI (порт **17682**). Токен печатается при установке / лежит в `/opt/zator/config/zator.json`.
+Лаунчер определит архитектуру, скачает `zator-linux-<arch>`, выполнит `zator install` и поднимет Web UI (порт **17682**). По умолчанию Web UI открыт без токена; для защиты задайте `"token"` в `/opt/zator/config/zator.json`.
+
+Обновления ZatorGO (Web UI «Проверить» / `zator update`) берутся из **Koviand/zatorGOtest**. Переопределение: `ZATOR_OWNER`, `ZATOR_REPO`, `ZATOR_LATEST_URL`.
 
 ### CLI (только bootstrap)
 

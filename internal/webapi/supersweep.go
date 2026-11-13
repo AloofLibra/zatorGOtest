@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/sweep"
@@ -15,24 +16,54 @@ import (
 // sweepDir — каталог прогресса суперавтопрогона.
 func (s *Server) sweepDir() string { return filepath.Join(s.paths.StateDir, "supersweep") }
 
+// probeDir — рабочий каталог изолированного nfqws2.
+func (s *Server) probeDir() string { return filepath.Join(s.paths.StateDir, "supersweep-probe") }
+
 // sweeperOrDefault возвращает Sweeper; по умолчанию лениво создаёт
-// *sweep.Coordinator поверх хранилища orchestra и сетевого Checker.
-// Изолированный nfqws2 (Probe) не подключается: используется NoopProbe.
+// *sweep.Coordinator с изолированным NfqwsProbe и приватным ProbeStore.
 func (s *Server) sweeperOrDefault() (Sweeper, error) {
 	s.sweepMu.Lock()
 	defer s.sweepMu.Unlock()
 	if s.sweeper != nil {
 		return s.sweeper, nil
 	}
+
+	cfgLive, installed := s.readConfig()
+	if !installed {
+		return nil, s.notInstalledErr()
+	}
+
+	probeStore := orchestra.NewStore(filepath.Join(s.probeDir(), "orchestra"))
+	probeStore.MaxStrategy = s.maxStrategy
+
+	probe, err := sweep.NewNfqwsProbe(sweep.NfqwsProbeConfig{
+		Paths:        s.paths,
+		WorkDir:      s.probeDir(),
+		OrchestraDir: probeStore.Dir(),
+		Config:       cfgLive,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	opts := netcheck.DefaultOptions()
+	opts.DialContext = netcheck.BindPortRangeDialer(
+		firewall.SuperSweepPortFirst, firewall.SuperSweepPortLast)
+	checker := netcheck.NewChecker(opts)
+	if base, ok := s.checker.(*netcheck.Checker); ok {
+		checker.RedirectorURL = base.RedirectorURL
+		checker.DNS = base.DNS
+	}
+
 	cfg := sweep.Config{
 		Dir:         s.sweepDir(),
 		ArchiveDir:  s.paths.StateDir,
 		Store:       s.store,
-		Checker:     s.checker,
+		ProbeStore:  probeStore,
+		Probe:       probe,
+		Checker:     checker,
 		MaxStrategy: s.maxStrategy,
-	}
-	if c, ok := s.checker.(*netcheck.Checker); ok {
-		cfg.GVURL = func(ctx context.Context) string { return "https://" + c.ClusterDomain(ctx) }
+		GVURL:       func(ctx context.Context) string { return "https://" + checker.ClusterDomain(ctx) },
 	}
 	coord, err := sweep.New(cfg)
 	if err != nil {

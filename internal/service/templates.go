@@ -254,6 +254,12 @@ func (m *manager) templateData(u Unit) TemplateData {
 		d.Description = "zapret2 (nfqws2)"
 		d.Command = []string{slash(filepath.Join(m.cfg.Paths.ZapretRoot, "nfq2", "nfqws2")), "@" + slash(m.cfg.ArgsFile)}
 		d.Start = 90
+	case UnitValidator:
+		d.Description = "zator strategy-validator (circular_quality watchdog)"
+		script := slash(filepath.Join(m.cfg.Paths.LuaDir, "strategy-validator.sh"))
+		d.Command = []string{script, "--daemon"}
+		d.Start = 91
+		d.FWHook = ""
 	case UnitWebUI:
 		d.Description = "zator Web UI"
 		d.Command = []string{slash(m.cfg.ZatorBin), "webui"}

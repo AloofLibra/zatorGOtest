@@ -94,18 +94,20 @@ func TestInstallUpdateUninstall(t *testing.T) {
 	if err := a.Install(); err != nil {
 		t.Fatal(err)
 	}
-	if !a.Installed() || a.Config.Token == "" {
+	if !a.Installed() {
 		t.Fatalf("установка неполная: %+v", a.Config)
+	}
+	if a.Config.Token != "" {
+		t.Fatalf("по умолчанию токен не должен генерироваться, got %q", a.Config.Token)
 	}
 	if _, err := os.Stat(filepath.Join(a.Paths.WebUIDir, "index.html")); err != nil {
 		t.Errorf("index.html не распакован: %v", err)
 	}
-	tok := a.Config.Token
 	if err := a.Update(); err != nil {
 		t.Fatal(err)
 	}
-	if a.Config.Token != tok {
-		t.Error("update изменил токен")
+	if a.Config.Token != "" {
+		t.Error("update не должен создавать токен")
 	}
 	if err := a.Uninstall(); err != nil {
 		t.Fatal(err)

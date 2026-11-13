@@ -11,16 +11,21 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const route = useRoute()
 const tabs = [
-  { to: '/', name: 'status', label: 'Обзор' },
-  { to: '/strategies', name: 'strategies', label: 'Стратегии' },
-  { to: '/domains', name: 'domains', label: 'Домены' },
-  { to: '/settings', name: 'settings', label: 'Настройки' },
+  { to: '/', name: 'status', label: 'Обзор', hint: 'Состояние и быстрые действия' },
+  { to: '/strategies', name: 'strategies', label: 'Стратегии', hint: 'Локи профилей и supersweep' },
+  { to: '/domains', name: 'domains', label: 'Домены', hint: 'Списки hostlist / custom' },
+  { to: '/settings', name: 'settings', label: 'Настройки', hint: 'Режимы, сеть, бэкапы' },
+]
+const themes: { id: ThemeMode; label: string }[] = [
+  { id: 'light', label: 'Светлая' },
+  { id: 'dark', label: 'Тёмная' },
+  { id: 'auto', label: 'Авто' },
 ]
 const active = computed(() => String(route.name || 'status'))
-const themeSelect = computed({
-  get: () => theme.value,
-  set: (v: string) => { theme.value = v as ThemeMode },
-})
+
+function setTheme(mode: ThemeMode) {
+  theme.value = mode
+}
 
 onMounted(() => {
   fetchAndApplyState()
@@ -34,7 +39,7 @@ onMounted(() => {
     <aside class="rail">
       <div class="brand">
         <div class="brand-mark">Zator<span>GO</span></div>
-        <div class="brand-sub">управление zapret2</div>
+        <div class="brand-sub">Панель управления zapret2</div>
       </div>
       <nav class="nav" aria-label="Разделы">
         <router-link
@@ -42,17 +47,25 @@ onMounted(() => {
           :key="t.name"
           :to="t.to"
           :class="{ 'is-active': active === t.name, 'is-locked': busyActive && !statusLoaded }"
-        >{{ t.label }}</router-link>
+        >
+          <strong>{{ t.label }}</strong>
+          <small>{{ t.hint }}</small>
+        </router-link>
       </nav>
       <div class="rail-foot">
-        <label class="theme-field">
-          <span>Тема</span>
-          <select v-model="themeSelect" aria-label="Тема">
-            <option value="auto">Авто</option>
-            <option value="light">Светлая</option>
-            <option value="dark">Тёмная</option>
-          </select>
-        </label>
+        <div class="theme-field">
+          <span>Тема оформления</span>
+          <div class="theme-seg" role="group" aria-label="Тема">
+            <button
+              v-for="t in themes"
+              :key="t.id"
+              type="button"
+              :class="{ 'is-active': theme === t.id }"
+              :aria-pressed="theme === t.id"
+              @click="setTheme(t.id)"
+            >{{ t.label }}</button>
+          </div>
+        </div>
       </div>
     </aside>
     <main class="main">

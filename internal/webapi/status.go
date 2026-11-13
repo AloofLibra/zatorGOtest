@@ -14,6 +14,7 @@ import (
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/provider"
 	"github.com/AloofLibra/zator/internal/zapret"
 )
 
@@ -59,6 +60,13 @@ func scopeParam(p params) (string, error) {
 }
 
 func (s *Server) providerText() string {
+	if s.provider != nil {
+		return s.provider.Menu()
+	}
+	if v, ok := provider.ReadCache(s.paths); ok {
+		return v
+	}
+	// Legacy: state/provider.txt до унификации с state/cache/provider.txt.
 	data, err := os.ReadFile(filepath.Join(s.paths.StateDir, providerFile))
 	if err != nil {
 		return providerUnknown

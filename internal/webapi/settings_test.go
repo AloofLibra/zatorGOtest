@@ -2,12 +2,14 @@ package webapi
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/provider"
 )
 
 func settingGetMap(t *testing.T, e *env, setting string) map[string]any {
@@ -292,8 +294,50 @@ func TestSettingsProvider(t *testing.T) {
 	}
 	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "provider_set", "name", "  ")
 	wantError(t, resp, out, 400, "Укажите название провайдера")
-	resp, _ = e.post("/cgi-bin/settings.cgi", "setting", "provider_redetect")
-	wantStatus(t, resp, http.StatusNotImplemented)
+}
+
+func TestSettingsProviderRedetect(t *testing.T) {
+	const ipwhoOK = `{"success":true,"city":"Moscow","connection":{"asn":8359,"isp":"PJSC MTS"}}`
+	hits := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits[r.URL.Path]++
+		switch r.URL.Path {
+		case "/ipwho":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(ipwhoOK))
+		default:
+			http.Error(w, "no", 500)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	e := newEnv(t, envOpts{})
+	d := provider.New(e.app.Paths)
+	d.HTTP = srv.Client()
+	d.IPWhoURL = srv.URL + "/ipwho"
+	d.IPInfoURL = srv.URL + "/ipinfo"
+	d.IPAPIURL = srv.URL + "/ipapi"
+	d.ASNRemoteURL = ""
+	e.srv.provider = d
+
+	resp, out := e.post("/cgi-bin/settings.cgi", "setting", "provider_redetect")
+	wantOK(t, resp, out)
+	if out["provider"] != "MTS - Moscow" {
+		t.Errorf("redetect = %v", out)
+	}
+	if out["source"] != "ipwho.is" || out["asn"] != float64(8359) {
+		t.Errorf("meta = %v", out)
+	}
+	if got := settingGetMap(t, e, "provider")["provider"]; got != "MTS - Moscow" {
+		t.Errorf("GET provider = %v", got)
+	}
+	_, st := e.get("/cgi-bin/status.cgi")
+	if st["provider"] != "MTS - Moscow" {
+		t.Errorf("status provider = %v", st["provider"])
+	}
+	if hits["/ipwho"] == 0 {
+		t.Error("ipwho.is не вызывался")
+	}
 }
 
 func TestSettingsBlobsAndWG(t *testing.T) {

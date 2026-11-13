@@ -192,6 +192,18 @@ func TestRenderSystemd(t *testing.T) {
 		t.Errorf("unit webui:\n%s", web)
 	}
 
+	val, err := RenderSystemd(c.templateData(UnitValidator))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vscript := filepath.ToSlash(filepath.Join(e.p.LuaDir, "strategy-validator.sh"))
+	if !strings.Contains(val, "ExecStart="+vscript+" --daemon") || strings.Contains(val, "ExecStartPre") {
+		t.Errorf("unit validator:\n%s", val)
+	}
+	if !strings.Contains(val, "strategy-validator") {
+		t.Errorf("unit validator description:\n%s", val)
+	}
+
 	// Без FWHook строк Pre/Post нет.
 	c2 := e.ctl(t, platSystemd).(*manager)
 	plain, _ := RenderSystemd(c2.templateData(UnitZapret2))
@@ -642,5 +654,10 @@ func TestMatchers(t *testing.T) {
 		MatchWebUI("", []string{"/bin/zator"}) ||
 		MatchWebUI("", []string{"/bin/other", "webui"}) {
 		t.Error("MatchWebUI")
+	}
+	if !MatchValidator("strategy-validator.sh", nil) ||
+		!MatchValidator("sh", []string{"/bin/sh", "/opt/zator/lua/strategy-validator.sh", "--daemon"}) ||
+		MatchValidator("bash", []string{"bash", "-c", "echo"}) {
+		t.Error("MatchValidator")
 	}
 }

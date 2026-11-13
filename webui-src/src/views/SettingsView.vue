@@ -21,18 +21,25 @@ import { announceRestart, restartSuffix, showToast } from '../stores/toast'
 const route = useRoute()
 
 const sections = [
-  { id: 'sec-updates', label: 'Обновления' },
-  { id: 'sec-modes', label: 'Режимы' },
-  { id: 'sec-firewall', label: 'Firewall' },
-  { id: 'sec-tls', label: 'TLS' },
-  { id: 'sec-wg', label: 'WireGuard' },
-  { id: 'sec-ports', label: 'Порты' },
-  { id: 'sec-scopes', label: 'Scopes' },
-  { id: 'sec-provider', label: 'Провайдер' },
-  { id: 'sec-backups', label: 'Бэкапы' },
-  { id: 'sec-wssize', label: 'WSSIZE' },
-  { id: 'sec-config', label: 'Конфиг' },
-  { id: 'sec-errors', label: 'Ошибки' },
+  { id: 'sec-updates', label: 'Обновления', group: 'Система' },
+  { id: 'sec-provider', label: 'Провайдер', group: 'Система' },
+  { id: 'sec-backups', label: 'Бэкапы', group: 'Система' },
+  { id: 'sec-modes', label: 'Режимы', group: 'Обход' },
+  { id: 'sec-tls', label: 'TLS', group: 'Обход' },
+  { id: 'sec-wg', label: 'WireGuard', group: 'Обход' },
+  { id: 'sec-wssize', label: 'WSSIZE', group: 'Обход' },
+  { id: 'sec-firewall', label: 'Firewall', group: 'Сеть' },
+  { id: 'sec-ports', label: 'Порты', group: 'Сеть' },
+  { id: 'sec-scopes', label: 'Scopes', group: 'Сеть' },
+  { id: 'sec-config', label: 'Конфиг', group: 'Сервис' },
+  { id: 'sec-errors', label: 'Ошибки', group: 'Сервис' },
+]
+
+const settingGroups = [
+  { id: 'grp-system', title: 'Система', desc: 'Обновления, провайдер и резервные копии.' },
+  { id: 'grp-bypass', title: 'Обход DPI', desc: 'Режимы стратегий, TLS/WG blob и wssize.' },
+  { id: 'grp-net', title: 'Сеть', desc: 'Firewall, порты NFQUEUE и client scopes.' },
+  { id: 'grp-svc', title: 'Сервис', desc: 'Сырой конфиг zapret2 и журнал ошибок.' },
 ]
 
 const modes = [
@@ -428,7 +435,7 @@ onMounted(() => {
     <div class="page-head">
       <div>
         <h1>Настройки</h1>
-        <p>Полный набор параметров ZatorGO — всё, что раньше делалось в меню Z2R.</p>
+        <p>Параметры сгруппированы по задачам. Навигация сверху быстро переносит к нужному блоку.</p>
       </div>
       <div class="actions">
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh-settings' }" @click="refresh">Обновить</button>
@@ -441,9 +448,14 @@ onMounted(() => {
 
     <div v-if="!settingsLoaded" class="loading">Загрузка…</div>
     <template v-else>
+      <div id="grp-system" class="settings-group">
+        <h2>{{ settingGroups[0].title }}</h2>
+        <p>{{ settingGroups[0].desc }}</p>
+      </div>
+
       <section id="sec-updates" class="panel">
         <div class="panel-h"><h2>Обновления</h2></div>
-        <p class="panel-d">Проверка и установка релизов ZatorGO (п.5 CLI).</p>
+        <p class="panel-d">Проверка и установка релизов ZatorGO.</p>
         <p v-if="updateInfo" class="panel-d">
           {{ updateInfo.update_available ? 'Есть обновление' : 'Актуально' }}
           <template v-if="updateInfo.release"> · {{ updateInfo.release }}</template>
@@ -455,9 +467,52 @@ onMounted(() => {
         </div>
       </section>
 
+      <section id="sec-provider" class="panel">
+        <div class="panel-h"><h2>Провайдер</h2></div>
+        <p class="panel-d">Нужен для рекомендаций стратегий. Можно задать вручную или определить автоматически.</p>
+        <div class="grid-2">
+          <label class="field"><span>Имя</span><input v-model="providerName" :disabled="busyActive"></label>
+          <label class="field"><span>Город</span><input v-model="providerCity" :disabled="busyActive"></label>
+        </div>
+        <div class="actions" style="margin-top:0.8rem">
+          <button type="button" class="primary" :disabled="busyActive || !providerName.trim()" @click="saveProvider">Сохранить</button>
+          <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'provider-redetect' }" @click="redetectProvider">Определить заново</button>
+        </div>
+      </section>
+
+      <section id="sec-backups" class="panel">
+        <div class="panel-h"><h2>Бэкапы</h2></div>
+        <p class="panel-d">Снимок конфига и локов. Можно скачать или восстановить из файла.</p>
+        <div class="actions">
+          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'bak-create' }" @click="createBackup">Создать</button>
+          <label class="ghost" style="padding:0.65rem 1rem;border:1px solid var(--line);border-radius:10px;cursor:pointer">
+            Загрузить
+            <input type="file" accept=".tar,.tgz,.gz,application/x-tar" style="display:none" :disabled="busyActive" @change="uploadBackup">
+          </label>
+        </div>
+        <div class="domain-list" style="margin-top:0.8rem">
+          <div v-for="b in (backups?.items || [])" :key="b.name" class="domain-item">
+            <div>
+              <code>{{ b.name }}</code>
+              <div style="color:var(--muted);font-size:0.8rem">{{ b.date }} · {{ b.size ?? 0 }}</div>
+            </div>
+            <div class="row">
+              <a class="ghost" style="padding:0.5rem 0.8rem;border:1px solid var(--line);border-radius:10px"
+                :href="backupsApi.downloadUrl(b.name)">Скачать</a>
+              <button type="button" class="ghost danger" :disabled="busyActive" @click="deleteBackup(b.name)">Удалить</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div id="grp-bypass" class="settings-group">
+        <h2>{{ settingGroups[1].title }}</h2>
+        <p>{{ settingGroups[1].desc }}</p>
+      </div>
+
       <section id="sec-modes" class="panel">
         <div class="panel-h"><h2>Режимы обхода</h2></div>
-        <p class="panel-d">Переключатели из главного меню Z2R: авторотация, hostlist, fallback, DNS, UDP games, RST, reasm, QUIC.</p>
+        <p class="panel-d">Авторотация, hostlist, fallback, DNS, UDP games, RST, reasm, QUIC.</p>
         <div class="grid-2">
           <label v-for="m in modes" :key="m.key" class="toggle">
             <input type="checkbox" :checked="!!modeOn(m)" :disabled="busyActive"
@@ -472,36 +527,9 @@ onMounted(() => {
         </p>
       </section>
 
-      <section id="sec-firewall" class="panel">
-        <div class="panel-h"><h2>Firewall / Offload</h2></div>
-        <p class="panel-d">Пункты 9 и 11 CLI.</p>
-        <div class="grid-2">
-          <label class="field">
-            <span>FWTYPE</span>
-            <select v-model="fw" :disabled="busyActive">
-              <option value="iptables">iptables</option>
-              <option value="nftables">nftables</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>FLOWOFFLOAD</span>
-            <select v-model="offload" :disabled="busyActive">
-              <option value="donttouch">donttouch</option>
-              <option value="none">none</option>
-              <option value="software">software</option>
-              <option value="hardware">hardware</option>
-            </select>
-          </label>
-        </div>
-        <div class="actions" style="margin-top:0.8rem">
-          <button type="button" class="primary" :disabled="busyActive" @click="saveSelect('fwtype', fw, 'FWTYPE')">Сохранить FW</button>
-          <button type="button" class="primary" :disabled="busyActive" @click="saveSelect('flowoffload', offload, 'Offload')">Сохранить Offload</button>
-        </div>
-      </section>
-
       <section id="sec-tls" class="panel">
         <div class="panel-h"><h2>TLS blob</h2><span class="chip">{{ tlsBlobSettings?.current_mode || '—' }}</span></div>
-        <p class="panel-d">Пункт 16 CLI: глобальный blob ClientHello.</p>
+        <p class="panel-d">Глобальный blob ClientHello для TLS-фейков.</p>
         <div class="grid-2">
           <label class="field">
             <span>Режим</span>
@@ -542,104 +570,6 @@ onMounted(() => {
         </div>
       </section>
 
-      <section id="sec-ports" class="panel">
-        <div class="panel-h"><h2>Порты NFQWS2</h2></div>
-        <p class="panel-d">Пункт 20 CLI.</p>
-        <div class="row">
-          <select v-model="portProto" :disabled="busyActive" style="max-width:7rem">
-            <option value="tcp">TCP</option>
-            <option value="udp">UDP</option>
-          </select>
-          <input v-model="portValue" :disabled="busyActive" placeholder="443 или 1000-2000" style="flex:1;min-width:10rem">
-          <button type="button" class="primary" :disabled="busyActive" @click="addPort">Добавить</button>
-        </div>
-        <p v-if="ports?.[portProto]?.full" class="panel-d">Текущие: <code>{{ ports[portProto]?.full }}</code></p>
-        <div class="domain-list" style="margin-top:0.8rem">
-          <div v-for="p in portList" :key="p" class="domain-item">
-            <code>{{ p }}</code>
-            <button type="button" class="ghost danger" :disabled="busyActive" @click="removePort(p)">Удалить</button>
-          </div>
-          <p v-if="!portList.length" class="panel-d">Пользовательских портов пока нет.</p>
-        </div>
-      </section>
-
-      <section id="sec-scopes" class="panel">
-        <div class="panel-h"><h2>Client scopes</h2><span class="chip" :class="{ on: scopeForm.enable }">{{ scopeForm.enable ? 'вкл' : 'выкл' }}</span></div>
-        <p class="panel-d">Пункт 23 CLI. Стратегии по IP — во вкладке «Стратегии».</p>
-        <div class="grid-2">
-          <label class="toggle"><input v-model="scopeForm.enable" type="checkbox" :disabled="busyActive"><span>Включить режим mark</span></label>
-          <label class="field"><span>mask</span><input v-model="scopeForm.mask" :disabled="busyActive"></label>
-          <label class="field"><span>shift</span><input v-model="scopeForm.shift" type="number" min="0" max="31" :disabled="busyActive"></label>
-          <label class="field"><span>max</span><input v-model="scopeForm.max" type="number" min="1" max="255" :disabled="busyActive"></label>
-        </div>
-        <div class="actions" style="margin-top:0.8rem">
-          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'scope' }" @click="saveScope">Сохранить scopes</button>
-        </div>
-      </section>
-
-      <section id="sec-provider" class="panel">
-        <div class="panel-h"><h2>Провайдер</h2></div>
-        <div class="grid-2">
-          <label class="field"><span>Имя</span><input v-model="providerName" :disabled="busyActive"></label>
-          <label class="field"><span>Город</span><input v-model="providerCity" :disabled="busyActive"></label>
-        </div>
-        <div class="actions" style="margin-top:0.8rem">
-          <button type="button" class="primary" :disabled="busyActive || !providerName.trim()" @click="saveProvider">Сохранить</button>
-          <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'provider-redetect' }" @click="redetectProvider">Определить заново</button>
-        </div>
-      </section>
-
-      <section id="sec-backups" class="panel">
-        <div class="panel-h"><h2>Бэкапы</h2></div>
-        <p class="panel-d">Пункт 21 CLI.</p>
-        <div class="actions">
-          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'bak-create' }" @click="createBackup">Создать</button>
-          <label class="ghost" style="padding:0.65rem 1rem;border:1px solid var(--line);border-radius:10px;cursor:pointer">
-            Загрузить
-            <input type="file" accept=".tar,.tgz,.gz,application/x-tar" style="display:none" :disabled="busyActive" @change="uploadBackup">
-          </label>
-        </div>
-        <div class="domain-list" style="margin-top:0.8rem">
-          <div v-for="b in (backups?.items || [])" :key="b.name" class="domain-item">
-            <div>
-              <code>{{ b.name }}</code>
-              <div style="color:var(--muted);font-size:0.8rem">{{ b.date }} · {{ b.size ?? 0 }}</div>
-            </div>
-            <div class="row">
-              <a class="ghost" style="padding:0.5rem 0.8rem;border:1px solid var(--line);border-radius:10px"
-                :href="backupsApi.downloadUrl(b.name)">Скачать</a>
-              <button type="button" class="ghost danger" :disabled="busyActive" @click="deleteBackup(b.name)">Удалить</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="sec-config" class="panel">
-        <div class="panel-h">
-          <h2>Конфиг zapret2</h2>
-          <button type="button" class="ghost" :disabled="busyActive" @click="loadConfig">Перечитать</button>
-        </div>
-        <p class="panel-d">Пункт 7 CLI · <code>{{ configPath || '/opt/zapret2/config' }}</code></p>
-        <textarea v-if="configLoaded" v-model="configText" class="config-editor" :disabled="busyActive" spellcheck="false"></textarea>
-        <p v-else class="loading">Загрузка конфига…</p>
-        <div class="actions" style="margin-top:0.8rem">
-          <button type="button" class="primary" :disabled="busyActive || !configLoaded" :class="{ 'is-busy': busyButton === 'cfg-save' }" @click="saveConfig">Сохранить и перезапустить</button>
-        </div>
-      </section>
-
-      <section id="sec-errors" class="panel">
-        <div class="panel-h">
-          <h2>Ошибки nfqws2</h2>
-          <button type="button" class="ghost" :disabled="busyActive" @click="loadErrors">Обновить</button>
-        </div>
-        <p class="panel-d">Пункт 666 CLI.</p>
-        <p v-if="!errors.available" class="panel-d">Журнал пуст или не найден.</p>
-        <template v-else>
-          <p class="panel-d"><code>{{ errors.path }}</code> · строк: {{ errors.lines }}</p>
-          <pre class="error-log">{{ errors.content || '(пусто)' }}</pre>
-        </template>
-      </section>
-
       <section id="sec-wssize" class="panel">
         <div class="panel-h">
           <h2>WSSIZE ramp</h2>
@@ -668,6 +598,104 @@ onMounted(() => {
           <div class="actions" style="margin-top:0.8rem">
             <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'wssize' }" @click="saveWssize">Сохранить</button>
           </div>
+        </template>
+      </section>
+
+      <div id="grp-net" class="settings-group">
+        <h2>{{ settingGroups[2].title }}</h2>
+        <p>{{ settingGroups[2].desc }}</p>
+      </div>
+
+      <section id="sec-firewall" class="panel">
+        <div class="panel-h"><h2>Firewall / Offload</h2></div>
+        <p class="panel-d">Тип межсетевого экрана и flow offload.</p>
+        <div class="grid-2">
+          <label class="field">
+            <span>FWTYPE</span>
+            <select v-model="fw" :disabled="busyActive">
+              <option value="iptables">iptables</option>
+              <option value="nftables">nftables</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>FLOWOFFLOAD</span>
+            <select v-model="offload" :disabled="busyActive">
+              <option value="donttouch">donttouch</option>
+              <option value="none">none</option>
+              <option value="software">software</option>
+              <option value="hardware">hardware</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions" style="margin-top:0.8rem">
+          <button type="button" class="primary" :disabled="busyActive" @click="saveSelect('fwtype', fw, 'FWTYPE')">Сохранить FW</button>
+          <button type="button" class="primary" :disabled="busyActive" @click="saveSelect('flowoffload', offload, 'Offload')">Сохранить Offload</button>
+        </div>
+      </section>
+
+      <section id="sec-ports" class="panel">
+        <div class="panel-h"><h2>Порты NFQWS2</h2></div>
+        <p class="panel-d">Дополнительные порты, которые обрабатывает nfqws2.</p>
+        <div class="row">
+          <select v-model="portProto" :disabled="busyActive" style="max-width:7rem">
+            <option value="tcp">TCP</option>
+            <option value="udp">UDP</option>
+          </select>
+          <input v-model="portValue" :disabled="busyActive" placeholder="443 или 1000-2000" style="flex:1;min-width:10rem">
+          <button type="button" class="primary" :disabled="busyActive" @click="addPort">Добавить</button>
+        </div>
+        <p v-if="ports?.[portProto]?.full" class="panel-d">Текущие: <code>{{ ports[portProto]?.full }}</code></p>
+        <div class="domain-list" style="margin-top:0.8rem">
+          <div v-for="p in portList" :key="p" class="domain-item">
+            <code>{{ p }}</code>
+            <button type="button" class="ghost danger" :disabled="busyActive" @click="removePort(p)">Удалить</button>
+          </div>
+          <p v-if="!portList.length" class="panel-d">Пользовательских портов пока нет.</p>
+        </div>
+      </section>
+
+      <section id="sec-scopes" class="panel">
+        <div class="panel-h"><h2>Client scopes</h2><span class="chip" :class="{ on: scopeForm.enable }">{{ scopeForm.enable ? 'вкл' : 'выкл' }}</span></div>
+        <p class="panel-d">Разные стратегии для разных клиентов по mark. Локи — во вкладке «Стратегии».</p>
+        <div class="grid-2">
+          <label class="toggle"><input v-model="scopeForm.enable" type="checkbox" :disabled="busyActive"><span>Включить режим mark</span></label>
+          <label class="field"><span>mask</span><input v-model="scopeForm.mask" :disabled="busyActive"></label>
+          <label class="field"><span>shift</span><input v-model="scopeForm.shift" type="number" min="0" max="31" :disabled="busyActive"></label>
+          <label class="field"><span>max</span><input v-model="scopeForm.max" type="number" min="1" max="255" :disabled="busyActive"></label>
+        </div>
+        <div class="actions" style="margin-top:0.8rem">
+          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'scope' }" @click="saveScope">Сохранить scopes</button>
+        </div>
+      </section>
+
+      <div id="grp-svc" class="settings-group">
+        <h2>{{ settingGroups[3].title }}</h2>
+        <p>{{ settingGroups[3].desc }}</p>
+      </div>
+
+      <section id="sec-config" class="panel">
+        <div class="panel-h">
+          <h2>Конфиг zapret2</h2>
+          <button type="button" class="ghost" :disabled="busyActive" @click="loadConfig">Перечитать</button>
+        </div>
+        <p class="panel-d">Сырой файл · <code>{{ configPath || '/opt/zapret2/config' }}</code></p>
+        <textarea v-if="configLoaded" v-model="configText" class="config-editor" :disabled="busyActive" spellcheck="false"></textarea>
+        <p v-else class="loading">Загрузка конфига…</p>
+        <div class="actions" style="margin-top:0.8rem">
+          <button type="button" class="primary" :disabled="busyActive || !configLoaded" :class="{ 'is-busy': busyButton === 'cfg-save' }" @click="saveConfig">Сохранить и перезапустить</button>
+        </div>
+      </section>
+
+      <section id="sec-errors" class="panel">
+        <div class="panel-h">
+          <h2>Ошибки nfqws2</h2>
+          <button type="button" class="ghost" :disabled="busyActive" @click="loadErrors">Обновить</button>
+        </div>
+        <p class="panel-d">Последние сообщения демона nfqws2.</p>
+        <p v-if="!errors.available" class="panel-d">Журнал пуст или не найден.</p>
+        <template v-else>
+          <p class="panel-d"><code>{{ errors.path }}</code> · строк: {{ errors.lines }}</p>
+          <pre class="error-log">{{ errors.content || '(пусто)' }}</pre>
         </template>
       </section>
     </template>

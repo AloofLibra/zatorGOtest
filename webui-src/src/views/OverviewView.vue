@@ -7,29 +7,52 @@ import { refreshAll, status, statusCheck, statusCheckRan, statusLoaded, versionI
 import { fallbackSettings } from '../stores/settings'
 import { showToast } from '../stores/toast'
 
+type Metric = {
+  k: string
+  v: string
+  s?: string
+  c?: string
+  to?: string
+}
+
 const running = computed(() => Boolean(status.value?.zapret2_running))
 
-const cards = computed(() => {
+const groups = computed(() => {
   const d = status.value
-  if (!d) return []
+  if (!d) return [] as { title: string; items: Metric[] }[]
   const ver = versionInfo.value
   const scope = d.client_scope || {}
   const fb = fallbackSettings.value?.state ?? '—'
   const dns = (d.profiles || []).find((p) => p.is_dns_desync)
   return [
-    { k: 'ZatorGO', v: ver?.zator_version || '—', s: ver?.update_available ? 'есть обновление' : ver?.webui_date, c: ver?.update_available ? 'info' : '', to: '/settings#sec-updates' },
-    { k: 'zapret2', v: d.zapret2_running ? 'Запущен' : 'Остановлен', s: ver?.zapret2_version, c: d.zapret2_running ? 'ok' : 'bad' },
-    { k: 'Стратегии', v: d.strategy_locks_status || '—', to: '/strategies' },
-    { k: 'Scopes', v: scope.mode === 'mark' ? 'mark' : 'выкл', to: '/settings#sec-scopes' },
-    { k: 'Авторотация', v: d.auto_mode || '—', c: d.auto_mode === 'включен' ? 'ok' : '', to: '/settings#sec-modes' },
-    { k: 'Fallback', v: fb, c: fb === 'включен' ? 'ok' : '', to: '/settings#sec-modes' },
-    { k: 'Hostlist', v: d.hostlist_mode || '—', to: '/settings#sec-modes' },
-    { k: 'FW', v: d.fwtype || '—', to: '/settings#sec-firewall' },
-    { k: 'Offload', v: d.flowoffload || '—', to: '/settings#sec-firewall' },
-    { k: 'TLS blob', v: d.tls_blob_mode || '—', to: '/settings#sec-tls' },
-    { k: 'WireGuard', v: d.wireguard || '—', to: '/settings#sec-wg' },
-    { k: 'DNS', v: dns ? (dns.dns_desync_enabled ? 'вкл' : 'выкл') : '—', to: '/settings#sec-modes' },
-    { k: 'Провайдер', v: String(d.provider || '—').split(' - ')[0], s: String(d.provider || '').includes(' - ') ? String(d.provider).split(' - ').slice(1).join(' - ') : '', to: '/settings#sec-provider' },
+    {
+      title: 'Система',
+      items: [
+        { k: 'ZatorGO', v: ver?.zator_version || '—', s: ver?.update_available ? 'есть обновление' : ver?.webui_date, c: ver?.update_available ? 'info' : '', to: '/settings#sec-updates' },
+        { k: 'zapret2', v: d.zapret2_running ? 'Запущен' : 'Остановлен', s: ver?.zapret2_version, c: d.zapret2_running ? 'ok' : 'bad' },
+        { k: 'Провайдер', v: String(d.provider || '—').split(' - ')[0], s: String(d.provider || '').includes(' - ') ? String(d.provider).split(' - ').slice(1).join(' - ') : '', to: '/settings#sec-provider' },
+      ],
+    },
+    {
+      title: 'Обход DPI',
+      items: [
+        { k: 'Стратегии', v: d.strategy_locks_status || '—', to: '/strategies' },
+        { k: 'Авторотация', v: d.auto_mode || '—', c: d.auto_mode === 'включен' ? 'ok' : '', to: '/settings#sec-modes' },
+        { k: 'Fallback', v: fb, c: fb === 'включен' ? 'ok' : '', to: '/settings#sec-modes' },
+        { k: 'Hostlist', v: d.hostlist_mode || '—', to: '/settings#sec-modes' },
+        { k: 'TLS blob', v: d.tls_blob_mode || '—', to: '/settings#sec-tls' },
+        { k: 'WireGuard', v: d.wireguard || '—', to: '/settings#sec-wg' },
+      ],
+    },
+    {
+      title: 'Сеть',
+      items: [
+        { k: 'Firewall', v: d.fwtype || '—', to: '/settings#sec-firewall' },
+        { k: 'Offload', v: d.flowoffload || '—', to: '/settings#sec-firewall' },
+        { k: 'Scopes', v: scope.mode === 'mark' ? 'mark' : 'выкл', to: '/settings#sec-scopes' },
+        { k: 'DNS антиспуф', v: dns ? (dns.dns_desync_enabled ? 'вкл' : 'выкл') : '—', to: '/settings#sec-modes' },
+      ],
+    },
   ]
 })
 
@@ -70,7 +93,7 @@ async function check() {
     <div class="page-head">
       <div>
         <h1>Обзор</h1>
-        <p>Состояние ZatorGO и быстрый доступ ко всем параметрам обхода — без CLI.</p>
+        <p>Сводка по системе, обходу и сети. Карточки ведут в нужный раздел настроек.</p>
       </div>
       <div class="actions">
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh' }" @click="refresh">Обновить</button>
@@ -84,22 +107,26 @@ async function check() {
 
     <div v-if="!statusLoaded" class="loading">Загрузка…</div>
     <template v-else>
-      <div class="metrics">
-        <component
-          :is="c.to ? 'router-link' : 'article'"
-          v-for="c in cards"
-          :key="c.k"
-          class="metric"
-          v-bind="c.to ? { to: c.to } : {}"
-        >
-          <span class="k">{{ c.k }}</span>
-          <span class="v" :class="c.c">{{ c.v }}</span>
-          <span v-if="c.s" class="s">{{ c.s }}</span>
-        </component>
-      </div>
+      <template v-for="g in groups" :key="g.title">
+        <div class="section-label">{{ g.title }}</div>
+        <div class="metrics">
+          <component
+            :is="c.to ? 'router-link' : 'article'"
+            v-for="c in g.items"
+            :key="c.k"
+            class="metric"
+            v-bind="c.to ? { to: c.to } : {}"
+          >
+            <span class="k">{{ c.k }}</span>
+            <span class="v" :class="c.c">{{ c.v }}</span>
+            <span v-if="c.s" class="s">{{ c.s }}</span>
+          </component>
+        </div>
+      </template>
 
-      <div v-if="statusCheckRan && statusCheck" class="panel">
+      <div v-if="statusCheckRan && statusCheck" class="panel" style="margin-top:1.2rem">
         <div class="panel-h"><h2>Проверка доступности</h2></div>
+        <p class="panel-d">TLS-пробы к типовым целям. «ok» — хотя бы одна версия TLS ответила успешно.</p>
         <div class="domain-list">
           <div v-for="(r, i) in (statusCheck.results || [])" :key="i" class="domain-item">
             <div>

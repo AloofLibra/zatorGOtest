@@ -151,7 +151,7 @@ async function saveCloneSize(profile: string) {
     <div class="page-head">
       <div>
         <h1>Стратегии</h1>
-        <p>Фиксация стратегий по профилям — пункт 1 CLI. Scope клиента переключается ниже.</p>
+        <p>Зафиксируйте рабочую стратегию для каждого профиля или оставьте «Авто». Scope — если включены client marks.</p>
       </div>
       <div class="actions">
         <label class="field" style="min-width:160px">

@@ -5,7 +5,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/AloofLibra/zator"
+	"github.com/AloofLibra/zator/internal/deploy"
 	"github.com/AloofLibra/zator/internal/uiembed"
 )
 
@@ -22,9 +26,13 @@ func (a *App) Install() error {
 	if err := a.syncAssets(); err != nil {
 		return err
 	}
-	if err := a.EnsureToken(); err != nil {
-		return err
-	}
+	// Токен опционален: по умолчанию Web UI открыт без авторизации.
+	// Задайте token в zator.json и перезапустите webui, если нужна защита.
+	_ = deploy.WriteVersion(a.Paths, deploy.Version{
+		ZatorVersion: zator.Version(),
+		ZatorDate:    time.Now().UTC().Format("2006-01-02 15:04"),
+		Tracking:     "latest",
+	})
 	return a.Save()
 }
 
@@ -39,7 +47,12 @@ func (a *App) Update() error {
 	if err := a.Load(); err != nil {
 		return err
 	}
-	return a.syncAssets()
+	// Web UI по умолчанию без токена: снимаем ранее автосгенерированный.
+	a.ClearToken()
+	if err := a.syncAssets(); err != nil {
+		return err
+	}
+	return a.Save()
 }
 
 // Uninstall удаляет каталог zator целиком. Каталог zapret2 не затрагивается.
@@ -58,6 +71,8 @@ func (a *App) syncAssets() error {
 	if err := copyFS(uiembed.Lua(), a.Paths.LuaDir); err != nil {
 		return fmt.Errorf("распаковка lua: %w", err)
 	}
+	// strategy-validator.sh должен быть исполняемым (служба zator-strategy-validator).
+	_ = os.Chmod(filepath.Join(a.Paths.LuaDir, "strategy-validator.sh"), 0o755)
 	if err := copyFS(uiembed.Orchestra(), filepath.Join(a.Paths.ExtraStratsDir, "cache", "orchestra")); err != nil {
 		return fmt.Errorf("распаковка orchestra: %w", err)
 	}
@@ -110,7 +125,11 @@ func copyFSKeepExisting(src fs.FS, dst string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o644)
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(strings.ToLower(name), ".sh") {
+			mode = 0o755
+		}
+		return os.WriteFile(target, data, mode)
 	})
 }
 
@@ -164,6 +183,10 @@ func copyFS(src fs.FS, dst string) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o644)
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(strings.ToLower(name), ".sh") {
+			mode = 0o755
+		}
+		return os.WriteFile(target, data, mode)
 	})
 }

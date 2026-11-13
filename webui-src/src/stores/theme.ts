@@ -3,9 +3,15 @@ import { ref, watch } from 'vue'
 export type ThemeMode = 'auto' | 'light' | 'dark'
 
 function loadTheme(): ThemeMode {
+  try {
+    const saved = localStorage.getItem('zatorgo-theme') || localStorage.getItem('z2r-theme')
+    if (saved === 'light' || saved === 'dark' || saved === 'auto') return saved
+  } catch {
+    // ignore
+  }
   const current = document.documentElement.dataset.theme
   if (current === 'light' || current === 'dark' || current === 'auto') return current
-  return 'auto'
+  return 'light'
 }
 
 export const theme = ref<ThemeMode>(loadTheme())

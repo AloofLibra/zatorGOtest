@@ -46,6 +46,20 @@ func MatchWebUI(comm string, cmdline []string) bool {
 	return false
 }
 
+// MatchValidator выбирает strategy-validator.sh --daemon.
+func MatchValidator(comm string, cmdline []string) bool {
+	base := exeBase(comm)
+	if strings.Contains(base, "strategy-validator") {
+		return true
+	}
+	for _, a := range cmdline {
+		if strings.Contains(a, "strategy-validator") {
+			return true
+		}
+	}
+	return false
+}
+
 func exeBase(p string) string {
 	p = strings.TrimSuffix(strings.ToLower(filepath.Base(p)), ".exe")
 	return p
