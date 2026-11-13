@@ -396,6 +396,9 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		return map[string]any{"ok": true, "added": added, "duplicates": dups, "skipped": skipped}, nil
 
 	case "clear":
+		if err := s.autoGuard(d); err != nil {
+			return nil, err
+		}
 		entries := listEntries(lines)
 		if err := save(nil); err != nil {
 			return nil, err

@@ -20,26 +20,34 @@ const draft = ref<Record<string, string>>({})
 const fakeMode = ref<Record<string, string>>({})
 const tlsProfile = ref<Record<string, string>>({})
 const cloneSize = ref<Record<string, string>>({})
+const overrideDirty = ref<Record<string, boolean>>({})
 
-watch(locks, (list) => {
+function syncDraftFromLocks(list: ProfileInfo[] | undefined | null, force = false) {
+  const next: Record<string, string> = force ? {} : { ...draft.value }
   for (const p of list || []) {
     const id = String(p.profile)
-    if (draft.value[id] === undefined) {
-      draft.value[id] = p.current_lock && p.current_lock !== 'auto' ? String(p.current_lock) : ''
+    if (force || next[id] === undefined) {
+      next[id] = p.current_lock && p.current_lock !== 'auto' ? String(p.current_lock) : ''
     }
   }
-}, { immediate: true, deep: true })
+  draft.value = next
+}
 
-watch(tlsBlobSettings, (t) => {
+function syncOverridesFromSettings(force = false) {
+  const t = tlsBlobSettings.value
   if (!t) return
   for (const p of locks.value || []) {
     const id = String(p.profile)
     if (!OVERRIDE_PROFILES.has(id)) continue
+    if (!force && overrideDirty.value[id]) continue
     fakeMode.value[id] = t.profile_modes?.[id] || 'classic'
     tlsProfile.value[id] = t.profile_blobs?.[id] ?? ''
     cloneSize.value[id] = t.profile_sizes?.[id] || ''
   }
-}, { immediate: true, deep: true })
+}
+
+watch(locks, (list) => syncDraftFromLocks(list, false), { immediate: true, deep: true })
+watch(tlsBlobSettings, () => syncOverridesFromSettings(false), { immediate: true, deep: true })
 
 const scopeOptions = computed(() => scopes.value.scopes || ['default'])
 
@@ -54,7 +62,19 @@ onMounted(() => {
 function changeScope(v: string) {
   scope.value = v || 'default'
   router.replace({ query: { scope: scope.value } })
-  refreshAll().catch((e) => showToast((e as Error).message, 'error'))
+  for (const key of Object.keys(strategyChecks)) delete strategyChecks[key]
+  draft.value = {}
+  overrideDirty.value = {}
+  refreshAll()
+    .then(() => {
+      syncDraftFromLocks(locks.value, true)
+      syncOverridesFromSettings(true)
+    })
+    .catch((e) => showToast((e as Error).message, 'error'))
+}
+
+function markOverrideDirty(profile: string) {
+  overrideDirty.value[profile] = true
 }
 
 function canOverride(p: ProfileInfo) {
@@ -86,6 +106,11 @@ async function save(profile: string, p: ProfileInfo) {
   const n = Number(raw)
   if (!Number.isInteger(n) || n < 0) {
     showToast('Некорректный номер стратегии', 'error')
+    return
+  }
+  const max = Number(p.max_strategy || 0)
+  if (n !== 0 && max > 0 && n > max) {
+    showToast(`Стратегия вне диапазона (1–${max}, или 0)`, 'error')
     return
   }
   try {
@@ -150,6 +175,7 @@ async function saveFake(profile: string) {
     await withBusy(`fake-${profile}`, async () => {
       const res = await applySetting.fake_mode(profile, fakeMode.value[profile] || 'classic')
       showToast(`Режим фейков профиля ${profile}.${restartSuffix(res)}`)
+      overrideDirty.value[profile] = false
       await refreshTlsBlobSettings()
     })
   } catch (e) {
@@ -162,6 +188,7 @@ async function saveTlsProfile(profile: string) {
     await withBusy(`tlsprof-${profile}`, async () => {
       const res = await applySetting.tls_blob_profile(profile, tlsProfile.value[profile] ?? '')
       showToast(`TLS профиля ${profile}.${restartSuffix(res)}`)
+      overrideDirty.value[profile] = false
       await refreshTlsBlobSettings()
     })
   } catch (e) {
@@ -174,6 +201,7 @@ async function saveCloneSize(profile: string) {
     await withBusy(`clone-${profile}`, async () => {
       const res = await applySetting.clone_size(profile, cloneSize.value[profile] || '')
       showToast(`Лимит клона профиля ${profile}.${restartSuffix(res)}`)
+      overrideDirty.value[profile] = false
       await refreshTlsBlobSettings()
     })
   } catch (e) {
@@ -243,7 +271,8 @@ async function saveCloneSize(profile: string) {
         <div v-if="canOverride(p)" class="grid-2" style="margin-top:0.75rem">
           <label class="field">
             <span>Режим фейков</span>
-            <select v-model="fakeMode[String(p.profile)]" :disabled="busyActive">
+            <select v-model="fakeMode[String(p.profile)]" :disabled="busyActive"
+              @change="markOverrideDirty(String(p.profile))">
               <option value="classic">classic</option>
               <option value="clone">clone</option>
             </select>
@@ -254,7 +283,8 @@ async function saveCloneSize(profile: string) {
           </div>
           <label class="field">
             <span>TLS blob профиля</span>
-            <select v-model="tlsProfile[String(p.profile)]" :disabled="busyActive">
+            <select v-model="tlsProfile[String(p.profile)]" :disabled="busyActive"
+              @change="markOverrideDirty(String(p.profile))">
               <option value="">как глобальный</option>
               <option value="fake_default_tls">fake_default_tls</option>
               <option v-for="b in (tlsBlobSettings?.available_blobs || [])" :key="b" :value="b">{{ b }}</option>
@@ -266,7 +296,8 @@ async function saveCloneSize(profile: string) {
           </div>
           <label v-if="fakeMode[String(p.profile)] === 'clone'" class="field">
             <span>Лимит клона (байт, пусто = без лимита)</span>
-            <input v-model="cloneSize[String(p.profile)]" :disabled="busyActive" placeholder="1200">
+            <input v-model="cloneSize[String(p.profile)]" :disabled="busyActive" placeholder="1200"
+              @input="markOverrideDirty(String(p.profile))">
           </label>
           <div v-if="fakeMode[String(p.profile)] === 'clone'" class="actions" style="align-items:end">
             <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `clone-${p.profile}` }"

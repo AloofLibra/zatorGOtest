@@ -38,6 +38,9 @@ func (s *Server) postStrategyRegister(r *http.Request, p params) (map[string]any
 	if err := autoConflict(cfg, id); err != nil {
 		return nil, err
 	}
+	if err := profileModeGuard(cfg, id); err != nil {
+		return nil, err
+	}
 
 	var assigned int
 	err := s.editConfigs(func(c *config.Config) error {
@@ -56,11 +59,14 @@ func (s *Server) postStrategyRegister(r *http.Request, p params) (map[string]any
 	}
 
 	locked := false
+	lockWarning := ""
 	if p.Get("lock") == "1" {
 		if err := s.applyProfileLock(scopeOrDefault(p), id, orchestra.Strategy(assigned)); err != nil {
-			return nil, errf(http.StatusInternalServerError, "Не удалось зафиксировать стратегию")
+			// Стратегия уже в конфиге — не откатываем и не отдаём 500.
+			lockWarning = "Стратегия добавлена, но зафиксировать не удалось: " + err.Error()
+		} else {
+			locked = true
 		}
-		locked = true
 	}
 
 	return map[string]any{
@@ -69,8 +75,28 @@ func (s *Server) postStrategyRegister(r *http.Request, p params) (map[string]any
 		"strategy":     assigned,
 		"max_strategy": assigned,
 		"locked":       locked,
+		"warning":      lockWarning,
 		"restarted":    s.maybeRestart(r.Context(), p),
 	}, nil
+}
+
+// profileModeGuard запрещает ручные стратегии для выключенных режимов.
+func profileModeGuard(cfg *config.Config, id int) error {
+	switch id {
+	case config.ProfileFallbackT, config.ProfileFallbackH:
+		if cfg.FallbackText() != "включен" {
+			return errf(http.StatusConflict, "Сначала включите безразборный режим")
+		}
+	case config.ProfileUDPGames:
+		if cfg.UDPGamesText() != "Включен" {
+			return errf(http.StatusConflict, "Сначала включите игровой UDP")
+		}
+	case config.ProfileDNS:
+		if cfg.DNSDesyncText() != "Включен" {
+			return errf(http.StatusConflict, "Сначала включите антиспуф DNS")
+		}
+	}
+	return nil
 }
 
 func scopeOrDefault(p params) string {
@@ -143,12 +169,15 @@ func (s *Server) handleBlobUpload(w http.ResponseWriter, r *http.Request, p para
 			apply, aerr = s.postTLSBlob(r, pp)
 		}
 		if aerr != nil {
-			writeErr(w, aerr)
-			return
-		}
-		out["selected"] = true
-		if v, ok := apply["restarted"]; ok {
-			out["restarted"] = v
+			// Файл уже сохранён — не маскируем успех загрузки ошибкой select.
+			out["selected"] = false
+			out["select_error"] = aerr.Error()
+			out["warning"] = "Файл сохранён, но выбрать текущим не удалось: " + aerr.Error()
+		} else {
+			out["selected"] = true
+			if v, ok := apply["restarted"]; ok {
+				out["restarted"] = v
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

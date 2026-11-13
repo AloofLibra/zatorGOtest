@@ -6,6 +6,7 @@ import DomainsView from '../views/DomainsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import { busyActive } from '../stores/busy'
 import { statusLoaded } from '../stores/status'
+import { showToast } from '../stores/toast'
 
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -29,5 +30,13 @@ router.beforeEach(() => {
     first = false
     return true
   }
-  return !busyActive.value && statusLoaded.value
+  if (!statusLoaded.value) {
+    showToast('Дождитесь загрузки состояния', 'error')
+    return false
+  }
+  if (busyActive.value) {
+    showToast('Дождитесь завершения текущей операции', 'error')
+    return false
+  }
+  return true
 })

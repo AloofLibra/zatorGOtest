@@ -36,16 +36,17 @@ async function save(nextEnabled: boolean) {
   }
   try {
     await withBusy('client-scope-save', async () => {
-      await api('/cgi-bin/settings.cgi', formBody({
+      const res = await api<{ ok?: boolean; enabled?: boolean; warning?: string }>('/cgi-bin/settings.cgi', formBody({
         setting: 'client_scope',
         client_scope_enable: nextEnabled ? '1' : '0',
         client_scope_mark_mask: mask.value.trim(),
         client_scope_mark_shift: shift.value.trim(),
         client_scope_mark_max: max.value.trim(),
       }))
-      enabled.value = nextEnabled
-      showToast(nextEnabled ? 'Client scopes включены.' : 'Client scopes выключены.')
       await fetchAndApplyState()
+      enabled.value = res.enabled ?? nextEnabled
+      if (res.warning) showToast(res.warning, 'error')
+      else showToast(enabled.value ? 'Client scopes включены.' : 'Client scopes выключены.')
     })
   } catch (error) {
     showToast((error as Error).message, 'error')

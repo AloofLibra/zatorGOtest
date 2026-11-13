@@ -232,6 +232,11 @@ textarea { resize: vertical; min-height: 10rem; }
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .nav a.is-active strong { color: var(--accent); }
+.nav a.is-locked {
+  opacity: 0.55;
+  pointer-events: none;
+  cursor: not-allowed;
+}
 .rail-foot {
   margin-top: auto;
   display: grid;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { applySetting, registerStrategy, uploadBlob } from '../api/endpoints'
+import { gatedReason, isProfileGated } from '../gating'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { refreshTlsBlobSettings, refreshWgBlobSettings, tlsBlobSettings, wgBlobSettings } from '../stores/settings'
 import { fetchAndApplyState } from '../stores/state'
@@ -40,7 +41,16 @@ const profileOptions = computed(() =>
     id: String(p.profile),
     label: `${p.profile}. ${p.label}`,
     max: p.max_strategy,
+    gated: isProfileGated(p),
+    reason: gatedReason(p),
+    raw: p,
   })))
+
+const selectedProfile = computed(() =>
+  (locks.value || []).find((p) => String(p.profile) === profile.value) || null)
+
+const selectedGated = computed(() =>
+  selectedProfile.value ? isProfileGated(selectedProfile.value) : false)
 
 const blobHint = computed(() =>
   blobKind.value === 'wg'
@@ -68,6 +78,10 @@ async function submitStrategy() {
     showToast('Укажите строку desync', 'error')
     return
   }
+  if (selectedProfile.value && isProfileGated(selectedProfile.value)) {
+    showToast(gatedReason(selectedProfile.value), 'error')
+    return
+  }
   try {
     await withBusy('manual-strat', async () => {
       const res = await registerStrategy({
@@ -77,7 +91,11 @@ async function submitStrategy() {
         scope: scope.value,
       })
       lastStrategy.value = Number(res.strategy || 0) || null
-      showToast(`Стратегия ${res.strategy} добавлена в профиль ${profile.value}.${restartSuffix(res)}`)
+      const warn = String((res as { warning?: string }).warning || '')
+      showToast(
+        warn || `Стратегия ${res.strategy} добавлена в профиль ${profile.value}.${restartSuffix(res)}`,
+        warn ? 'error' : undefined,
+      )
       await refreshAll()
       await fetchAndApplyState()
     })
@@ -100,10 +118,15 @@ async function submitBlob() {
         file: blobFile.value!,
         select: selectAfter.value,
       })
-      showToast(`Blob ${res.name} сохранён.${restartSuffix(res)}`)
+      const warn = String((res as { warning?: string; select_error?: string }).warning
+        || (res as { select_error?: string }).select_error || '')
+      showToast(
+        warn || `Blob ${res.name} сохранён.${restartSuffix(res)}`,
+        warn ? 'error' : undefined,
+      )
       await refreshTlsBlobSettings()
       await refreshWgBlobSettings()
-      if (selectAfter.value && blobKind.value === 'tls' && !res.selected) {
+      if (selectAfter.value && blobKind.value === 'tls' && !res.selected && !warn) {
         await applySetting.tls_blob(name)
       }
     })
@@ -131,8 +154,8 @@ async function submitBlob() {
           <label class="field">
             <span>Профиль</span>
             <select v-model="profile" :disabled="busyActive">
-              <option v-for="p in profileOptions" :key="p.id" :value="p.id">
-                {{ p.label }} (max {{ p.max ?? '—' }})
+              <option v-for="p in profileOptions" :key="p.id" :value="p.id" :disabled="p.gated">
+                {{ p.label }} (max {{ p.max ?? '—' }}){{ p.gated ? ' — недоступен' : '' }}
               </option>
             </select>
           </label>
@@ -151,13 +174,17 @@ async function submitBlob() {
             placeholder="fake:blob=fake_default_tls:repeats=2 --lua-desync=multisplit:pos=1,midsld"></textarea>
         </label>
 
+        <p v-if="selectedGated" class="panel-d" style="color:var(--warn);margin-top:0.65rem">
+          {{ selectedProfile ? gatedReason(selectedProfile) : '' }}
+        </p>
+
         <label class="check-row" style="margin-top:0.65rem">
-          <input v-model="lockAfter" type="checkbox" :disabled="busyActive">
+          <input v-model="lockAfter" type="checkbox" :disabled="busyActive || selectedGated">
           <span>Сразу зафиксировать новую стратегию</span>
         </label>
 
         <div class="actions" style="margin-top:0.85rem">
-          <button type="button" class="primary" :disabled="busyActive"
+          <button type="button" class="primary" :disabled="busyActive || selectedGated"
             :class="{ 'is-busy': busyButton === 'manual-strat' }"
             @click="submitStrategy">Добавить стратегию</button>
         </div>

@@ -47,7 +47,7 @@ onMounted(() => {
           v-for="t in tabs"
           :key="t.name"
           :to="t.to"
-          :class="{ 'is-active': active === t.name, 'is-locked': busyActive && !statusLoaded }"
+          :class="{ 'is-active': active === t.name, 'is-locked': busyActive || !statusLoaded }"
         >
           <strong>{{ t.label }}</strong>
           <small>{{ t.hint }}</small>

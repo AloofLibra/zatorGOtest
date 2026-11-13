@@ -249,15 +249,21 @@ async function saveScope() {
   try {
     await withBusy('scope', async () => {
       announceRestart()
-      await api('/cgi-bin/settings.cgi', formBody({
+      const res = await api<{ ok?: boolean; enabled?: boolean; warning?: string }>('/cgi-bin/settings.cgi', formBody({
         setting: 'client_scope',
         client_scope_enable: scopeForm.enable ? '1' : '0',
         client_scope_mark_mask: scopeForm.mask,
         client_scope_mark_shift: scopeForm.shift,
         client_scope_mark_max: scopeForm.max,
       }))
-      showToast(scopeForm.enable ? 'Client scopes включены' : 'Client scopes выключены')
       await fetchAndApplyState()
+      const enabled = res.enabled ?? !!scopes.value?.enabled
+      scopeForm.enable = !!enabled
+      if (res.warning) {
+        showToast(res.warning, 'error')
+      } else {
+        showToast(enabled ? 'Client scopes включены' : 'Client scopes выключены')
+      }
     })
   } catch (e) {
     showToast((e as Error).message, 'error')

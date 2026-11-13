@@ -85,10 +85,14 @@ async function setStrategy(domain: string) {
   const raw = (strategyDraft.value[domain] || '').trim()
   try {
     await withBusy(`domain-st-${domain}`, async () => {
-      if (!raw) await domains.clear_strategy(domain)
-      else await domains.set_strategy(domain, raw)
+      if (!raw || raw === '0') {
+        await domains.clear_strategy(domain)
+        strategyDraft.value[domain] = ''
+      } else {
+        await domains.set_strategy(domain, raw)
+      }
       await refreshDomainList(active.value)
-      showToast(raw ? `Стратегия ${raw} для ${domain}` : `Стратегия снята с ${domain}`)
+      showToast((!raw || raw === '0') ? `Стратегия снята с ${domain}` : `Стратегия ${raw} для ${domain}`)
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -160,14 +164,21 @@ const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
       <form class="row" @submit.prevent="add">
         <input v-model="input" :placeholder="meta.placeholder" :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))" style="flex:1;min-width:12rem">
         <button type="submit" class="primary" :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))" :class="{ 'is-busy': busyButton === 'domain-add' }">Добавить</button>
-        <button type="button" class="ghost danger" :disabled="busyActive" @click="clearAll">Очистить</button>
+        <button type="button" class="ghost danger"
+          :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))"
+          @click="clearAll">Очистить</button>
       </form>
 
       <div class="field" style="margin-top:0.9rem">
         <span>Импорт списком</span>
-        <textarea v-model="bulk" :disabled="busyActive" rows="4" placeholder="по одному на строку"></textarea>
+        <textarea v-model="bulk"
+          :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))"
+          rows="4" placeholder="по одному на строку"></textarea>
         <div class="actions" style="margin-top:0.5rem">
-          <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'domain-import' }" @click="importList">Импортировать</button>
+          <button type="button"
+            :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))"
+            :class="{ 'is-busy': busyButton === 'domain-import' }"
+            @click="importList">Импортировать</button>
         </div>
       </div>
     </div>
@@ -179,7 +190,7 @@ const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
           <div v-if="active === 'custom_rkn'" class="row" style="margin-top:0.45rem">
             <input
               :value="strategyDraft[item.value] ?? (item.strategy != null ? String(item.strategy) : '')"
-              type="number" min="0" placeholder="стратегия"
+              type="number" min="1" placeholder="стратегия"
               :disabled="busyActive" style="max-width:7rem"
               @input="strategyDraft[item.value] = ($event.target as HTMLInputElement).value"
             >
