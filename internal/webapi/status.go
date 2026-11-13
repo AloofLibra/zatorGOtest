@@ -230,9 +230,13 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request, p params) {
 		"reasm":       section("reasm"),
 		"quic443":     section("quic443"),
 		"dns_desync":  section("dns_desync"),
-		"ports":       section("ports"),
-		"provider":    section("provider"),
-		"backups":     backups,
+		"ports":         section("ports"),
+		"provider":      section("provider"),
+		"fwtype":        section("fwtype"),
+		"flowoffload":   section("flowoffload"),
+		"client_scope":  section("client_scope"),
+		"nfqws2_errors": section("nfqws2_errors"),
+		"backups":       backups,
 	}
 	writeJSON(w, http.StatusOK, out)
 }

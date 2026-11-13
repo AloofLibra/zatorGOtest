@@ -37,9 +37,12 @@ func init() {
 		},
 		"client_scope": (*Server).postClientScope,
 		"wssize_ramp":  (*Server).postWssizeRamp,
-		"supersweep":   (*Server).postSupersweep,
-		"fwtype":       varSetting("FWTYPE", "Некорректное значение: ", "iptables", "nftables"),
-		"flowoffload":  varSetting("FLOWOFFLOAD", "Некорректное значение: ", "donttouch", "none", "software", "hardware"),
+		"supersweep":    (*Server).postSupersweep,
+		"fwtype":        varSetting("FWTYPE", "Некорректное значение: ", "iptables", "nftables"),
+		"flowoffload":   varSetting("FLOWOFFLOAD", "Некорректное значение: ", "donttouch", "none", "software", "hardware"),
+		"config_raw":    (*Server).postConfigRaw,
+		"config":        (*Server).postConfigRaw,
+		"update_apply":  (*Server).postUpdateApply,
 	}
 	for _, t := range toggles {
 		t := t

@@ -24,7 +24,7 @@ var (
 
 const (
 	blobDefault = "fake_default_tls"
-	cliHint     = " Обновите конфиг через CLI (zator update) или Web UI."
+	cliHint     = " Обновите конфиг через Web UI (Настройки → Конфиг) или zator update."
 )
 
 // normSetting приводит имя настройки к каноничному виду.
@@ -111,6 +111,10 @@ func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) 
 		return s.updateCheck(), nil
 	case "recommendations":
 		return s.recommendations(), nil
+	case "config_raw", "config":
+		return s.configRawGet(), nil
+	case "nfqws2_errors", "errors":
+		return s.nfqws2ErrorsGet(), nil
 	}
 	return s.tlsBlobGet(cfg)
 }

@@ -8,3 +8,4 @@ dist/
 *.log
 .env
 .DS_Store
+webui-src/node_modules/

@@ -223,7 +223,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 		ok, viaQuery := s.authorized(r)
 		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="zator"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="ZatorGO"`)
 			writeError(w, http.StatusUnauthorized, "Требуется авторизация")
 			return
 		}

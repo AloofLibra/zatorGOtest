@@ -1,0 +1,276 @@
+export interface ClientScopeDiagnostics {
+  mode?: string
+  mask?: number | string
+  shift?: number
+  max_scope?: number
+  scoped_lock_count?: number
+  conflicts?: number
+  last_seen_scope?: string
+  fallback_reason?: string
+}
+
+export interface ProfileInfo {
+  profile: string
+  label: string
+  description?: string
+  current_lock?: string
+  max_strategy?: number
+  is_fallback?: boolean
+  fallback_enabled?: boolean
+  is_udp_games?: boolean
+  udp_games_enabled?: boolean
+  is_dns_desync?: boolean
+  dns_desync_enabled?: boolean
+}
+
+export interface StatusPayload {
+  zapret2_running?: boolean
+  strategy_locks_status?: string
+  auto_mode?: string
+  hostlist_mode?: string
+  fwtype?: string
+  flowoffload?: string
+  tls_blob_mode?: string
+  wireguard?: string
+  rst_guard?: string
+  provider?: string
+  client_scope?: ClientScopeDiagnostics
+  profiles?: ProfileInfo[]
+}
+
+export interface ScopesPayload {
+  enabled?: boolean
+  warning?: string
+  scopes?: string[]
+}
+
+export interface CheckDetail {
+  text?: string
+  state?: string
+}
+
+export interface CheckItem {
+  label?: string
+  target?: string
+  verdict?: string
+  text?: string
+  tls12?: boolean
+  tls13?: boolean
+  tls12_detail?: CheckDetail
+  tls13_detail?: CheckDetail
+  download?: CheckDetail
+}
+
+export interface CheckPayload {
+  results?: CheckItem[]
+  message?: string
+}
+
+export interface TlsBlobSettings {
+  current_mode?: string
+  current_blob?: string
+  available_blobs?: string[]
+  // «профиль -> значение»: "" = как глобальный, fake_default_tls | файл слота
+  profile_blobs?: Record<string, string>
+  // «профиль -> режим фейков»: classic | clone (нет строки = classic)
+  profile_modes?: Record<string, string>
+  // «профиль -> SNI клона»: "" = невинный дефолт (www.google.com)
+  profile_snis?: Record<string, string>
+  // «профиль -> лимит клонов в байтах»: "" = без ограничения (граница ТСПУ 1200)
+  profile_sizes?: Record<string, string>
+}
+
+export interface WgBlobSettings {
+  current_blob?: string
+  current_repeats?: string
+  available_blobs?: string[]
+}
+
+export interface WgStateSettings {
+  enabled?: boolean
+}
+
+export interface FallbackSettings {
+  state?: string
+}
+
+export interface UdpGamesSettings {
+  enabled?: boolean
+  ports?: string
+}
+
+export interface WssizeRampSettings {
+  enabled: boolean
+  mode: 'full' | 'lite'
+  scale: number
+  googlevideo_ips: number
+  googlevideo_local_collection: 'enabled' | 'disabled' | 'unsupported'
+}
+
+export interface ModeSettingData {
+  enabled?: boolean
+  auto?: boolean
+  lua_available?: boolean
+}
+
+export interface PortInfo {
+  full?: string
+  user?: string[]
+  base?: string
+}
+
+export interface PortsSettings {
+  tcp?: PortInfo
+  udp?: PortInfo
+}
+
+export interface RecommendationProfile {
+  samples: number
+  top: { strategy: number; success_pct: number; samples: number; mode: 'classic' | 'clone' | 'mixed' }[]
+  clone_recommended: boolean
+  classic_pct: number | null
+  clone_pct: number | null
+}
+
+export interface Recommendations {
+  provider: string
+  samples: number
+  minimum: 10
+  generated_at: number
+  status: 'ready' | 'insufficient' | 'unavailable' | 'unknown_provider' | 'stale'
+  profiles: Record<string, RecommendationProfile>
+}
+
+export interface SupersweepPayload {
+  available: boolean
+  state: 'idle' | 'starting' | 'running' | 'applying' | 'done' | 'cancelled' | 'interrupted'
+  active: boolean
+  source: 'none' | 'live' | 'saved'
+  started: number
+  updated: number
+  scope: string
+  phase: string
+  completed: number
+  total: number
+  workers: {
+    name: string
+    label: string
+    profile: number
+    completed: number
+    total: number
+    ok: number
+    warn: number
+    fail: number
+    current_strategy: number | null
+    current_target: string
+    greens: string
+    warns: string
+    applied: string
+  }[]
+  applied: { kind: 'profile' | 'domain'; target: string; strategy: number }[]
+  domains: {
+    domain: string
+    best_strategy: number | null
+    verdict: 'ok' | 'warn' | 'fail'
+    applied: number | null
+  }[]
+}
+
+export interface ProviderSettings {
+  provider?: string
+}
+
+export interface BackupItem {
+  name: string
+  date?: string
+  size?: number
+}
+
+export interface BackupsPayload {
+  items?: BackupItem[]
+}
+
+export interface DomainItem {
+  value: string
+  strategy?: number
+}
+
+export interface DomainsListPayload {
+  title?: string
+  description?: string
+  items?: DomainItem[]
+  is_custom_rkn?: boolean
+  max_strategy?: number
+}
+
+export interface ApplyResult {
+  restarted?: boolean
+  restart_required?: boolean
+  added?: number
+  skipped?: string
+  name?: string
+  provider?: string
+  duplicate?: boolean
+  check?: CheckPayload
+}
+
+export interface UpdateCheckResult {
+  update_available: boolean
+  release?: string
+  latest_zator_date?: string
+  latest_webui_date?: string
+  checked_at?: string
+  error?: string
+}
+
+export interface DomainsImportResult {
+  added?: number
+  duplicates?: number
+  skipped?: number
+}
+
+export interface VersionInfo {
+  zapret2_version: string
+  zator_version: string
+  zator_date: string
+  webui_version: string
+  webui_date: string
+  tracking: string
+  update_available: boolean
+  latest_release: string
+  latest_zator_date: string
+  latest_webui_date: string
+  config_date: string
+  config_default_date: string
+  config_update_pending: boolean
+}
+
+export interface ValueSetting {
+  state?: string
+  value?: string
+}
+
+export interface StatePayload {
+  status: StatusPayload
+  version: VersionInfo
+  scopes: ScopesPayload
+  tls_blob: TlsBlobSettings
+  wg_blob: WgBlobSettings
+  wg_state: WgStateSettings
+  fallback: FallbackSettings
+  udp_games: UdpGamesSettings
+  wssize_ramp: WssizeRampSettings
+  auto_mode: ModeSettingData
+  hostlist: ModeSettingData
+  rst_guard: ModeSettingData
+  reasm: ModeSettingData
+  quic443: ModeSettingData
+  dns_desync: ModeSettingData
+  ports: PortsSettings
+  provider: ProviderSettings
+  fwtype?: ValueSetting
+  flowoffload?: ValueSetting
+  client_scope?: ScopesPayload
+  nfqws2_errors?: { available?: boolean; content?: string; path?: string; lines?: number }
+  backups: BackupsPayload
+}
