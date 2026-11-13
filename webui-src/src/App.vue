@@ -1,99 +1,64 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { busyActive } from './stores/busy'
 import { fetchAndApplyState } from './stores/state'
 import { statusLoaded } from './stores/status'
 import { showToast } from './stores/toast'
 import { theme, type ThemeMode } from './stores/theme'
-import ToastHost from './components/ui/ToastHost.vue'
-import ConfirmDialog from './components/ui/ConfirmDialog.vue'
-import SupportModal from './components/ui/SupportModal.vue'
-import Icon from './components/ui/Icon.vue'
+import ToastHost from './components/ToastHost.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const route = useRoute()
-
 const tabs = [
-  { view: 'status', label: 'Статус' },
-  { view: 'strategies', label: 'Стратегии' },
-  { view: 'domains', label: 'Домены' },
-  { view: 'settings', label: 'Настройки' },
+  { to: '/', name: 'status', label: 'Обзор' },
+  { to: '/strategies', name: 'strategies', label: 'Стратегии' },
+  { to: '/domains', name: 'domains', label: 'Домены' },
+  { to: '/settings', name: 'settings', label: 'Настройки' },
 ]
-
-const activeView = computed(() => String(route.name || 'status'))
+const active = computed(() => String(route.name || 'status'))
 const themeSelect = computed({
   get: () => theme.value,
-  set: (value: string) => { theme.value = value as ThemeMode },
+  set: (v: string) => { theme.value = v as ThemeMode },
 })
-
-const heroHidden = ref(false)
-
-// IntersectionObserver не диспатчится в части встроенных WebView —
-// опираемся на scroll + геометрию шапки: кнопка видна ровно когда hero ушёл вверх
-function checkHero() {
-  const hero = document.querySelector('header.hero')
-  heroHidden.value = hero
-    ? hero.getBoundingClientRect().bottom < 0
-    : window.scrollY > 200
-}
-
-function scrollToTop() {
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-}
 
 onMounted(() => {
-  window.addEventListener('scroll', checkHero, { passive: true })
-  window.addEventListener('resize', checkHero, { passive: true })
-  checkHero()
   fetchAndApplyState()
-    .catch((error) => showToast((error as Error).message, 'error'))
+    .catch((e) => showToast((e as Error).message, 'error'))
     .finally(() => { statusLoaded.value = true })
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('scroll', checkHero)
-  window.removeEventListener('resize', checkHero)
 })
 </script>
 
 <template>
-  <main class="app">
-    <header class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">ZatorGO</p>
-        <router-link to="/" class="brand-link" id="brand-link" role="button" tabindex="0">
-          <img class="brand-logo" :src="'/favicon.svg'" alt="" aria-hidden="true"><span class="brand-label">ZatorGO</span>
-        </router-link>
-        <p class="subtitle">Полное управление zapret2: статус, стратегии, домены и все настройки как в CLI Z2R.</p>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <div class="brand-mark">Zator<span>GO</span></div>
+        <div class="brand-sub">управление zapret2</div>
       </div>
-
-      <div class="header-controls">
-        <nav class="tabs" aria-label="Разделы">
-          <router-link v-for="tab in tabs" :key="tab.view" :to="tab.view === 'status' ? '/' : `/${tab.view}`"
-            class="tab" :class="{ 'is-active': activeView === tab.view, 'is-locked': busyActive || !statusLoaded }">
-            {{ tab.label }}
-          </router-link>
-        </nav>
-
-        <label class="theme-field" for="theme-mode">
+      <nav class="nav" aria-label="Разделы">
+        <router-link
+          v-for="t in tabs"
+          :key="t.name"
+          :to="t.to"
+          :class="{ 'is-active': active === t.name, 'is-locked': busyActive && !statusLoaded }"
+        >{{ t.label }}</router-link>
+      </nav>
+      <div class="rail-foot">
+        <label class="theme-field">
           <span>Тема</span>
-          <select id="theme-mode" v-model="themeSelect" aria-label="Тема интерфейса">
+          <select v-model="themeSelect" aria-label="Тема">
             <option value="auto">Авто</option>
             <option value="light">Светлая</option>
             <option value="dark">Тёмная</option>
           </select>
         </label>
-
-        <SupportModal />
       </div>
-    </header>
-
-    <router-view />
-
-    <button id="to-top" type="button" aria-label="Наверх" :class="{ 'is-visible': heroHidden }"
-      @click="scrollToTop"><Icon name="arrow-up" /></button>
-
+    </aside>
+    <main class="main">
+      <router-view />
+    </main>
     <ToastHost />
     <ConfirmDialog />
-  </main>
+  </div>
 </template>

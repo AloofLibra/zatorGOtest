@@ -92,6 +92,7 @@ export interface WgStateSettings {
 
 export interface FallbackSettings {
   state?: string
+  enabled?: boolean
 }
 
 export interface UdpGamesSettings {

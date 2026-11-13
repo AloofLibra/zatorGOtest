@@ -58,11 +58,6 @@ const cards = computed<CardDef[]>(() => {
   const scopeMode = scope.mode === 'mark' ? 'mark' : 'disabled'
   const scopeSub = `mask: ${scope.mask || '—'} / shift: ${scope.shift ?? 0} / max: ${scope.max_scope ?? 0} · последний scope: ${scope.last_seen_scope || 'unavailable'} · locks: ${scope.scoped_lock_count ?? 0} · conflicts: ${scope.conflicts ?? 0} · fallback: ${scope.fallback_reason || '—'}`
 
-  const scopeTarget: RouteLocationRaw | undefined =
-    scopeMode === 'mark' && scope.last_seen_scope && scope.last_seen_scope !== 'unavailable'
-      ? { path: '/strategies', query: { scope: scope.last_seen_scope } }
-      : '/strategies'
-
   const fallbackState = fallbackSettings.value?.state ?? '—'
   const dnsProfile = (data.profiles || []).find((profile) => profile.is_dns_desync)
 

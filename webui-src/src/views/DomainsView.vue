@@ -3,201 +3,178 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { domains } from '../api/endpoints'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
-import { confirmDialog } from '../stores/confirm'
 import {
-  DOMAIN_LISTS, DOMAIN_META, domainChecks, domainLists, domainsLoaded, refreshDomainList, refreshDomains,
-  type DomainListName,
+  DOMAIN_LISTS, DOMAIN_META, domainLists, domainsLoaded, refreshDomainList, refreshDomains, type DomainListName,
 } from '../stores/domains'
-import { status } from '../stores/status'
 import { showToast } from '../stores/toast'
-import DomainRow from '../components/domains/DomainRow.vue'
+import { confirmDialog } from '../stores/confirm'
 
 const route = useRoute()
 const router = useRouter()
+const input = ref('')
+const bulk = ref('')
+const strategyDraft = ref<Record<string, string>>({})
 
-const AUTO_RKN_LISTS: DomainListName[] = ['custom_rkn', 'substring']
+const labels: Record<DomainListName, string> = {
+  netrogat: 'Исключения',
+  custom_rkn: 'TCP Custom',
+  substring: 'Подстроки RKN',
+  netrogat_substring: 'Подстроки исключений',
+}
 
-const activeList = computed<DomainListName>(() => {
-  const value = route.params.list as string | undefined
-  return (DOMAIN_LISTS as readonly string[]).includes(value || '') ? value as DomainListName : 'netrogat'
+const active = computed<DomainListName>(() => {
+  const p = String(route.params.list || 'netrogat')
+  return (DOMAIN_LISTS as readonly string[]).includes(p) ? p as DomainListName : 'netrogat'
 })
+const list = computed(() => domainLists[active.value])
+const meta = computed(() => DOMAIN_META[active.value])
 
-const subtabs = [
-  { name: 'netrogat', label: 'Исключения' },
-  { name: 'custom_rkn', label: 'TCP_Custom' },
-  { name: 'substring', label: 'Подстроки' },
-  { name: 'netrogat_substring', label: 'Подстроки исключений' },
-]
-
-const listData = computed(() => domainLists[activeList.value])
-const meta = computed(() => DOMAIN_META[activeList.value])
-const items = computed(() => Array.isArray(listData.value?.items) ? listData.value?.items || [] : [])
-const autoBlocked = computed(() =>
-  AUTO_RKN_LISTS.includes(activeList.value) && status.value?.hostlist_mode === 'авто')
-
-const addValue = ref('')
-const domainAddInput = ref<HTMLInputElement | null>(null)
-const importText = ref('')
-
-// один раз при первом заходе; повторные переходы берут списки из стора
 onMounted(() => {
   if (!domainsLoaded.value) refreshDomains()
 })
-
-watch(activeList, () => {
-  addValue.value = ''
+watch(active, (name) => {
+  if (!domainLists[name]) refreshDomainList(name)
 })
 
-async function refresh() {
+function go(name: DomainListName) {
+  router.push(`/domains/${name}`)
+}
+
+async function add() {
+  const d = input.value.trim()
+  if (!d) return
   try {
-    await withBusy('refresh-domains', refreshDomains)
-  } catch (error) {
-    showToast((error as Error).message, 'error')
+    await withBusy('domain-add', async () => {
+      await domains.add(active.value, d)
+      input.value = ''
+      await refreshDomainList(active.value)
+    })
+    showToast('Добавлено')
+  } catch (e) {
+    showToast((e as Error).message, 'error')
   }
 }
 
-async function addDomain() {
-  const value = addValue.value.trim()
-  if (!value) return
+async function remove(domain: string) {
   try {
-    await withBusy('domain-add', async () => {
-      const payload = await domains.add(activeList.value, value)
-      // Поле очищается при любом завершённом результате (в т.ч. «уже есть»),
-      // при ошибке текст остаётся для повторной попытки.
-      addValue.value = ''
-      domainAddInput.value?.focus()
-      if (payload?.duplicate) showToast('Уже есть в списке.')
-      else showToast('Добавлено.')
-      await refreshDomainList(activeList.value)
-      const label = payload?.check?.results?.[0]?.label
-      if (label) domainChecks[label] = payload?.check || { results: [] }
+    await withBusy('domain-rm', async () => {
+      await domains.remove(active.value, domain)
+      await refreshDomainList(active.value)
     })
-  } catch (error) {
-    showToast((error as Error).message, 'error')
+  } catch (e) {
+    showToast((e as Error).message, 'error')
   }
 }
 
 async function importList() {
-  if (!importText.value.trim()) {
-    showToast('Список для импорта пуст.', 'warning')
-    return
-  }
+  if (!bulk.value.trim()) return
   try {
     await withBusy('domain-import', async () => {
-      const payload = await domains.import(activeList.value, importText.value)
-      showToast(`Импорт: добавлено ${payload?.added ?? 0}, дубли ${payload?.duplicates ?? 0}, пропущено ${payload?.skipped ?? 0}.`)
-      importText.value = ''
-      await refreshDomainList(activeList.value)
+      const res = await domains.import(active.value, bulk.value)
+      bulk.value = ''
+      await refreshDomainList(active.value)
+      showToast(`Импорт: +${res.added || 0}`)
     })
-  } catch (error) {
-    showToast((error as Error).message, 'error')
+  } catch (e) {
+    showToast((e as Error).message, 'error')
   }
 }
 
-async function clearList() {
-  const confirmed = await confirmDialog({
-    title: 'Очистить весь список?',
-    message: 'Все записи будут удалены безвозвратно.',
-    confirmText: 'Очистить',
-    cancelText: 'Отмена',
+async function setStrategy(domain: string) {
+  const raw = (strategyDraft.value[domain] || '').trim()
+  try {
+    await withBusy(`domain-st-${domain}`, async () => {
+      if (!raw) await domains.clear_strategy(domain)
+      else await domains.set_strategy(domain, raw)
+      await refreshDomainList(active.value)
+      showToast(raw ? `Стратегия ${raw} для ${domain}` : `Стратегия снята с ${domain}`)
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function clearAll() {
+  const ok = await confirmDialog({
+    title: 'Очистить список?',
+    message: 'Все записи будут удалены.',
     danger: true,
   })
-  if (!confirmed) return
+  if (!ok) return
   try {
     await withBusy('domain-clear', async () => {
-      await domains.clear(activeList.value)
-      showToast('Список очищен.')
-      await refreshDomainList(activeList.value)
+      await domains.clear(active.value)
+      await refreshDomainList(active.value)
     })
-  } catch (error) {
-    showToast((error as Error).message, 'error')
-  }
-}
-
-async function copyList() {
-  const values = items.value.map((item) => item.value)
-  if (!values.length) {
-    showToast('Список пуст, нечего копировать.', 'warning')
-    return
-  }
-  const text = values.join('\n')
-  try {
-    await withBusy('domain-copy', async () => {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text)
-      } else {
-        const field = document.createElement('textarea')
-        field.value = text
-        field.style.position = 'fixed'
-        field.style.opacity = '0'
-        document.body.appendChild(field)
-        field.select()
-        document.execCommand('copy')
-        field.remove()
-      }
-      showToast(`Скопировано ${values.length} ${values.length === 1 ? 'запись' : 'записей'}.`)
-    })
-  } catch (error) {
-    showToast((error as Error).message, 'error')
+    showToast('Список очищен')
+  } catch (e) {
+    showToast((e as Error).message, 'error')
   }
 }
 </script>
 
 <template>
-  <section class="view is-active" id="view-domains" :class="{ 'is-loading': !domainsLoaded }">
-    <div class="actions">
-      <nav class="subtabs" aria-label="Списки доменов">
-        <button v-for="sub in subtabs" :key="sub.name" class="subtab"
-          :class="{ 'is-active': activeList === sub.name, 'is-locked': busyActive }" type="button"
-          @click="router.push(`/domains/${sub.name}`)">{{ sub.label }}</button>
-      </nav>
-      <button id="refresh-domains" :class="{ 'is-busy': busyButton === 'refresh-domains' }" :disabled="busyActive"
-        type="button" @click="refresh">Обновить</button>
+  <section>
+    <div class="page-head">
+      <div>
+        <h1>Домены</h1>
+        <p>Списки обхода и исключений — пункт 6 CLI.</p>
+      </div>
+      <div class="actions">
+        <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'domains-refresh' }"
+          @click="withBusy('domains-refresh', refreshDomains)">Обновить</button>
+      </div>
     </div>
 
-    <div v-if="!domainsLoaded" class="status-loading" aria-live="polite">Пожалуйста подождите, загружаю списки доменов...</div>
+    <div class="subtabs">
+      <button v-for="name in DOMAIN_LISTS" :key="name" type="button"
+        :class="{ 'is-active': active === name }" :disabled="busyActive" @click="go(name)">
+        {{ labels[name] }}
+      </button>
+    </div>
 
-    <section v-else class="panel" id="domains-panel">
-      <div class="panel-header">
-        <h2 id="domains-title">{{ listData?.title || activeList }}</h2>
-        <span class="chip" :class="{ 'is-ok': items.length > 0 }" id="domains-count">{{ items.length }}</span>
+    <div class="panel">
+      <div class="panel-h">
+        <h2>{{ list?.title || labels[active] }}</h2>
+        <span class="chip">{{ list?.items?.length ?? 0 }}</span>
       </div>
-      <p class="panel-desc" id="domains-desc">{{ listData?.description || '' }}</p>
+      <p class="panel-d">{{ list?.description || meta.addLabel }}</p>
 
-      <form id="domain-add-form" class="settings-form" @submit.prevent="addDomain">
-        <label>
-          <span id="domain-add-label">{{ meta.addLabel }}</span>
-          <input type="text" id="domain-add-input" ref="domainAddInput" v-model="addValue"
-            :disabled="autoBlocked || busyActive" required :placeholder="meta.placeholder">
-        </label>
-        <div class="card-actions">
-          <button type="submit" class="primary" id="domain-add-submit" :disabled="autoBlocked || busyActive">Добавить</button>
-        </div>
+      <form class="row" @submit.prevent="add">
+        <input v-model="input" :placeholder="meta.placeholder" :disabled="busyActive" style="flex:1;min-width:12rem">
+        <button type="submit" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'domain-add' }">Добавить</button>
+        <button type="button" class="ghost danger" :disabled="busyActive" @click="clearAll">Очистить</button>
       </form>
 
-      <div class="settings-alert" id="domains-auto-alert" :hidden="!autoBlocked">
-        Автосбор списков включён: домены RKN zapret2 определяет автоматически, ручное добавление отключено.
-        Выключите автосбор в настройках («Фильтрация по спискам»), чтобы пополнять список вручную. Удаление доступно.
-      </div>
-
-      <details class="import-block">
-        <summary>Импорт списка</summary>
-        <textarea id="domain-import-input" v-model="importText" rows="6" :disabled="autoBlocked || busyActive"
-          placeholder="по одному домену на строку"></textarea>
-        <div class="card-actions">
-          <button type="button" id="domain-import-btn" :disabled="autoBlocked || busyActive" @click="importList">Импортировать</button>
+      <div class="field" style="margin-top:0.9rem">
+        <span>Импорт списком</span>
+        <textarea v-model="bulk" :disabled="busyActive" rows="4" placeholder="по одному на строку"></textarea>
+        <div class="actions" style="margin-top:0.5rem">
+          <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'domain-import' }" @click="importList">Импортировать</button>
         </div>
-      </details>
-
-      <div class="card-actions domain-toolbar">
-        <button type="button" class="ghost" id="domain-copy-btn" :disabled="busyActive" @click="copyList">Копировать всё</button>
-        <button type="button" class="ghost danger" id="domain-clear-btn" :disabled="busyActive" @click="clearList">Очистить всё</button>
       </div>
+    </div>
 
-      <div class="domain-empty" id="domains-empty" :hidden="items.length > 0">Список пуст.</div>
-      <ul class="domain-list" id="domain-items">
-        <DomainRow v-for="item in items" :key="item.value" :item="item" :list="activeList" />
-      </ul>
-    </section>
+    <div class="domain-list">
+      <div v-for="item in (list?.items || [])" :key="item.value" class="domain-item">
+        <div>
+          <code>{{ item.value }}</code>
+          <div v-if="active === 'custom_rkn'" class="row" style="margin-top:0.45rem">
+            <input
+              :value="strategyDraft[item.value] ?? (item.strategy != null ? String(item.strategy) : '')"
+              type="number" min="0" placeholder="стратегия"
+              :disabled="busyActive" style="max-width:7rem"
+              @input="strategyDraft[item.value] = ($event.target as HTMLInputElement).value"
+            >
+            <button type="button" :disabled="busyActive"
+              :class="{ 'is-busy': busyButton === `domain-st-${item.value}` }"
+              @click="setStrategy(item.value)">Стратегия</button>
+          </div>
+        </div>
+        <button type="button" class="ghost danger" :disabled="busyActive"
+          @click="remove(item.value)">Удалить</button>
+      </div>
+      <p v-if="domainsLoaded && !(list?.items || []).length" class="panel-d">Список пуст.</p>
+    </div>
   </section>
 </template>

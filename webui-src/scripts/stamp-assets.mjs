@@ -12,7 +12,9 @@ let html = readFileSync(path.join(webuiDir, 'index.html'), 'utf8')
 
 // classic-скрипт обязан идти в конец body: app.js монтируется синхронно в #app
 html = html.replace(/<script[^>]*src="[^"]*app\.js[^"]*"[^>]*><\/script>\s*/g, '')
-html = html.replace(/<link[^>]*rel="stylesheet"[^>]*>\s*/g, '')
+// только локальный styles.css (не трогаем Google Fonts и прочие внешние CSS)
+html = html.replace(/<link[^>]*rel="stylesheet"[^>]*href="\.?\/?styles\.css[^"]*"[^>]*>\s*/gi, '')
+html = html.replace(/<link[^>]*href="\.?\/?styles\.css[^"]*"[^>]*rel="stylesheet"[^>]*>\s*/gi, '')
 html = html.replace('</head>', `  <link rel="stylesheet" href="styles.css?v=${digest('styles.css')}">\n</head>`)
 html = html.replace('</body>', `  <script src="app.js?v=${digest('app.js')}"></script>\n</body>`)
 html = html.replace(/(<link[^>]*href=")favicon\.svg([^"]*")/,

@@ -1,5 +1,6 @@
 bin/
 dist/
+.gotmp/
 *.exe
 *.test
 *.out
