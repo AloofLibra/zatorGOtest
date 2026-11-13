@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import OverviewView from '../views/OverviewView.vue'
 import StrategiesView from '../views/StrategiesView.vue'
+import ManualAddView from '../views/ManualAddView.vue'
 import DomainsView from '../views/DomainsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import { busyActive } from '../stores/busy'
@@ -11,6 +12,7 @@ export const router = createRouter({
   routes: [
     { path: '/', name: 'status', component: OverviewView },
     { path: '/strategies', name: 'strategies', component: StrategiesView },
+    { path: '/manual', name: 'manual', component: ManualAddView },
     { path: '/domains/:list?', name: 'domains', component: DomainsView },
     { path: '/settings/:panel?', name: 'settings', component: SettingsView },
     { path: '/:pathMatch(.*)*', redirect: '/' },

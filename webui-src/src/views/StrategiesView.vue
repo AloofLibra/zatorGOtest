@@ -187,7 +187,7 @@ async function saveCloneSize(profile: string) {
     <div class="page-head">
       <div>
         <h1>Стратегии</h1>
-        <p>Зафиксируйте рабочую стратегию для каждого профиля или оставьте «Авто». Scope — если включены client marks.</p>
+        <p>Локи рабочих стратегий по профилям. Новые тестовые desync и blob — во вкладке «Вручную».</p>
       </div>
       <div class="actions">
         <label class="field" style="min-width:160px">
@@ -197,19 +197,14 @@ async function saveCloneSize(profile: string) {
           </select>
         </label>
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh-locks' }" @click="refresh">Обновить</button>
+        <router-link class="ghost btn-link" to="/manual">Вручную</router-link>
         <button type="button" class="ghost" @click="focusSupersweep">К суперсвипу</button>
       </div>
     </div>
 
     <p v-if="scopes.warning" class="panel-d" style="color:var(--warn)">{{ scopes.warning }}</p>
 
-    <SupersweepPanel
-      :scope="scope"
-      :scopes="scopeOptions"
-      @started="refresh"
-      @cancelled="refresh"
-    />
-
+    <h2 class="section-title">Локи профилей</h2>
     <div v-if="!statusLoaded" class="loading">Загрузка…</div>
     <div v-else class="strategy-grid">
       <article v-for="p in locks" :key="p.profile" class="strategy" :class="{ 'is-gated': gated(p) }">
@@ -280,5 +275,13 @@ async function saveCloneSize(profile: string) {
         </div>
       </article>
     </div>
+
+    <h2 class="section-title" style="margin-top:1.5rem">Суперсвип</h2>
+    <SupersweepPanel
+      :scope="scope"
+      :scopes="scopeOptions"
+      @started="refresh"
+      @cancelled="refresh"
+    />
   </section>
 </template>

@@ -38,9 +38,10 @@ func init() {
 		"supersweep":    (*Server).postSupersweep,
 		"fwtype":        varSetting("FWTYPE", "Некорректное значение: ", "iptables", "nftables"),
 		"flowoffload":   varSetting("FLOWOFFLOAD", "Некорректное значение: ", "donttouch", "none", "software", "hardware"),
-		"config_raw":    (*Server).postConfigRaw,
-		"config":        (*Server).postConfigRaw,
-		"update_apply":  (*Server).postUpdateApply,
+		"config_raw":         (*Server).postConfigRaw,
+		"config":             (*Server).postConfigRaw,
+		"update_apply":       (*Server).postUpdateApply,
+		"strategy_register":  (*Server).postStrategyRegister,
 	}
 	for _, t := range toggles {
 		t := t

@@ -74,6 +74,46 @@ export const fetchSetting = {
   wssize_ramp: () => api<WssizeRampSettings>('/cgi-bin/settings.cgi?setting=wssize_ramp'),
 }
 
+export const registerStrategy = (opts: {
+  profile: string
+  desync: string
+  lock?: boolean
+  scope?: string
+  restart?: boolean
+}) =>
+  api<ApplyResult & { strategy?: number; max_strategy?: number; locked?: boolean; profile?: number }>(
+    '/cgi-bin/settings.cgi',
+    formBody({
+      setting: 'strategy_register',
+      profile: opts.profile,
+      desync: opts.desync,
+      lock: opts.lock ? '1' : '0',
+      scope: opts.scope || 'default',
+      restart: opts.restart === false ? '0' : '1',
+    }))
+
+export const uploadBlob = async (opts: {
+  kind: 'tls' | 'wg'
+  name: string
+  file: Blob
+  select?: boolean
+  restart?: boolean
+}) => {
+  const q = new URLSearchParams({
+    kind: opts.kind,
+    name: opts.name,
+  })
+  if (opts.select) q.set('select', '1')
+  if (opts.restart === false) q.set('restart', '0')
+  return api<ApplyResult & { name?: string; kind?: string; available_blobs?: string[]; selected?: boolean }>(
+    `/cgi-bin/blob-upload.cgi?${q}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: opts.file,
+    })
+}
+
 export const applySetting = {
   tls_blob: (value: string) =>
     api<ApplyResult>('/cgi-bin/settings.cgi', formBody({ setting: 'tls_blob', value })),

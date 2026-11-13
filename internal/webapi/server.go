@@ -194,7 +194,8 @@ var endpoints = map[string]endpoint{
 	"domains":    (*Server).handleDomains,
 	"backups":    (*Server).handleBackups,
 	"scopes":     (*Server).handleScopes,
-	"settings":   (*Server).handleSettings,
+	"settings":     (*Server).handleSettings,
+	"blob-upload":  (*Server).handleBlobUpload,
 }
 
 // Handler возвращает корневой http.Handler (авторизация + API + статика).
@@ -319,7 +320,9 @@ func (p params) Raw(key string) string { return url.Values(p).Get(key) }
 
 func parseParams(w http.ResponseWriter, r *http.Request) (params, error) {
 	q := r.URL.Query()
-	upload := q.Get("action") == "upload"
+	upload := q.Get("action") == "upload" ||
+		strings.HasSuffix(r.URL.Path, "blob-upload.cgi") ||
+		strings.HasSuffix(r.URL.Path, "/blob-upload")
 	if r.Method == http.MethodPost && !upload && r.Body != nil {
 		r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 		if err := r.ParseForm(); err != nil {

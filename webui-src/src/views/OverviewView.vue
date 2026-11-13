@@ -38,6 +38,7 @@ const groups = computed(() => {
       title: 'Обход DPI',
       items: [
         { k: 'Стратегии', v: d.strategy_locks_status || '—', to: '/strategies' },
+        { k: 'Вручную', v: 'тест', s: 'свои desync / blob', to: '/manual' },
         { k: 'Авторотация', v: d.auto_mode || '—', c: d.auto_mode === 'включен' ? 'ok' : '', to: '/settings/modes' },
         { k: 'Fallback', v: fb, c: fb === 'включен' ? 'ok' : '', to: '/settings/modes' },
         { k: 'Hostlist', v: d.hostlist_mode || '—', to: '/settings/modes' },
