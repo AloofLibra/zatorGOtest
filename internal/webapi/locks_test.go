@@ -26,10 +26,13 @@ func TestStatusShape(t *testing.T) {
 	resp, st := e.get("/cgi-bin/status.cgi")
 	wantStatus(t, resp, http.StatusOK)
 	for _, k := range []string{"zapret2_running", "strategy_locks_status", "hostlist_mode", "fwtype", "flowoffload",
-		"tls_blob_mode", "wireguard", "auto_mode", "rst_guard", "reasm", "quic443", "provider", "profiles"} {
+		"tls_blob_mode", "wireguard", "auto_mode", "rst_guard", "reasm", "quic443", "provider", "client_scope", "profiles"} {
 		if _, ok := st[k]; !ok {
 			t.Errorf("нет поля %s", k)
 		}
+	}
+	if cs, ok := st["client_scope"].(map[string]any); !ok || cs["mode"] == nil {
+		t.Errorf("client_scope = %v", st["client_scope"])
 	}
 	if st["strategy_locks_status"] != "Нет" || st["fwtype"] != "iptables" || st["auto_mode"] != "выключен" {
 		t.Errorf("status = %v", st)

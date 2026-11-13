@@ -84,13 +84,14 @@ async function save() {
   try {
     // Ключ с номером профиля: спиннер крутится только на карточке,
     // где нажали (busyActive всё равно блокирует остальные кнопки).
-    await withBusy(`save-${props.profile.profile}`, async () => {
-      await setLock(props.profile.profile, value, scope.value)
-      delete strategyChecks[props.profile.profile]
+    const profileId = String(props.profile.profile)
+    await withBusy(`save-${profileId}`, async () => {
+      await setLock(profileId, value, scope.value)
+      delete strategyChecks[profileId]
       await refreshAll()
       if (value !== 0) {
         try {
-          strategyChecks[props.profile.profile] = await profileCheck(props.profile.profile, scope.value)
+          strategyChecks[profileId] = await profileCheck(profileId, scope.value)
         } catch {
           // проверка необязательна: стратегия уже применена
         }
@@ -110,9 +111,10 @@ async function clearLockAction() {
     return
   }
   try {
-    await withBusy(`clear-${props.profile.profile}`, async () => {
-      await clearLock(props.profile.profile, scope.value)
-      delete strategyChecks[props.profile.profile]
+    const profileId = String(props.profile.profile)
+    await withBusy(`clear-${profileId}`, async () => {
+      await clearLock(profileId, scope.value)
+      delete strategyChecks[profileId]
       await refreshAll()
     })
     showToast(`Lock снят для ${props.profile.label}.`)

@@ -96,7 +96,13 @@ watch(provider, (p) => {
 }, { immediate: true })
 
 const scopeForm = reactive({ enable: false, mask: '0xff00', shift: '8', max: '255' })
-watch(scopes, (s) => { scopeForm.enable = !!s?.enabled }, { immediate: true })
+watch(scopes, (s) => {
+  if (!s) return
+  scopeForm.enable = !!s.enabled
+  if (s.mask != null && String(s.mask) !== '') scopeForm.mask = String(s.mask)
+  if (s.shift != null) scopeForm.shift = String(s.shift)
+  if (s.max_scope != null) scopeForm.max = String(s.max_scope)
+}, { immediate: true })
 
 const configText = ref('')
 const configPath = ref('')
@@ -412,6 +418,30 @@ async function deleteBackup(name: string) {
   }
 }
 
+async function restoreBackup(name: string) {
+  const ok = await confirmDialog({
+    title: 'Восстановить бэкап?',
+    message: [
+      `Архив: ${name}`,
+      'Будут восстановлены конфиг, списки доменов и локи стратегий.',
+      'zapret2 будет перезапущен.',
+    ],
+    danger: true,
+    confirmText: 'Восстановить',
+  })
+  if (!ok) return
+  try {
+    await withBusy('bak-restore', async () => {
+      announceRestart()
+      const res = await backupsApi.restore(name, 'full')
+      showToast(`Восстановлено файлов: ${res.files ?? 0}.${restartSuffix(res)}`)
+      await fetchAndApplyState()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
 function scrollToPanel() {
   const panel = route.params.panel || (route.hash || '').replace('#', '')
   if (!panel) return
@@ -500,6 +530,9 @@ onMounted(() => {
             <div class="row">
               <a class="ghost" style="padding:0.5rem 0.8rem;border:1px solid var(--line);border-radius:10px"
                 :href="backupsApi.downloadUrl(b.name)">Скачать</a>
+              <button type="button" class="primary" :disabled="busyActive"
+                :class="{ 'is-busy': busyButton === 'bak-restore' }"
+                @click="restoreBackup(b.name)">Восстановить</button>
               <button type="button" class="ghost danger" :disabled="busyActive" @click="deleteBackup(b.name)">Удалить</button>
             </div>
           </div>

@@ -142,6 +142,7 @@ func (s *Server) statusPayload(ctx context.Context, scope string) map[string]any
 		"reasm":                 cfg.ReasmText(),
 		"quic443":               cfg.QUIC443Text(),
 		"provider":              s.providerText(),
+		"client_scope":          s.clientScopeDiag(cfg),
 		"profiles":              profiles,
 	}
 }
@@ -278,23 +279,73 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request, p params) {
 
 // --- scopes.cgi ---
 
+func (s *Server) clientScopeDiag(cfg *config.Config) map[string]any {
+	enabled := cfg.ClientScopeText() == "включен"
+	out := map[string]any{
+		"mode":              "off",
+		"mask":              cfg.GetDefault("CLIENT_SCOPE_MARK_MASK", "0xff00"),
+		"shift":             atoiDefault(cfg.GetDefault("CLIENT_SCOPE_MARK_SHIFT", "8"), 8),
+		"max_scope":         atoiDefault(cfg.GetDefault("CLIENT_SCOPE_MARK_MAX", "255"), 255),
+		"scoped_lock_count": 0,
+		"conflicts":         0,
+		"last_seen_scope":   "",
+		"fallback_reason":   "",
+	}
+	if enabled {
+		out["mode"] = "mark"
+	}
+	if cc, err := firewall.ClientScopeConfigFromGetter(cfg.Get, s.paths.ZatorRoot); err == nil {
+		if cc.Mask != 0 {
+			out["mask"] = firewall.FormatMark(cc.Mask)
+		}
+		out["shift"] = int(cc.Shift)
+		out["max_scope"] = int(cc.Max)
+		if err := cc.Validate(); err != nil && enabled {
+			out["fallback_reason"] = err.Error()
+		}
+	}
+	if scopes, err := s.store.ListScopes(); err == nil {
+		n := 0
+		for _, sc := range scopes {
+			if sc != orchestra.ScopeDefault {
+				n++
+			}
+		}
+		out["scoped_lock_count"] = n
+	}
+	return out
+}
+
+func atoiDefault(s string, def int) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return def
+	}
+	return n
+}
+
 func (s *Server) scopesPayload(cfg *config.Config) map[string]any {
+	diag := s.clientScopeDiag(cfg)
 	enabled := cfg.ClientScopeText() == "включен"
 	warning := ""
 	if enabled {
-		cc, err := firewall.ClientScopeConfigFromGetter(cfg.Get, s.paths.ZatorRoot)
-		if err == nil {
-			err = cc.Validate()
-		}
-		if err != nil {
-			warning = err.Error()
+		if reason, _ := diag["fallback_reason"].(string); reason != "" {
+			warning = reason
 		}
 	}
 	scopes, err := s.store.ListScopes()
 	if err != nil || len(scopes) == 0 {
 		scopes = []string{orchestra.ScopeDefault}
 	}
-	return map[string]any{"enabled": enabled, "warning": warning, "scopes": scopes}
+	return map[string]any{
+		"enabled":   enabled,
+		"warning":   warning,
+		"scopes":    scopes,
+		"mask":      diag["mask"],
+		"shift":     diag["shift"],
+		"max_scope": diag["max_scope"],
+		"mode":      diag["mode"],
+	}
 }
 
 // GET /cgi-bin/scopes.cgi

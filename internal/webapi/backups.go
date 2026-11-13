@@ -9,12 +9,15 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/AloofLibra/zator/internal/backup"
+	"github.com/AloofLibra/zator/internal/fetch"
 	"github.com/AloofLibra/zator/internal/fsutil"
 )
 
@@ -250,10 +253,198 @@ func (s *Server) handleBackups(w http.ResponseWriter, r *http.Request, p params)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": name})
+	case "restore":
+		name := p.Get("name")
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "Не указано имя файла")
+			return
+		}
+		path, ok := s.resolveBackup(name)
+		if !ok {
+			writeError(w, http.StatusNotFound, "Бэкап не найден")
+			return
+		}
+		mode := strings.ToLower(strings.TrimSpace(p.Get("mode")))
+		if mode == "" {
+			mode = "smart"
+		}
+		n, err := s.restoreBackup(path, mode)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Не удалось восстановить бэкап: "+err.Error())
+			return
+		}
+		restarted := s.maybeRestart(r.Context(), p)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "name": name, "mode": mode, "files": n, "restarted": restarted,
+		})
 	case "upload":
 		s.backupUpload(w, r, p.Get("name"))
 	default:
 		writeError(w, http.StatusBadRequest, "Неизвестное действие")
+	}
+}
+
+// restoreBackup восстанавливает архив Web UI (config/lists/extra_strats/orchestra_state)
+// или формат internal/backup (config/lists/orchestra). mode: full|smart|lists.
+func (s *Server) restoreBackup(archivePath, mode string) (int, error) {
+	switch mode {
+	case "full", "smart", "lists":
+	default:
+		return 0, fmt.Errorf("неизвестный режим: %s", mode)
+	}
+	layout, err := detectBackupLayout(archivePath)
+	if err != nil {
+		return 0, err
+	}
+	if layout == "manager" {
+		mgr := backup.NewIn(s.paths, s.paths.BackupDir)
+		bm, err := backup.ParseMode(mode)
+		if err != nil {
+			return 0, err
+		}
+		res, err := mgr.RestoreFile(archivePath, backup.RestoreOptions{Mode: bm})
+		if err != nil {
+			return 0, err
+		}
+		return len(res.Files), nil
+	}
+	tmp, err := os.MkdirTemp("", "zator-restore-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(tmp)
+	if err := extractPlainTar(archivePath, tmp); err != nil {
+		return 0, err
+	}
+	count := 0
+	err = filepath.WalkDir(tmp, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		rel, err := filepath.Rel(tmp, p)
+		if err != nil {
+			return err
+		}
+		clean, err := fetch.CleanEntryName(filepath.ToSlash(rel))
+		if err != nil {
+			return err
+		}
+		dst := s.restoreDest(clean, mode)
+		if dst == "" {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := fsutil.AtomicWriteFile(dst, data, 0o644); err != nil {
+			return err
+		}
+		count++
+		return nil
+	})
+	return count, err
+}
+
+// detectBackupLayout: "manager" (orchestra/|lists/ без orchestra_state) или "webui".
+func detectBackupLayout(archivePath string) (string, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	tr := tar.NewReader(f)
+	webui, manager := false, false
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		n := strings.TrimPrefix(filepath.ToSlash(hdr.Name), "./")
+		switch {
+		case strings.HasPrefix(n, "orchestra_state/") || strings.HasPrefix(n, "extra_strats/"):
+			webui = true
+		case strings.HasPrefix(n, "orchestra/") || n == "lists/TCP_Custom.txt":
+			manager = true
+		}
+	}
+	if webui {
+		return "webui", nil
+	}
+	if manager {
+		return "manager", nil
+	}
+	return "webui", nil
+}
+
+func (s *Server) restoreDest(name, mode string) string {
+	name = path.Clean(name)
+	switch {
+	case name == "config":
+		// smart/lists в webui-раскладке не затирают живой config.
+		if mode == "lists" || mode == "smart" {
+			return ""
+		}
+		return s.paths.ZapretConfig
+	case strings.HasPrefix(name, "lists/"):
+		return filepath.Join(s.paths.ListsDir, filepath.FromSlash(strings.TrimPrefix(name, "lists/")))
+	case strings.HasPrefix(name, "extra_strats/"):
+		return filepath.Join(s.paths.ExtraStratsDir, filepath.FromSlash(strings.TrimPrefix(name, "extra_strats/")))
+	case strings.HasPrefix(name, "orchestra_state/"):
+		return filepath.Join(s.paths.StateOrchestraDir(), filepath.FromSlash(strings.TrimPrefix(name, "orchestra_state/")))
+	case strings.HasPrefix(name, "orchestra/"):
+		return filepath.Join(s.paths.StateOrchestraDir(), filepath.FromSlash(strings.TrimPrefix(name, "orchestra/")))
+	}
+	return ""
+}
+
+func extractPlainTar(archive, dest string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		name, err := fetch.CleanEntryName(hdr.Name)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dest, filepath.FromSlash(name))
+		if hdr.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(out, tr)
+		closeErr := out.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
 	}
 }
 

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { serviceAction, runCheck } from '../api/endpoints'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { fetchAndApplyState } from '../stores/state'
-import { refreshAll, status, statusCheck, statusCheckRan, statusLoaded, versionInfo } from '../stores/status'
+import { refreshAll, scopes, status, statusCheck, statusCheckRan, statusLoaded, versionInfo } from '../stores/status'
 import { fallbackSettings } from '../stores/settings'
 import { showToast } from '../stores/toast'
 
@@ -21,7 +21,8 @@ const groups = computed(() => {
   const d = status.value
   if (!d) return [] as { title: string; items: Metric[] }[]
   const ver = versionInfo.value
-  const scope = d.client_scope || {}
+  const scope = d.client_scope || scopes.value || {}
+  const scopeOn = scope.mode === 'mark' || scopes.value?.enabled
   const fb = fallbackSettings.value?.state ?? '—'
   const dns = (d.profiles || []).find((p) => p.is_dns_desync)
   return [
@@ -49,7 +50,7 @@ const groups = computed(() => {
       items: [
         { k: 'Firewall', v: d.fwtype || '—', to: '/settings#sec-firewall' },
         { k: 'Offload', v: d.flowoffload || '—', to: '/settings#sec-firewall' },
-        { k: 'Scopes', v: scope.mode === 'mark' ? 'mark' : 'выкл', to: '/settings#sec-scopes' },
+        { k: 'Scopes', v: scopeOn ? 'mark' : 'выкл', s: scopeOn ? `mask ${scope.mask ?? scopes.value?.mask ?? '—'}` : undefined, to: '/settings#sec-scopes' },
         { k: 'DNS антиспуф', v: dns ? (dns.dns_desync_enabled ? 'вкл' : 'выкл') : '—', to: '/settings#sec-modes' },
       ],
     },

@@ -262,7 +262,7 @@ defineExpose({ refresh })
 .supersweep-workers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: .75rem; margin: .75rem 0; }
 .supersweep-worker { min-width: 0; padding: .75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .supersweep-ok { color: var(--success); }
-.supersweep-warn { color: var(--warning); }
+.supersweep-warn { color: var(--warn); }
 .supersweep-error, .supersweep-fail { color: var(--danger); }
 .supersweep-panel summary { cursor: pointer; margin-top: .75rem; }
 .supersweep-domains li { margin: .5rem 0; }

@@ -16,6 +16,9 @@ const max = ref('255')
 watch(scopes, (data: ScopesPayload | null) => {
   if (!data) return
   enabled.value = !!data.enabled
+  if (data.mask != null && String(data.mask) !== '') mask.value = String(data.mask)
+  if (data.shift != null) shift.value = String(data.shift)
+  if (data.max_scope != null) max.value = String(data.max_scope)
 }, { immediate: true, deep: true })
 
 const chip = computed(() => (enabled.value ? 'включен' : 'выключен'))

@@ -288,6 +288,27 @@ func TestBackups(t *testing.T) {
 		t.Errorf("tar без config/lists: %d", r.StatusCode)
 	}
 
+	// Restore (webui layout).
+	e.post("/cgi-bin/domains.cgi", "list", "netrogat", "action", "clear")
+	resp, out = e.post("/cgi-bin/backups.cgi", "action", "restore", "name", name, "mode", "full")
+	wantOK(t, resp, out)
+	if out["files"] == nil || out["files"].(float64) < 1 {
+		t.Errorf("restore files = %v", out["files"])
+	}
+	_, listOut := e.get("/cgi-bin/domains.cgi?list=netrogat")
+	itemsList, _ := listOut["items"].([]any)
+	found := false
+	for _, it := range itemsList {
+		if it.(map[string]any)["value"] == "avito.ru" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("после restore netrogat без avito.ru: %v", listOut["items"])
+	}
+	resp, out = e.post("/cgi-bin/backups.cgi", "action", "restore", "name", "missing.tar")
+	wantError(t, resp, out, 404, "Бэкап не найден")
+
 	// Delete.
 	resp, out = e.post("/cgi-bin/backups.cgi", "action", "delete", "name", name)
 	wantOK(t, resp, out)

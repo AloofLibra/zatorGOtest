@@ -134,7 +134,9 @@ export const domains = {
     domainsPost({ list, action: 'rename', domain, new_domain }),
   import: (list: string, domain: string) => domainsPost({ list, action: 'import', domain }),
   clear: (list: string) => domainsPost({ list, action: 'clear' }),
-  check: (domain: string) => domainsPost({ list: 'custom_rkn', action: 'check', domain }),
+  check: (domain: string) =>
+    api<ApplyResult>('/cgi-bin/domains.cgi',
+      formBody({ list: 'custom_rkn', action: 'check', domain })),
   set_strategy: (domain: string, strategy: string) =>
     domainsPost({ list: 'custom_rkn', action: 'set_strategy', domain, strategy }),
   clear_strategy: (domain: string) => domainsPost({ list: 'custom_rkn', action: 'clear_strategy', domain }),
@@ -145,6 +147,9 @@ export const fetchBackups = () => api<BackupsPayload>('/cgi-bin/backups.cgi')
 export const backups = {
   create: () => api<{ name: string }>('/cgi-bin/backups.cgi', formBody({ action: 'create' })),
   delete: (name: string) => api<Record<string, never>>('/cgi-bin/backups.cgi', formBody({ action: 'delete', name })),
+  restore: (name: string, mode: 'full' | 'smart' | 'lists' = 'full') =>
+    api<{ ok: boolean; name: string; files?: number; restarted?: boolean }>(
+      '/cgi-bin/backups.cgi', formBody({ action: 'restore', name, mode })),
   downloadUrl: (name: string) => `/cgi-bin/backups.cgi?action=download&name=${encodeURIComponent(name)}`,
   upload: (file: File) => api<{ name: string }>(
     `/cgi-bin/backups.cgi?action=upload&name=${encodeURIComponent(file.name)}`,

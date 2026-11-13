@@ -10,7 +10,7 @@ export interface ClientScopeDiagnostics {
 }
 
 export interface ProfileInfo {
-  profile: string
+  profile: string | number
   label: string
   description?: string
   current_lock?: string
@@ -42,6 +42,10 @@ export interface ScopesPayload {
   enabled?: boolean
   warning?: string
   scopes?: string[]
+  mask?: string | number
+  shift?: number
+  max_scope?: number
+  mode?: string
 }
 
 export interface CheckDetail {

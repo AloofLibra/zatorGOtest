@@ -4,8 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { domains } from '../api/endpoints'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import {
-  DOMAIN_LISTS, DOMAIN_META, domainLists, domainsLoaded, refreshDomainList, refreshDomains, type DomainListName,
+  DOMAIN_LISTS, DOMAIN_META, domainChecks, domainLists, domainsLoaded, refreshDomainList, refreshDomains, type DomainListName,
 } from '../stores/domains'
+import { modeSettings } from '../stores/settings'
 import { showToast } from '../stores/toast'
 import { confirmDialog } from '../stores/confirm'
 
@@ -111,6 +112,19 @@ async function clearAll() {
     showToast((e as Error).message, 'error')
   }
 }
+
+async function checkDomain(domain: string) {
+  try {
+    await withBusy(`domain-check-${domain}`, async () => {
+      const res = await domains.check(domain)
+      if (res.check) domainChecks[domain] = res.check
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
 </script>
 
 <template>
@@ -139,10 +153,13 @@ async function clearAll() {
         <span class="chip">{{ list?.items?.length ?? 0 }}</span>
       </div>
       <p class="panel-d">{{ list?.description || meta.addLabel }}</p>
+      <p v-if="hostlistAuto && (active === 'custom_rkn' || active === 'substring')" class="panel-d" style="color:var(--warn)">
+        Autohostlist включён: ручное добавление в этот список заблокировано. Выключите автосбор в Настройках → Режимы.
+      </p>
 
       <form class="row" @submit.prevent="add">
-        <input v-model="input" :placeholder="meta.placeholder" :disabled="busyActive" style="flex:1;min-width:12rem">
-        <button type="submit" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'domain-add' }">Добавить</button>
+        <input v-model="input" :placeholder="meta.placeholder" :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))" style="flex:1;min-width:12rem">
+        <button type="submit" class="primary" :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))" :class="{ 'is-busy': busyButton === 'domain-add' }">Добавить</button>
         <button type="button" class="ghost danger" :disabled="busyActive" @click="clearAll">Очистить</button>
       </form>
 
@@ -171,8 +188,16 @@ async function clearAll() {
               @click="setStrategy(item.value)">Стратегия</button>
           </div>
         </div>
-        <button type="button" class="ghost danger" :disabled="busyActive"
-          @click="remove(item.value)">Удалить</button>
+        <div class="row">
+          <button v-if="active === 'custom_rkn'" type="button" class="ghost" :disabled="busyActive"
+            :class="{ 'is-busy': busyButton === `domain-check-${item.value}` }"
+            @click="checkDomain(item.value)">Проверить</button>
+          <button type="button" class="ghost danger" :disabled="busyActive"
+            @click="remove(item.value)">Удалить</button>
+        </div>
+        <p v-if="domainChecks[item.value]" class="panel-d" style="grid-column:1/-1;margin:0.35rem 0 0">
+          {{ (domainChecks[item.value].results || []).map(r => r.verdict || r.text).join(' · ') || domainChecks[item.value].message || 'Готово' }}
+        </p>
       </div>
       <p v-if="domainsLoaded && !(list?.items || []).length" class="panel-d">Список пуст.</p>
     </div>
