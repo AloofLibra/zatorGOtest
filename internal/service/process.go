@@ -61,6 +61,8 @@ func MatchValidator(comm string, cmdline []string) bool {
 }
 
 func exeBase(p string) string {
+	// Унифицируем разделители, чтобы MatchWebUI видел `C:\zator.exe` и на Linux.
+	p = strings.ReplaceAll(p, `\`, `/`)
 	p = strings.TrimSuffix(strings.ToLower(filepath.Base(p)), ".exe")
 	return p
 }

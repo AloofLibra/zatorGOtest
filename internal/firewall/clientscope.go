@@ -82,7 +82,9 @@ type ClientScopeConfig struct {
 // DefaultClientScopeMapFile возвращает путь client_scope.tsv для корня zator
 // (всегда с прямыми слешами — путь используется на устройстве).
 func DefaultClientScopeMapFile(zatorRoot string) string {
-	return path.Join(filepath.ToSlash(zatorRoot), ClientScopeMapRelPath)
+	// Нормализуем и Windows-разделители: filepath.ToSlash на Unix не трогает `\`.
+	root := strings.ReplaceAll(filepath.ToSlash(zatorRoot), `\`, `/`)
+	return path.Join(root, ClientScopeMapRelPath)
 }
 
 // DefaultClientScopeConfig возвращает конфигурацию по умолчанию (маска 0xff00,
