@@ -18,6 +18,22 @@ export const fetchRecommendations = (signal?: AbortSignal) =>
 export const fetchSupersweep = (signal?: AbortSignal) =>
   api<SupersweepPayload>('/cgi-bin/settings.cgi?setting=supersweep', { signal })
 
+export const supersweepStart = (opts: {
+  scope?: string
+  domain?: string
+  tls_pref?: string
+} = {}) => {
+  const body: Record<string, string> = { setting: 'supersweep', value: 'start' }
+  if (opts.scope) body.scope = opts.scope
+  if (opts.domain?.trim()) body.domain = opts.domain.trim()
+  if (opts.tls_pref) body.tls_pref = opts.tls_pref
+  return api<{ ok: boolean; started?: boolean }>('/cgi-bin/settings.cgi', formBody(body))
+}
+
+export const supersweepCancel = () =>
+  api<{ ok: boolean; cancelled?: boolean }>('/cgi-bin/settings.cgi',
+    formBody({ setting: 'supersweep', value: 'cancel' }))
+
 export const fetchScopes = () => api<ScopesPayload>('/cgi-bin/scopes.cgi')
 
 export const setLock = (profile: string, strategy: number, scope: string) =>

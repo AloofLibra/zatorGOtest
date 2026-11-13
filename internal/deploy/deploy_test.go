@@ -177,3 +177,50 @@ func TestSafeAssetURL(t *testing.T) {
 	}
 	_ = io.Discard
 }
+
+func TestCompareLatestGitHubNoSHA(t *testing.T) {
+	// Binary-only релизы: в Latest нет SHA — нельзя предлагать update при равных версиях.
+	cur := Version{ZatorVersion: "0.1.6", WebUIVersion: "0.1.6"}
+	same := &Latest{SchemaVersion: 1, Release: "v0.1.6"}
+	res := CompareLatest(cur, same, true)
+	if res.UpdateAvailable() {
+		t.Fatalf("same version must not update: %+v", res)
+	}
+	newer := &Latest{SchemaVersion: 1, Release: "v0.1.7"}
+	res = CompareLatest(cur, newer, true)
+	if !res.UpdateZator || !res.UpdateWebUI {
+		t.Fatalf("newer tag must update both: %+v", res)
+	}
+	// Пустой SHA только у latest при непустом cur SHA — fallback на версии.
+	curSHA := Version{ZatorVersion: "0.1.6", ZatorSHA: "abc"}
+	res = CompareLatest(curSHA, same, false)
+	if res.UpdateZator {
+		t.Fatalf("empty latest SHA must not force update: %+v", res)
+	}
+	if res = CompareLatest(cur, nil, true); res.UpdateAvailable() {
+		t.Fatalf("nil latest: %+v", res)
+	}
+}
+
+func TestReadCachedLatest(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ReadCachedLatest(p)
+	if err != nil || l != nil {
+		t.Fatalf("empty cache: l=%v err=%v", l, err)
+	}
+	raw, _ := json.Marshal(Latest{SchemaVersion: 1, Release: "v0.1.6", ZatorDate: "2026-01-01"})
+	if err := os.MkdirAll(Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(LatestCachePath(p), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadCachedLatest(p)
+	if err != nil || got == nil || got.Release != "v0.1.6" {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}

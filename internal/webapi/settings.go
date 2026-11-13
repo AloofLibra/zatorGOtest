@@ -227,7 +227,7 @@ func (s *Server) updateCheck() any {
 	if deploy.DetectOffline(os.Getenv, "").Offline {
 		u.Offline = true
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	res, err := u.CheckLatest(ctx)
 	if err != nil {

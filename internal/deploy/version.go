@@ -121,6 +121,23 @@ func WriteVersion(p paths.Paths, v Version) error {
 	return fsutil.AtomicWriteFile(VersionPath(p), []byte(v.String()), 0o644)
 }
 
+// LatestCachePath возвращает путь к кэшу latest.json.
+func LatestCachePath(p paths.Paths) string {
+	return filepath.Join(Dir(p), LatestCacheName)
+}
+
+// ReadCachedLatest читает кэш последнего CheckLatest; при отсутствии — (nil, nil).
+func ReadCachedLatest(p paths.Paths) (*Latest, error) {
+	data, err := readFileOpt(LatestCachePath(p))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return ParseLatest(data)
+}
+
 // CompareVersions сравнивает версии: -1 если a < b, 0 если равны, 1 если a > b.
 //
 // Правила (семантическое версионирование с послаблениями): ведущая "v"

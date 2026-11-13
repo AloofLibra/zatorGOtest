@@ -28,9 +28,13 @@ func (a *App) Install() error {
 	}
 	// Токен опционален: по умолчанию Web UI открыт без авторизации.
 	// Задайте token в zator.json и перезапустите webui, если нужна защита.
+	now := time.Now().UTC().Format("2006-01-02 15:04")
+	ver := zator.Version()
 	_ = deploy.WriteVersion(a.Paths, deploy.Version{
-		ZatorVersion: zator.Version(),
-		ZatorDate:    time.Now().UTC().Format("2006-01-02 15:04"),
+		ZatorVersion: ver,
+		ZatorDate:    now,
+		WebUIVersion: ver,
+		WebUIDate:    now,
 		Tracking:     "latest",
 	})
 	return a.Save()
@@ -52,6 +56,15 @@ func (a *App) Update() error {
 	if err := a.syncAssets(); err != nil {
 		return err
 	}
+	now := time.Now().UTC().Format("2006-01-02 15:04")
+	ver := zator.Version()
+	_ = deploy.WriteVersion(a.Paths, deploy.Version{
+		ZatorVersion: ver,
+		ZatorDate:    now,
+		WebUIVersion: ver,
+		WebUIDate:    now,
+		Tracking:     "latest",
+	})
 	return a.Save()
 }
 

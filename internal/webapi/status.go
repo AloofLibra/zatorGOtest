@@ -12,6 +12,7 @@ import (
 
 	"github.com/AloofLibra/zator"
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/deploy"
 	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/provider"
@@ -181,7 +182,7 @@ func (s *Server) versionPayload() map[string]any {
 			pending = true
 		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"zapret2_version":       zv,
 		"zator_version":         ver,
 		"zator_date":            date,
@@ -196,6 +197,32 @@ func (s *Server) versionPayload() map[string]any {
 		"config_default_date":   defDate,
 		"config_update_pending": pending,
 	}
+	// Без сети: сравнение с кэшем последнего update_check.
+	if cur, err := deploy.ReadVersion(s.paths); err == nil && !cur.IsZero() {
+		if cur.ZatorVersion != "" {
+			out["zator_version"] = cur.ZatorVersion
+		}
+		if cur.ZatorDate != "" {
+			out["zator_date"] = cur.ZatorDate
+		}
+		if cur.WebUIVersion != "" {
+			out["webui_version"] = cur.WebUIVersion
+		}
+		if cur.WebUIDate != "" {
+			out["webui_date"] = cur.WebUIDate
+		}
+		if cur.Tracking != "" {
+			out["tracking"] = cur.Tracking
+		}
+		if l, err := deploy.ReadCachedLatest(s.paths); err == nil && l != nil {
+			res := deploy.CompareLatest(cur, l, true)
+			out["update_available"] = res.UpdateAvailable()
+			out["latest_release"] = l.Release
+			out["latest_zator_date"] = l.ZatorDate
+			out["latest_webui_date"] = l.WebUIDate
+		}
+	}
+	return out
 }
 
 // GET /cgi-bin/state.cgi — агрегат начальной инициализации.

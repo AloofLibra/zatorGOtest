@@ -197,10 +197,6 @@ func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, 
 	if err := os.Rename(tmp, final); err != nil {
 		return nil, tag, err
 	}
-	_ = WriteVersion(u.Paths, Version{
-		ZatorVersion: strings.TrimPrefix(tag, "v"),
-		Tracking:     "latest",
-	})
 	// Новый бинарник сам разложит актуальные assets (webui и пр.).
 	cmd := exec.CommandContext(ctx, final, "install", "-zapret=false")
 	cmd.Env = os.Environ()
@@ -208,5 +204,14 @@ func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, 
 	if err != nil {
 		return nil, tag, fmt.Errorf("deploy: %s install: %w (%s)", final, err, strings.TrimSpace(string(out)))
 	}
+	ver := strings.TrimPrefix(tag, "v")
+	now := time.Now().UTC().Format("2006-01-02 15:04")
+	_ = WriteVersion(u.Paths, Version{
+		ZatorVersion: ver,
+		ZatorDate:    now,
+		WebUIVersion: ver,
+		WebUIDate:    now,
+		Tracking:     "latest",
+	})
 	return &ApplyResult{Installed: 1}, tag, nil
 }

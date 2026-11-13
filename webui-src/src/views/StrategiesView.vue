@@ -7,7 +7,7 @@ import { fetchAndApplyState } from '../stores/state'
 import { locks, refreshAll, scope, scopes, statusLoaded, strategyChecks } from '../stores/status'
 import { refreshTlsBlobSettings, tlsBlobSettings } from '../stores/settings'
 import { announceRestart, restartSuffix, showToast } from '../stores/toast'
-import { api, formBody } from '../api/client'
+import SupersweepPanel from '../components/strategies/SupersweepPanel.vue'
 
 const router = useRouter()
 const draft = ref<Record<string, string>>({})
@@ -95,15 +95,8 @@ async function check(profile: string) {
   }
 }
 
-async function supersweep(action: 'start' | 'cancel') {
-  try {
-    await withBusy(`ss-${action}`, async () => {
-      await api('/cgi-bin/settings.cgi', formBody({ setting: 'supersweep', value: action }))
-      showToast(action === 'start' ? 'Суперсвип запущен' : 'Суперсвип отменён')
-    })
-  } catch (e) {
-    showToast((e as Error).message, 'error')
-  }
+function focusSupersweep() {
+  document.getElementById('supersweep-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
 async function saveFake(profile: string) {
@@ -161,12 +154,19 @@ async function saveCloneSize(profile: string) {
           </select>
         </label>
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh-locks' }" @click="refresh">Обновить</button>
-        <button type="button" class="ghost" :disabled="busyActive" @click="supersweep('start')">Суперсвип</button>
-        <button type="button" class="ghost danger" :disabled="busyActive" @click="supersweep('cancel')">Стоп свип</button>
+        <button type="button" class="ghost" @click="focusSupersweep">К суперсвипу</button>
       </div>
     </div>
 
     <p v-if="scopes.warning" class="panel-d" style="color:var(--warn)">{{ scopes.warning }}</p>
+
+    <SupersweepPanel
+      :scope="scope"
+      :scopes="scopeOptions"
+      @started="refresh"
+      @cancelled="refresh"
+    />
+
     <div v-if="!statusLoaded" class="loading">Загрузка…</div>
     <div v-else class="strategy-grid">
       <article v-for="p in locks" :key="p.profile" class="strategy">

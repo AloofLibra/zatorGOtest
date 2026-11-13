@@ -286,27 +286,33 @@ func (r *CheckResult) UpdateAvailable() bool { return r != nil && (r.UpdateZator
 
 // CompareLatest сравнивает установленную версию с latest. Основной признак —
 // несовпадение SHA содержимого (как в shell-версии); при неизвестном SHA ядра
-// используется сравнение версий.
+// используется сравнение версий. SHA сравниваются только если заданы с обеих
+// сторон — иначе GitHub API без SHA не даёт «вечный update».
 func CompareLatest(cur Version, l *Latest, webUIInstalled bool) CheckResult {
 	r := CheckResult{Latest: l, Current: cur}
+	if l == nil {
+		return r
+	}
 	switch {
-	case cur.ZatorSHA != "":
+	case cur.ZatorSHA != "" && l.ZatorSHA != "":
 		r.UpdateZator = !strings.EqualFold(cur.ZatorSHA, l.ZatorSHA)
 	case knownVersion(cur.ZatorVersion):
 		r.UpdateZator = IsNewer(cur.ZatorVersion, l.Release)
 	default:
-		// Чистая установка без version.env — обновление доступно, если в latest
-		// есть метка релиза или SHA ядра.
-		r.UpdateZator = l != nil && (l.ZatorSHA != "" || knownVersion(l.Release))
+		// Чистая установка без version.env — предложить обновление, если есть тег.
+		r.UpdateZator = knownVersion(l.Release)
 	}
 	if webUIInstalled {
 		switch {
-		case cur.WebUISHA != "":
+		case cur.WebUISHA != "" && l.WebUISHA != "":
 			r.UpdateWebUI = !strings.EqualFold(cur.WebUISHA, l.WebUISHA)
 		case knownVersion(cur.WebUIVersion):
 			r.UpdateWebUI = IsNewer(cur.WebUIVersion, l.Release)
+		case knownVersion(cur.ZatorVersion):
+			// В binary-релизах Web UI едет вместе с ядром.
+			r.UpdateWebUI = IsNewer(cur.ZatorVersion, l.Release)
 		default:
-			r.UpdateWebUI = l != nil && (l.WebUISHA != "" || knownVersion(l.Release))
+			r.UpdateWebUI = knownVersion(l.Release)
 		}
 	}
 	r.VersionNewer = knownVersion(cur.ZatorVersion) && IsNewer(cur.ZatorVersion, l.Release)

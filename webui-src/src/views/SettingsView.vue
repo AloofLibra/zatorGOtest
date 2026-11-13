@@ -60,11 +60,12 @@ watch(status, (s) => {
   if (s?.flowoffload) offload.value = s.flowoffload
 }, { immediate: true })
 
-const tlsMode = ref('default')
+const tlsMode = ref('fake_default_tls')
 const tlsBlob = ref('')
 watch(tlsBlobSettings, (t) => {
   if (!t) return
-  tlsMode.value = t.current_mode || 'default'
+  // API отдаёт fake_default_tls | maxru | mixed — в UI: встроенный vs файл.
+  tlsMode.value = t.current_mode === 'fake_default_tls' ? 'fake_default_tls' : 'custom'
   tlsBlob.value = t.current_blob || ''
 }, { immediate: true })
 
@@ -166,8 +167,8 @@ async function saveTls() {
   try {
     await withBusy('tls', async () => {
       announceRestart()
-      const res = tlsMode.value === 'default'
-        ? await applySetting.tls_blob('default')
+      const res = tlsMode.value === 'fake_default_tls'
+        ? await applySetting.tls_blob('fake_default_tls')
         : await applySetting.tls_blob(tlsBlob.value || 'custom_tls.bin')
       showToast(`TLS blob сохранён.${restartSuffix(res)}`)
       await refreshTlsBlobSettings()
@@ -534,13 +535,13 @@ onMounted(() => {
           <label class="field">
             <span>Режим</span>
             <select v-model="tlsMode" :disabled="busyActive">
-              <option value="default">default</option>
-              <option value="custom">custom file</option>
+              <option value="fake_default_tls">fake_default_tls (встроенный)</option>
+              <option value="custom">файл maxru</option>
             </select>
           </label>
           <label class="field">
             <span>Файл</span>
-            <select v-model="tlsBlob" :disabled="busyActive || tlsMode === 'default'">
+            <select v-model="tlsBlob" :disabled="busyActive || tlsMode === 'fake_default_tls'">
               <option v-for="b in (tlsBlobSettings?.available_blobs || [])" :key="b" :value="b">{{ b }}</option>
             </select>
           </label>

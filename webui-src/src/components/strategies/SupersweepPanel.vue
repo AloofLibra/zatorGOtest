@@ -1,20 +1,48 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { fetchSupersweep } from '../../api/endpoints'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { fetchSupersweep, supersweepCancel, supersweepStart } from '../../api/endpoints'
 import type { SupersweepPayload } from '../../api/types'
+import { busyActive, busyButton, withBusy } from '../../stores/busy'
+import { confirmDialog } from '../../stores/confirm'
+import { refreshAll } from '../../stores/status'
+import { showToast } from '../../stores/toast'
+
+const props = withDefaults(defineProps<{
+  scope?: string
+  scopes?: string[]
+}>(), {
+  scope: 'default',
+  scopes: () => ['default'],
+})
+
+const emit = defineEmits<{ started: []; cancelled: [] }>()
 
 const data = ref<SupersweepPayload | null>(null)
 const loading = ref(false)
 const error = ref('')
+const runScope = ref(props.scope || 'default')
+const domainsText = ref('')
+const tlsPref = ref('any')
 const states = {
   idle: 'Нет прогона', starting: 'Подготовка', running: 'Выполняется', applying: 'Применение результатов',
   done: 'Завершён', cancelled: 'Отменён', interrupted: 'Прерван',
 }
 const verdicts = { ok: 'Работает', warn: 'С предупреждением', fail: 'Не работает' }
 const stateLabel = computed(() => data.value ? states[data.value.state] : 'Загрузка…')
+const active = computed(() => !!data.value?.active)
+const scopeOptions = computed(() => {
+  const list = props.scopes?.length ? [...props.scopes] : ['default']
+  if (!list.includes(runScope.value)) list.unshift(runScope.value)
+  return list
+})
 let mounted = false
 let timer: number | undefined
 let controller: AbortController | null = null
+let wasActive = false
+
+watch(() => props.scope, (v) => {
+  if (v && !active.value) runScope.value = v
+}, { immediate: true })
 
 const count = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0
 const strategy = (value: unknown) => value === null || count(value)
@@ -51,6 +79,10 @@ async function refresh() {
     const result = await fetchSupersweep(request.signal)
     if (!valid(result)) throw new Error('Некорректный ответ сервера')
     if (mounted) {
+      if (wasActive && !result.active) {
+        refreshAll().catch(() => undefined)
+      }
+      wasActive = result.active
       data.value = result
       error.value = ''
     }
@@ -68,6 +100,50 @@ function visibilityChanged() {
   stopTimer()
   if (!document.hidden) void refresh()
 }
+
+async function startRun() {
+  const ok = await confirmDialog({
+    title: 'Запустить суперсвип?',
+    message: 'Прогон подберёт стратегии для профилей и доменов РКН, затем применит победителей. Это может занять несколько минут.',
+  })
+  if (!ok) return
+  try {
+    await withBusy('ss-start', async () => {
+      await supersweepStart({
+        scope: runScope.value || 'default',
+        domain: domainsText.value,
+        tls_pref: tlsPref.value,
+      })
+      showToast('Суперсвип запущен')
+      emit('started')
+      wasActive = true
+      await refresh()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function cancelRun() {
+  const ok = await confirmDialog({
+    title: 'Остановить суперсвип?',
+    message: 'Текущий прогон будет отменён. Уже применённые локи останутся.',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await withBusy('ss-cancel', async () => {
+      await supersweepCancel()
+      showToast('Суперсвип отменён')
+      emit('cancelled')
+      await refresh()
+      await refreshAll()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
 onMounted(() => {
   mounted = true
   document.addEventListener('visibilitychange', visibilityChanged)
@@ -79,18 +155,56 @@ onUnmounted(() => {
   controller?.abort()
   document.removeEventListener('visibilitychange', visibilityChanged)
 })
+
+defineExpose({ refresh })
 </script>
 
 <template>
   <section id="supersweep-panel" class="supersweep-panel" aria-labelledby="supersweep-title">
     <div class="supersweep-header">
-      <h2 id="supersweep-title">Суперсвип · прогресс и последний результат</h2>
-      <button id="supersweep-refresh-btn" type="button" :disabled="loading" :aria-busy="loading" @click="refresh">
-        {{ loading ? 'Обновляем…' : 'Обновить' }}
-      </button>
+      <h2 id="supersweep-title">Суперсвип</h2>
+      <div class="actions">
+        <button id="supersweep-refresh-btn" type="button" :disabled="loading || busyActive" :aria-busy="loading" @click="refresh">
+          {{ loading ? 'Обновляем…' : 'Обновить' }}
+        </button>
+        <button type="button" class="primary" :disabled="busyActive || active"
+          :class="{ 'is-busy': busyButton === 'ss-start' }" @click="startRun">
+          Запустить
+        </button>
+        <button type="button" class="ghost danger" :disabled="busyActive || !active"
+          :class="{ 'is-busy': busyButton === 'ss-cancel' }" @click="cancelRun">
+          Остановить
+        </button>
+      </div>
     </div>
+
+    <p class="panel-d">Автоподбор стратегий для профилей и доменов РКН. Пустой список доменов — эталонный набор (xhamster.com, anidub.com, amnezia.org).</p>
+
+    <div class="grid-2 supersweep-controls">
+      <label class="field">
+        <span>Scope</span>
+        <select v-model="runScope" :disabled="busyActive || active">
+          <option v-for="s in scopeOptions" :key="s" :value="s">{{ s }}</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>TLS preference</span>
+        <select v-model="tlsPref" :disabled="busyActive || active">
+          <option value="any">any</option>
+          <option value="12">TLS 1.2</option>
+          <option value="13">TLS 1.3</option>
+          <option value="both">both</option>
+        </select>
+      </label>
+      <label class="field" style="grid-column:1/-1">
+        <span>Домены РКН (по одному в строке, необязательно)</span>
+        <textarea v-model="domainsText" rows="3" :disabled="busyActive || active"
+          placeholder="xhamster.com&#10;anidub.com&#10;amnezia.org"></textarea>
+      </label>
+    </div>
+
     <p v-if="error" class="supersweep-error" role="alert">Не удалось обновить суперсвип: {{ error }}
-      <span v-if="data">Показаны последние полученные данные — они могут быть устаревшими.</span>
+      <span v-if="data"> Показаны последние полученные данные — они могут быть устаревшими.</span>
     </p>
     <p v-if="!data && !error" role="status">Загружаем данные суперсвипа…</p>
     <template v-if="data">
@@ -98,7 +212,7 @@ onUnmounted(() => {
         · {{ data.source === 'saved' ? 'Сохранённый отчёт' : data.source === 'live' ? 'Текущий отчёт' : 'Нет отчёта' }}
         <span v-if="error"> · Устаревшие данные</span>
       </p>
-      <p v-if="!data.available">Прогонов пока нет. Запустите суперсвип из вкладки «Стратегии» или дождитесь результата.</p>
+      <p v-if="!data.available && !active">Прогонов пока нет. Заполните параметры выше и нажмите «Запустить».</p>
       <template v-else>
         <p>Фаза: {{ data.phase || '—' }} · Выполнено: {{ data.completed }} / {{ data.total }}</p>
         <progress v-if="data.total > 0" :value="data.completed" :max="data.total" aria-label="Общий прогресс суперсвипа" />
@@ -143,6 +257,8 @@ onUnmounted(() => {
 .supersweep-panel p { margin: .5rem 0; }
 .supersweep-panel progress { width: 100%; accent-color: var(--success); }
 .supersweep-meta { color: var(--muted); }
+.supersweep-controls { margin: .75rem 0 1rem; }
+.supersweep-controls textarea { width: 100%; resize: vertical; min-height: 4.5rem; }
 .supersweep-workers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: .75rem; margin: .75rem 0; }
 .supersweep-worker { min-width: 0; padding: .75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .supersweep-ok { color: var(--success); }
