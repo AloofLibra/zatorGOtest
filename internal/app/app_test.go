@@ -27,7 +27,7 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	a := newTestApp(t)
-	a.Config = Config{Port: 18000, Token: "abc", Mirror: "https://m.example", ZapretSource: ZapretSourceFork}
+	a.Config = Config{Port: 18000, Mirror: "https://m.example", ZapretSource: ZapretSourceFork}
 	if err := a.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -68,21 +68,6 @@ func TestLoadInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestEnsureToken(t *testing.T) {
-	a := newTestApp(t)
-	if err := a.EnsureToken(); err != nil {
-		t.Fatal(err)
-	}
-	tok := a.Config.Token
-	if len(tok) != 32 {
-		t.Fatalf("token = %q", tok)
-	}
-	_ = a.EnsureToken()
-	if a.Config.Token != tok {
-		t.Error("токен не должен меняться")
-	}
-}
-
 func TestInstallUpdateUninstall(t *testing.T) {
 	a := newTestApp(t)
 	if a.Installed() {
@@ -91,25 +76,29 @@ func TestInstallUpdateUninstall(t *testing.T) {
 	if err := a.Update(); err == nil {
 		t.Fatal("update без установки должен вернуть ошибку")
 	}
+	if err := a.SetPassword("test-pass"); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.Install(); err != nil {
 		t.Fatal(err)
 	}
 	if !a.Installed() {
 		t.Fatalf("установка неполная: %+v", a.Config)
 	}
-	if a.Config.Token != "" {
-		t.Fatalf("по умолчанию токен не должен генерироваться, got %q", a.Config.Token)
+	if !a.Config.AuthEnabled || !a.Config.HasPassword() {
+		t.Fatalf("ожидался пароль после install: %+v", a.Config)
 	}
 	if _, err := os.Stat(filepath.Join(a.Paths.WebUIDir, "index.html")); err != nil {
 		t.Errorf("index.html не распакован: %v", err)
 	}
+	hash := a.Config.PasswordHash
 	if err := a.Update(); err != nil {
 		t.Fatal(err)
 	}
-	if a.Config.Token != "" {
-		t.Error("update не должен создавать токен")
+	if a.Config.PasswordHash != hash || !a.Config.AuthEnabled {
+		t.Error("update не должен снимать auth")
 	}
-	if err := a.Uninstall(); err != nil {
+	if err := a.Uninstall(UninstallOptions{Purge: true, SkipService: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(a.Paths.ZatorRoot); !os.IsNotExist(err) {
@@ -122,8 +111,7 @@ func TestWebUIURL(t *testing.T) {
 	if got := a.WebUIURL(""); got != "http://localhost:17682/" {
 		t.Errorf("got %q", got)
 	}
-	a.Config.Token = "t"
-	if got := a.WebUIURL("1.2.3.4"); got != "http://1.2.3.4:17682/?token=t" {
+	if got := a.WebUIURL("1.2.3.4"); got != "http://1.2.3.4:17682/" {
 		t.Errorf("got %q", got)
 	}
 }

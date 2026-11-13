@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,14 +51,14 @@ func TestDefaultNotInstalled(t *testing.T) {
 
 func TestInstallStatusUninstall(t *testing.T) {
 	setupEnv(t)
-	if code, _, errOut := runCmd(t, "install", "-port", "18080", "-zapret=false", "-skip-service"); code != 0 {
+	if code, _, errOut := runCmd(t, "install", "-port", "18080", "-zapret=false", "-skip-service", "-password", "test-pass"); code != 0 {
 		t.Fatalf("install: %d %s", code, errOut)
 	}
 	code, out, _ := runCmd(t)
 	if code != 0 || !strings.Contains(out, ":18080/") {
 		t.Fatalf("default after install: %d %q", code, out)
 	}
-	if code, out, _ := runCmd(t, "status"); code != 0 || !strings.Contains(out, "Установлен:  true") {
+	if code, out, _ := runCmd(t, "status"); code != 0 || !strings.Contains(out, "Установлен:  true") || !strings.Contains(out, "password=true") {
 		t.Fatalf("status: %d %q", code, out)
 	}
 	if code, _, _ := runCmd(t, "uninstall"); code != 1 {
@@ -66,33 +67,53 @@ func TestInstallStatusUninstall(t *testing.T) {
 	if code, _, errOut := runCmd(t, "uninstall", "-y"); code != 0 {
 		t.Fatalf("uninstall: %d %s", code, errOut)
 	}
+	cfgPath := filepath.Join(os.Getenv("ZATOR_ROOT"), "config", "zator.json")
+	if _, err := os.Stat(cfgPath); err != nil {
+		t.Fatalf("config должен остаться после uninstall: %v", err)
+	}
+	if code, _, errOut := runCmd(t, "uninstall", "-y", "-purge"); code != 0 {
+		t.Fatalf("purge: %d %s", code, errOut)
+	}
+	if _, err := os.Stat(os.Getenv("ZATOR_ROOT")); !os.IsNotExist(err) {
+		t.Fatalf("purge должен удалить корень: %v", err)
+	}
 }
 
 func TestInstallInvalidSource(t *testing.T) {
 	setupEnv(t)
-	if code, _, _ := runCmd(t, "install", "-source", "nope"); code != 2 {
+	if code, _, _ := runCmd(t, "install", "-source", "nope", "-password", "x"); code != 2 {
 		t.Fatalf("code=%d", code)
+	}
+}
+
+func TestInstallNoAuth(t *testing.T) {
+	setupEnv(t)
+	if code, _, errOut := runCmd(t, "install", "-zapret=false", "-skip-service", "-no-auth"); code != 0 {
+		t.Fatalf("install: %d %s", code, errOut)
+	}
+	if code, out, _ := runCmd(t, "auth", "status"); code != 0 || !strings.Contains(out, "auth_enabled:  false") {
+		t.Fatalf("auth status: %d %q", code, out)
 	}
 }
 
 func TestWebHandlerServesAPIAndStatic(t *testing.T) {
 	setupEnv(t)
-	if code, _, errOut := runCmd(t, "install", "-port", "18081", "-zapret=false", "-skip-service"); code != 0 {
+	if code, _, errOut := runCmd(t, "install", "-port", "18081", "-zapret=false", "-skip-service", "-no-auth"); code != 0 {
 		t.Fatalf("install: %d %s", code, errOut)
 	}
 	a, err := app.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Config.Token != "" {
-		t.Fatalf("install не должен генерировать токен, got %q", a.Config.Token)
+	if a.Config.AuthEnabled || a.Config.HasPassword() {
+		t.Fatalf("no-auth install: %+v", a.Config)
 	}
 	var warn bytes.Buffer
 	h, err := newWebHandler(a, &warn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(warn.String(), "без токена") {
+	if !strings.Contains(warn.String(), "без проверки доступа") {
 		t.Errorf("ожидалось сообщение об открытом доступе: %q", warn.String())
 	}
 	ts := httptest.NewServer(h)
@@ -125,7 +146,7 @@ func TestWebHandlerServesAPIAndStatic(t *testing.T) {
 	}
 }
 
-func TestWebHandlerWarnsWithoutToken(t *testing.T) {
+func TestWebHandlerWarnsWithoutAuth(t *testing.T) {
 	setupEnv(t)
 	a, err := app.Load()
 	if err != nil {
@@ -135,7 +156,7 @@ func TestWebHandlerWarnsWithoutToken(t *testing.T) {
 	if _, err := newWebHandler(a, &warn); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(warn.String(), "без токена") {
+	if !strings.Contains(warn.String(), "без проверки доступа") {
 		t.Errorf("нет сообщения об открытом доступе: %q", warn.String())
 	}
 }

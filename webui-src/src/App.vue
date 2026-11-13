@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { api, formBody } from './api/client'
 import { busyActive } from './stores/busy'
 import { fetchAndApplyState } from './stores/state'
 import { statusLoaded } from './stores/status'
@@ -24,19 +25,64 @@ const themes: { id: ThemeMode; label: string }[] = [
 ]
 const active = computed(() => String(route.name || 'status'))
 
+const needLogin = ref(false)
+const loginPass = ref('')
+const loginError = ref('')
+const loginBusy = ref(false)
+
 function setTheme(mode: ThemeMode) {
   theme.value = mode
 }
 
-onMounted(() => {
-  fetchAndApplyState()
-    .catch((e) => showToast((e as Error).message, 'error'))
-    .finally(() => { statusLoaded.value = true })
-})
+async function bootstrap() {
+  try {
+    await fetchAndApplyState()
+    needLogin.value = false
+  } catch (e) {
+    const err = e as Error & { status?: number }
+    if (err.status === 401) {
+      needLogin.value = true
+      return
+    }
+    showToast(err.message, 'error')
+  } finally {
+    statusLoaded.value = !needLogin.value
+  }
+}
+
+async function submitLogin() {
+  loginError.value = ''
+  loginBusy.value = true
+  try {
+    await api('/api/login', formBody({ password: loginPass.value }))
+    loginPass.value = ''
+    needLogin.value = false
+    statusLoaded.value = false
+    await bootstrap()
+  } catch (e) {
+    loginError.value = (e as Error).message
+  } finally {
+    loginBusy.value = false
+  }
+}
+
+onMounted(() => { void bootstrap() })
 </script>
 
 <template>
-  <div class="shell">
+  <div v-if="needLogin" class="login-screen">
+    <form class="login-card" @submit.prevent="submitLogin">
+      <h1>Zator<span>GO</span></h1>
+      <p>Введите пароль панели управления</p>
+      <p v-if="loginError" class="login-err">{{ loginError }}</p>
+      <label>
+        <span>Пароль</span>
+        <input v-model="loginPass" type="password" autocomplete="current-password" required autofocus :disabled="loginBusy">
+      </label>
+      <button type="submit" class="primary" :disabled="loginBusy || !loginPass">Войти</button>
+    </form>
+  </div>
+  <div v-else class="shell">
     <aside class="rail">
       <div class="brand">
         <div class="brand-mark">Zator<span>GO</span></div>

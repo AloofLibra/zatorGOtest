@@ -8,7 +8,7 @@
 | Функция | Статус | Где |
 | --- | --- | --- |
 | Определение arch + скачивание бинарника | done | `scripts/zator-launcher.sh` |
-| `zator install` (каталоги, assets, token) | done | `cmd/zator`, `internal/app` |
+| `zator install` (каталоги, assets, password auth) | done | `cmd/zator`, `internal/app` |
 | Установка zapret2 без `install_easy.sh` | done | `internal/zapret`, `-zapret` |
 | Service hooks systemd/procd/Entware/Merlin/Keenetic | done | `internal/service` |
 | `zator webui` + URL/token | done | `cmd/zator`, `internal/webapi` |

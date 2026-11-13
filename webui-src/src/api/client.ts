@@ -23,6 +23,11 @@ export async function api<T = Record<string, unknown>>(path: string, options: Ap
       data = {}
     }
     if (!response.ok) {
+      if (response.status === 401) {
+        const err = new Error(String(data.error || 'Требуется авторизация')) as Error & { status?: number }
+        err.status = 401
+        throw err
+      }
       throw new Error(String(data.error || `HTTP ${response.status}`))
     }
     // Часть CGI отдаёт 200 с ok:false / error — не считаем это успехом.

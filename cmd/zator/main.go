@@ -31,7 +31,8 @@ const usage = `zator — управление zapret2 через Web UI
   status      показать состояние установки и платформу
   install     установить zator (каталоги, Web UI, конфигурация)
   update      обновить встроенные ресурсы
-  uninstall   удалить zator (-y без подтверждения)
+  uninstall   удалить runtime (-y); --purge сносит весь каталог
+  auth        пароль и включение/отключение проверки доступа
   webui       запустить Web UI (порт по умолчанию 17682)
   serve       синоним webui
   help        эта справка
@@ -58,6 +59,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdUpdate(stdout, stderr)
 	case "uninstall":
 		return cmdUninstall(rest, stdout, stderr)
+	case "auth":
+		return cmdAuth(rest, stdout, stderr)
 	case "webui", "serve":
 		return cmdServe(cmd, rest, stdout, stderr)
 	case "help", "-h", "--help":
@@ -99,6 +102,7 @@ func cmdStatus(stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "ZAPRET2:     %s\n", a.Paths.ZapretRoot)
 	fmt.Fprintf(stdout, "Конфиг:      %s\n", a.ConfigPath)
 	fmt.Fprintf(stdout, "Web UI:      http://localhost:%d/\n", a.Config.Port)
+	fmt.Fprintf(stdout, "Auth:        enabled=%t password=%t\n", a.Config.AuthEnabled, a.Config.HasPassword())
 	fmt.Fprintf(stdout, "Источник:    %s\n", a.Config.ZapretSource)
 	return 0
 }
@@ -112,7 +116,13 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	withZapret := fs.Bool("zapret", true, "скачать и установить zapret2")
 	zapretVer := fs.String("zapret-version", "", "версия zapret2 (пусто = latest с GitHub)")
 	skipService := fs.Bool("skip-service", false, "не ставить systemd/procd службу")
+	password := fs.String("password", "", "пароль Web UI (неинтерактивно)")
+	noAuth := fs.Bool("no-auth", false, "сознательно отключить проверку доступа")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *password != "" && *noAuth {
+		fmt.Fprintln(stderr, "нельзя одновременно -password и -no-auth")
 		return 2
 	}
 	a, err := app.Load()
@@ -132,6 +142,31 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	if err := a.Config.Validate(); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
+	}
+	switch {
+	case *noAuth:
+		a.DisableAuthExplicitly()
+		fmt.Fprintln(stderr, "внимание: проверка доступа отключена (-no-auth); Web UI открыт всей сети")
+	case *password != "":
+		if err := a.SetPassword(*password); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	case a.Config.HasPassword():
+		// Повторный install / refresh ассетов (в т.ч. из update) — сохраняем auth.
+	case a.Installed() && !a.Config.AuthEnabled:
+		// Ранее сознательно -no-auth / auth disable — не навязываем пароль при refresh.
+	default:
+		pass, err := promptPassword(stderr, "Пароль Web UI: ", "Повтор пароля: ")
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			fmt.Fprintln(stderr, "подсказка: zator install -password '…' или zator install -no-auth")
+			return 1
+		}
+		if err := a.SetPassword(pass); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	if err := a.Install(); err != nil {
 		fmt.Fprintf(stderr, "установка не удалась: %v\n", err)
@@ -169,6 +204,9 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintf(stdout, "Web UI: %s\n", a.WebUIURL(""))
+	if a.Config.AuthRequired() {
+		fmt.Fprintln(stdout, "Вход: пароль, заданный при установке.")
+	}
 	if !*skipService {
 		fmt.Fprintln(stdout, "Службы zapret2 и Web UI установлены и запущены.")
 	} else {
@@ -214,6 +252,7 @@ func cmdUninstall(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	yes := fs.Bool("y", false, "не спрашивать подтверждение")
+	purge := fs.Bool("purge", false, "удалить весь каталог zator (config/state/lists)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -223,27 +262,34 @@ func cmdUninstall(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if !*yes {
-		fmt.Fprintf(stderr, "будет удалён %s; повторите с флагом -y\n", a.Paths.ZatorRoot)
+		if *purge {
+			fmt.Fprintf(stderr, "будет полностью удалён %s (включая config/state/lists); повторите с -y --purge\n", a.Paths.ZatorRoot)
+		} else {
+			fmt.Fprintf(stderr, "будут удалены bin/webui/lua и службы; config/state/lists сохранятся в %s; повторите с -y (полный снос: -y --purge)\n", a.Paths.ZatorRoot)
+		}
 		return 1
 	}
-	if err := a.Uninstall(); err != nil {
+	if err := a.Uninstall(app.UninstallOptions{Purge: *purge}); err != nil {
 		fmt.Fprintf(stderr, "удаление не удалось: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(stdout, "zator удалён")
+	if *purge {
+		fmt.Fprintln(stdout, "zator полностью удалён (--purge)")
+	} else {
+		fmt.Fprintln(stdout, "runtime zator удалён; config/state/lists сохранены")
+	}
 	return 0
 }
 
 // newWebHandler собирает обработчик Web UI: API (/cgi-bin/*.cgi и /api/*) и
-// статику. Без токена в zator.json API открыт всем (режим разработки) —
-// об этом выводится предупреждение.
+// статику. Без auth_enabled API открыт всем — предупреждение в stderr.
 func newWebHandler(a *app.App, stderr io.Writer) (http.Handler, error) {
 	api, err := webapi.New(webapi.Options{App: a})
 	if err != nil {
 		return nil, err
 	}
-	if a.Config.Token == "" {
-		fmt.Fprintln(stderr, "Web UI без токена (откройте URL как есть; для защиты задайте token в zator.json)")
+	if !a.Config.AuthRequired() {
+		fmt.Fprintln(stderr, "Web UI без проверки доступа (auth_enabled=false); включите: zator auth enable / set-password")
 	}
 	return api.Handler(), nil
 }

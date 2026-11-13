@@ -215,3 +215,32 @@ func joinErrors(errs []string) string {
 	}
 	return out
 }
+
+// StopAndUninstallServices останавливает и снимает unit-файлы zator.
+func (a *App) StopAndUninstallServices() error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	mgr, err := service.New(service.Config{
+		Paths:    a.Paths,
+		Platform: a.Platform,
+		ZatorBin: filepath.Join(a.Paths.BinDir, "zator"),
+		ArgsFile: filepath.Join(a.Paths.ZapretRoot, "nfqws2.args"),
+	})
+	if err != nil {
+		return err
+	}
+	var errs []string
+	for _, u := range service.Units() {
+		_ = mgr.Stop(ctx, u)
+		if err := mgr.Uninstall(ctx, u); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", u, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", joinErrors(errs))
+	}
+	return nil
+}

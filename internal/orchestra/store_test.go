@@ -139,8 +139,8 @@ func TestSetLockValidation(t *testing.T) {
 		{"ok fallback 9 http", "default", "9", "http", 8, false},
 		{"ok mark scope", "mark:2", "3", "tls", 1, false},
 		{"ok custom domain", "default", "example.com", "tls", 5, false},
-		{"custom domain range = profile 3", "default", "example.com", "tls", 43, false},
-		{"custom domain over range", "default", "example.com", "tls", 44, true},
+		{"custom domain range = profile 3", "default", "example.com", "tls", 44, false},
+		{"custom domain over range", "default", "example.com", "tls", 45, true},
 		{"custom domain http", "default", "example.com", "http", 1, true},
 		{"over max profile 4", "default", "4", "tls", 29, true},
 		{"over max profile 9", "default", "9", "http", 9, true},
@@ -603,12 +603,12 @@ func TestStatusText(t *testing.T) {
 	if got := s.StatusText(); got != "Есть" {
 		t.Errorf("manual only: %q", got)
 	}
-	// per-mark файлы статус не меняют (как в shell).
+	// per-mark файлы тоже считаются (HasLocks смотрит scopes/).
 	only := newTestStore(t)
 	if err := only.SetLock("mark:2", "3", "tls", 1); err != nil {
 		t.Fatal(err)
 	}
-	if got := only.StatusText(); got != "Нет" {
+	if got := only.StatusText(); got != "Есть" {
 		t.Errorf("scoped only: %q", got)
 	}
 }

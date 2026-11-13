@@ -25,7 +25,7 @@ SLM_AUTO_LOCKED = SLM_AUTO_LOCKED or {}
 -- нужна только для восстановления после перезапуска и обновляется с паузой,
 -- чтобы не изнашивать flash-накопитель роутера частыми мелкими записями.
 local SLM_AUTO_LOCKED_PATH = "/tmp/auto_locked.tsv"
-local SLM_AUTO_LOCKED_BACKUP_PATH = "/opt/zator/extra_strats/cache/orchestra/auto_locked.tsv"
+local SLM_AUTO_LOCKED_BACKUP_PATH = "/opt/zator/state/orchestra/auto_locked.tsv"
 local SLM_AUTO_LOCKED_BACKUP_INTERVAL = 1800
 local SLM_AUTO_LOCKED_LAST_BACKUP = 0
 

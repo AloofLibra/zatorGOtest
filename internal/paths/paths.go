@@ -53,8 +53,6 @@ type Paths struct {
 	// Файлы состояния orchestra.
 	LockedTSV       string
 	LockedManualTSV string
-	HistoryTSV      string
-	FailedTSV       string
 }
 
 // New строит раскладку для заданных корней. Пустые значения заменяются
@@ -95,8 +93,6 @@ func New(zatorRoot, zapretRoot string) Paths {
 
 		LockedTSV:       filepath.Join(stateDir, "orchestra", "locked.tsv"),
 		LockedManualTSV: filepath.Join(stateDir, "orchestra", "locked.manual.tsv"),
-		HistoryTSV:      filepath.Join(stateDir, "orchestra", "history.tsv"),
-		FailedTSV:       filepath.Join(stateDir, "orchestra", "failed.tsv"),
 	}
 }
 

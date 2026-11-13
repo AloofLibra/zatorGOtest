@@ -2,13 +2,12 @@
 package app
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/AloofLibra/zator/internal/paths"
 	"github.com/AloofLibra/zator/internal/platform"
@@ -27,7 +26,9 @@ const (
 // Config — содержимое zator.json.
 type Config struct {
 	Port         int    `json:"port"`
-	Token        string `json:"token"`
+	AuthEnabled  bool   `json:"auth_enabled"`
+	PasswordHash string `json:"password_hash,omitempty"` // bcrypt; plaintext не храним
+	SessionToken string `json:"session_token,omitempty"` // cookie / Bearer после логина
 	Mirror       string `json:"mirror"`
 	ZapretSource string `json:"zapret_source"`
 }
@@ -37,6 +38,7 @@ func DefaultConfig() Config {
 	return Config{
 		Port:         DefaultPort,
 		ZapretSource: ZapretSourceFork,
+		AuthEnabled:  false,
 	}
 }
 
@@ -102,9 +104,28 @@ func (a *App) Load() error {
 		}
 		return fmt.Errorf("app: чтение %s: %w", a.ConfigPath, err)
 	}
-	cfg := DefaultConfig()
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	var raw struct {
+		Port         int    `json:"port"`
+		AuthEnabled  *bool  `json:"auth_enabled"`
+		PasswordHash string `json:"password_hash"`
+		SessionToken string `json:"session_token"`
+		Mirror       string `json:"mirror"`
+		ZapretSource string `json:"zapret_source"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("app: разбор %s: %w", a.ConfigPath, err)
+	}
+	cfg := DefaultConfig()
+	cfg.Port = raw.Port
+	cfg.PasswordHash = raw.PasswordHash
+	cfg.SessionToken = raw.SessionToken
+	cfg.Mirror = raw.Mirror
+	cfg.ZapretSource = raw.ZapretSource
+	if raw.AuthEnabled != nil {
+		cfg.AuthEnabled = *raw.AuthEnabled
+	} else {
+		// Старые конфиги без auth_enabled: наличие пароля = защита включена.
+		cfg.AuthEnabled = strings.TrimSpace(raw.PasswordHash) != ""
 	}
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -113,7 +134,7 @@ func (a *App) Load() error {
 	return nil
 }
 
-// Save атомарно записывает конфигурацию в ConfigPath (права 0600 — файл содержит токен).
+// Save атомарно записывает конфигурацию в ConfigPath (права 0600 — секреты).
 func (a *App) Save() error {
 	if err := a.Config.Validate(); err != nil {
 		return err
@@ -146,36 +167,12 @@ func (a *App) Save() error {
 	return os.Rename(tmpName, a.ConfigPath)
 }
 
-// EnsureToken генерирует случайный токен, если он ещё не задан.
-// Вызывайте явно, когда нужна защита Web UI; установка по умолчанию
-// оставляет Token пустым (доступ без авторизации).
-func (a *App) EnsureToken() error {
-	if a.Config.Token != "" {
-		return nil
-	}
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return err
-	}
-	a.Config.Token = hex.EncodeToString(buf)
-	return nil
-}
-
-// ClearToken отключает авторизацию Web UI.
-func (a *App) ClearToken() {
-	a.Config.Token = ""
-}
-
-// WebUIURL возвращает URL Web UI (с токеном, если он задан).
+// WebUIURL возвращает URL Web UI (без секретов в query).
 func (a *App) WebUIURL(host string) string {
 	if host == "" {
 		host = "localhost"
 	}
-	u := fmt.Sprintf("http://%s:%d/", host, a.Config.Port)
-	if a.Config.Token != "" {
-		u += "?token=" + a.Config.Token
-	}
-	return u
+	return fmt.Sprintf("http://%s:%d/", host, a.Config.Port)
 }
 
 // Installed сообщает, установлен ли zator.

@@ -120,7 +120,6 @@ type env struct {
 }
 
 type envOpts struct {
-	token        string
 	noZapret     bool // не создавать config zapret2
 	skipInstall  bool
 	customStatic bool
@@ -131,13 +130,10 @@ func newEnv(t *testing.T, o envOpts) *env {
 	root := t.TempDir()
 	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
 	a := app.NewWith(p, platform.Platform{})
-	a.Config.Token = o.token
 	if !o.skipInstall {
 		if err := a.Install(); err != nil {
 			t.Fatalf("install: %v", err)
 		}
-		// Install генерирует токен, если пуст: для режима «без токена» вернуть пусто.
-		a.Config.Token = o.token
 	}
 	if !o.noZapret {
 		if err := os.MkdirAll(p.ZapretRoot, 0o755); err != nil {

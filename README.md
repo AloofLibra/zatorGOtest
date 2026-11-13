@@ -28,12 +28,12 @@ chmod +x zator-launcher.sh
 
 1. определяет архитектуру CPU;
 2. скачивает `zator-linux-<arch>` из latest release;
-3. выполняет `zator install`;
+3. выполняет `zator install` (запросит пароль Web UI);
 4. поднимает Web UI на порту **17682**.
 
-Откройте в браузере: `http://<IP-устройства>:17682/`
+Откройте в браузере: `http://<IP-устройства>:17682/` и войдите с паролем, заданным при установке.
 
-По умолчанию Web UI **без токена**. Для защиты задайте `"token"` в `/opt/zator/config/zator.json` и перезапустите службу / `zator webui`.
+Проверка доступа **включена по умолчанию**. Отключить можно только сознательно: `zator install -no-auth` или `zator auth disable -y`.
 
 ### Обновление
 
@@ -51,26 +51,29 @@ export ZATOR_REPO=zatorGOtest
 ### Переустановка «с нуля»
 
 ```sh
-zator uninstall -y
+zator uninstall -y --purge
 curl -fsSL https://github.com/Koviand/zatorGOtest/releases/latest/download/zator-launcher.sh -o zator-launcher.sh
 chmod +x zator-launcher.sh
 ./zator-launcher.sh
 ```
+
+`uninstall -y` снимает службы и runtime (bin/webui/lua), но **сохраняет** config/state/lists. Полный снос каталога — только `--purge`.
 
 ---
 
 ## CLI (bootstrap)
 
 ```text
-zator install [-port 17682] [-source fork|official] [-zapret=true] [-skip-service]
+zator install [-port 17682] [-password …] [-no-auth] [-source fork|official] [-zapret=true] [-skip-service]
 zator update
-zator uninstall -y
+zator uninstall -y [--purge]
+zator auth status|set-password|enable|disable
 zator webui [-port 17682]
 zator status
 zator version
 ```
 
-Обычная повседневная работа — через Web UI; CLI нужен для install/update/uninstall и аварийного запуска UI.
+Обычная повседневная работа — через Web UI; CLI нужен для install/update/uninstall/auth и аварийного запуска UI.
 
 ---
 
@@ -97,7 +100,7 @@ make test
 | `/opt/zator/lists` / `extra_strats` | hostlist’ы |
 | `/opt/zator/files/fake` | TLS/WG blob (`.bin`) |
 | `/opt/zator/state/orchestra` | локи стратегий, overrides |
-| `/opt/zator/config/zator.json` | настройки zator (порт, token, …) |
+| `/opt/zator/config/zator.json` | настройки zator (порт, auth, password_hash, …) |
 | `/opt/zapret2` | runtime zapret2 (`nfqws2`, `config`, …) |
 
 ---
@@ -150,10 +153,10 @@ docs/PARITY.md       # паритет с bash-zator
 API:
 
 ```http
-POST /cgi-bin/settings.cgi
+POST /api/settings
   setting=strategy_register&profile=1&desync=…&lock=1
 
-POST /cgi-bin/blob-upload.cgi?kind=tls&name=tls_my.bin&select=1
+POST /api/blob-upload?kind=tls&name=tls_my.bin&select=1
 Content-Type: application/octet-stream
 <raw bytes>
 ```
@@ -188,19 +191,26 @@ npm run build          # → assets/webui/
 ```json
 {
   "port": 17682,
-  "token": "",
-  "tracking": "latest"
+  "auth_enabled": true,
+  "password_hash": "$2a$10$…",
+  "session_token": "…",
+  "zapret_source": "fork"
 }
 ```
 
-- `token` пустой — открытый UI (удобно в LAN);
-- непустой — нужен `Authorization: Bearer …`, Basic, `?token=` или cookie `zator_token`.
+- `auth_enabled: false` — открытый UI (только после `-no-auth` / `zator auth disable`);
+- `auth_enabled: true` — вход по паролю (`POST /api/login` → cookie `zator_session`), Basic с паролем, Bearer session;
+- `zator update` **не** снимает пароль и auth.
+- HTTP API: [`docs/API.md`](docs/API.md) (`/api/*`; `/cgi-bin/*.cgi` — алиас).
+
+CLI: `zator auth set-password`, `auth enable`, `auth disable -y`, `auth status`.
 
 ---
 
 ## Безопасность
 
-- Не выставляйте порт 17682 в интернет без токена / firewall.
+- Порт 17682 слушает все интерфейсы — на VPS обязателен пароль (или firewall / reverse proxy).
+- Не используйте `-no-auth` на машинах, доступных из интернета.
 - `strategy_register` и `blob-upload` меняют рабочий конфиг zapret2 — используйте «Вручную» осознанно; перед экспериментами сделайте бэкап в UI.
 - Обновления тянут бинарники с GitHub Releases — проверяйте, что `ZATOR_OWNER`/`ZATOR_REPO` указывают на доверенный репозиторий.
 

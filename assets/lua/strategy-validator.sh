@@ -1,5 +1,7 @@
 #!/bin/sh
-# Async worker for circular_quality; hostname is read only from a validated TSV.
+# ABI: runtime worker for circular_quality (unit zator-strategy-validator).
+# Do not edit ad-hoc on devices — ship changes via zator assets/releases.
+# Hostname is read only from a validated TSV.
 
 QUEUE_DIR="${Z2R_VALIDATION_QUEUE:-/tmp/z2r-strategy-validation}"
 Z2R_CURL_UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'

@@ -48,26 +48,33 @@ func TestJSONContentTypeAndAlias(t *testing.T) {
 }
 
 func TestAuth(t *testing.T) {
-	e := newEnv(t, envOpts{token: "s3cret"})
+	e := newEnv(t, envOpts{})
+	if err := e.app.SetPassword("s3cret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.app.Save(); err != nil {
+		t.Fatal(err)
+	}
+	session := e.app.Config.SessionToken
 
-	resp, out := e.get("/cgi-bin/status.cgi")
+	resp, out := e.get("/api/status")
 	wantError(t, resp, out, http.StatusUnauthorized, "Требуется авторизация")
 	if resp.Header.Get("WWW-Authenticate") == "" {
 		t.Error("нет WWW-Authenticate")
 	}
-	// Статика тоже защищена.
-	if resp, _ := e.do(http.MethodGet, "/", nil, nil); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("static without token: %d", resp.StatusCode)
+	// Статика SPA открыта без cookie.
+	if resp, body := e.do(http.MethodGet, "/", nil, nil); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "<html") {
+		t.Errorf("static without session: %d", resp.StatusCode)
 	}
 
-	// Bearer.
-	resp, _ = e.do(http.MethodGet, "/cgi-bin/status.cgi", nil, map[string]string{"Authorization": "Bearer s3cret"})
+	// Bearer session.
+	resp, _ = e.do(http.MethodGet, "/api/status", nil, map[string]string{"Authorization": "Bearer " + session})
 	wantStatus(t, resp, http.StatusOK)
-	resp, _ = e.do(http.MethodGet, "/cgi-bin/status.cgi", nil, map[string]string{"Authorization": "Bearer wrong"})
+	resp, _ = e.do(http.MethodGet, "/api/status", nil, map[string]string{"Authorization": "Bearer wrong"})
 	wantStatus(t, resp, http.StatusUnauthorized)
 
-	// Basic: пароль или имя пользователя = токен.
-	req, _ := http.NewRequest(http.MethodGet, e.ts.URL+"/cgi-bin/status.cgi", nil)
+	// Basic: только пароль.
+	req, _ := http.NewRequest(http.MethodGet, e.ts.URL+"/api/status", nil)
 	req.SetBasicAuth("admin", "s3cret")
 	r, err := e.ts.Client().Do(req)
 	if err != nil {
@@ -80,27 +87,13 @@ func TestAuth(t *testing.T) {
 	r.Body.Close()
 	wantStatus(t, r, http.StatusUnauthorized)
 
-	// ?token= выставляет cookie, по которому работают запросы без токена.
-	resp, _ = e.do(http.MethodGet, "/?token=s3cret", nil, nil)
+	resp, _ = e.do(http.MethodGet, "/api/status", nil, map[string]string{"Cookie": CookieName + "=" + session})
 	wantStatus(t, resp, http.StatusOK)
-	var cookie *http.Cookie
-	for _, c := range resp.Cookies() {
-		if c.Name == CookieName {
-			cookie = c
-		}
-	}
-	if cookie == nil || cookie.Value != "s3cret" || !cookie.HttpOnly {
-		t.Fatalf("cookie = %+v", cookie)
-	}
-	resp, _ = e.do(http.MethodGet, "/cgi-bin/status.cgi", nil, map[string]string{"Cookie": cookie.String()})
-	wantStatus(t, resp, http.StatusOK)
-	resp, _ = e.do(http.MethodGet, "/cgi-bin/status.cgi?token=bad", nil, nil)
-	wantStatus(t, resp, http.StatusUnauthorized)
 }
 
-func TestNoTokenAllowsAll(t *testing.T) {
+func TestNoAuthAllowsAll(t *testing.T) {
 	e := newEnv(t, envOpts{})
-	resp, _ := e.get("/cgi-bin/status.cgi")
+	resp, _ := e.get("/api/status")
 	wantStatus(t, resp, http.StatusOK)
 }
 

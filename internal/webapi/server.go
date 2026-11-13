@@ -8,24 +8,19 @@
 //
 // # Авторизация
 //
-// Если задан токен (поле token в zator.json или Options.Token), каждый запрос
-// (включая статику) должен нести его в одном из видов. Пустой токен —
-// открытый доступ (так по умолчанию после установки):
+// Если auth_enabled=true, API требует сессию. Статика SPA (index/js/css) открыта
+// без cookie — вход только через Vue / POST /api/login. auth_enabled=false —
+// открытый доступ (-no-auth / `zator auth disable`):
 //
-//   - Authorization: Bearer <token>;
-//   - HTTP Basic (пароль или имя пользователя равны токену);
-//   - параметр ?token=<token> (после чего выставляется cookie zator_token,
-//     чтобы последующие запросы SPA без токена продолжали работать);
-//   - cookie zator_token.
+//   - cookie zator_session = session_token;
+//   - Authorization: Bearer <session_token>;
+//   - HTTP Basic (пароль Web UI).
 //
-// Если токен пустой, авторизация ОТКЛЮЧЕНА и API открыт всем, кто достучится до
-// порта — это режим разработки; в продакшене токен обязателен (его создаёт
-// `zator install`).
+// Пароль — только bcrypt (password_hash).
 package webapi
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -49,8 +44,8 @@ import (
 	"github.com/AloofLibra/zator/internal/uiembed"
 )
 
-// CookieName — имя cookie с токеном.
-const CookieName = "zator_token"
+// CookieName — имя cookie сессии после login.
+const CookieName = "zator_session"
 
 // Ограничения запросов.
 const (
@@ -83,8 +78,6 @@ var (
 type Options struct {
 	// App задаёт пути и платформу; обязателен.
 	App *app.App
-	// Token переопределяет App.Config.Token (пусто — берётся из App).
-	Token string
 	// Static — файловая система Web UI. По умолчанию: WebUIDir, если там есть
 	// index.html, иначе встроенный Web UI.
 	Static fs.FS
@@ -106,7 +99,6 @@ type Options struct {
 type Server struct {
 	app      *app.App
 	paths    paths.Paths
-	token    string
 	static   fs.FS
 	store    *orchestra.Store
 	svc      service.Manager
@@ -131,7 +123,6 @@ func New(opts Options) (*Server, error) {
 	s := &Server{
 		app:      opts.App,
 		paths:    opts.App.Paths,
-		token:    opts.Token,
 		static:   opts.Static,
 		svc:      opts.Service,
 		checker:  opts.Checker,
@@ -139,9 +130,6 @@ func New(opts Options) (*Server, error) {
 		timeout:  opts.CheckTimeout,
 		now:      opts.Now,
 		sweeper:  opts.Sweeper,
-	}
-	if s.token == "" {
-		s.token = opts.App.Config.Token
 	}
 	if s.now == nil {
 		s.now = time.Now
@@ -185,17 +173,19 @@ func (s *Server) defaultStatic() fs.FS {
 type endpoint func(s *Server, w http.ResponseWriter, r *http.Request, p params)
 
 var endpoints = map[string]endpoint{
-	"status":     (*Server).handleStatus,
-	"state":      (*Server).handleState,
-	"set-lock":   (*Server).handleSetLock,
-	"clear-lock": (*Server).handleClearLock,
-	"service":    (*Server).handleService,
-	"check":      (*Server).handleCheck,
-	"domains":    (*Server).handleDomains,
-	"backups":    (*Server).handleBackups,
-	"scopes":     (*Server).handleScopes,
+	"status":       (*Server).handleStatus,
+	"state":        (*Server).handleState,
+	"set-lock":     (*Server).handleSetLock,
+	"clear-lock":   (*Server).handleClearLock,
+	"service":      (*Server).handleService,
+	"check":        (*Server).handleCheck,
+	"domains":      (*Server).handleDomains,
+	"backups":      (*Server).handleBackups,
+	"scopes":       (*Server).handleScopes,
 	"settings":     (*Server).handleSettings,
 	"blob-upload":  (*Server).handleBlobUpload,
+	"login":        (*Server).handleLogin,
+	"logout":       (*Server).handleLogout,
 }
 
 // Handler возвращает корневой http.Handler (авторизация + API + статика).
@@ -221,60 +211,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", notFound)
 	mux.Handle("/", s.staticHandler())
 	return s.authMiddleware(mux)
-}
-
-// --- авторизация ---
-
-func (s *Server) authMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.token == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		ok, viaQuery := s.authorized(r)
-		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="ZatorGO"`)
-			writeError(w, http.StatusUnauthorized, "Требуется авторизация")
-			return
-		}
-		if viaQuery {
-			http.SetCookie(w, &http.Cookie{
-				Name: CookieName, Value: s.token, Path: "/",
-				HttpOnly: true, SameSite: http.SameSiteLaxMode,
-				MaxAge: 30 * 24 * 3600,
-			})
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) tokenEqual(got string) bool {
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) == 1
-}
-
-// authorized проверяет токен; viaQuery — токен пришёл параметром ?token=.
-func (s *Server) authorized(r *http.Request) (ok, viaQuery bool) {
-	if h := r.Header.Get("Authorization"); h != "" {
-		if scheme, rest, found := strings.Cut(h, " "); found {
-			switch strings.ToLower(scheme) {
-			case "bearer":
-				if s.tokenEqual(strings.TrimSpace(rest)) {
-					return true, false
-				}
-			case "basic":
-				if user, pass, ok := r.BasicAuth(); ok && (s.tokenEqual(pass) || (pass == "" && s.tokenEqual(user))) {
-					return true, false
-				}
-			}
-		}
-	}
-	if c, err := r.Cookie(CookieName); err == nil && s.tokenEqual(c.Value) {
-		return true, false
-	}
-	if s.tokenEqual(r.URL.Query().Get("token")) {
-		return true, true
-	}
-	return false, false
 }
 
 // --- статика ---

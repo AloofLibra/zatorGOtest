@@ -8,6 +8,7 @@ export default defineConfig({
   base: './',
   server: {
     proxy: {
+      '/api': 'http://127.0.0.1:8099',
       '/cgi-bin': 'http://127.0.0.1:8099',
       '/favicon.svg': 'http://127.0.0.1:8099',
     },

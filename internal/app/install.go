@@ -14,7 +14,7 @@ import (
 )
 
 // Install создаёт раскладку каталогов, распаковывает встроенные ресурсы
-// и записывает текущую a.Config (с новым токеном, если его ещё нет).
+// и записывает текущую a.Config (пароль/auth задаёт вызывающий код).
 // Вызывающий код должен при необходимости предварительно вызвать Load.
 func (a *App) Install() error {
 	if err := a.Paths.EnsureDirs(); err != nil {
@@ -26,8 +26,6 @@ func (a *App) Install() error {
 	if err := a.syncAssets(); err != nil {
 		return err
 	}
-	// Токен опционален: по умолчанию Web UI открыт без авторизации.
-	// Задайте token в zator.json и перезапустите webui, если нужна защита.
 	now := time.Now().UTC().Format("2006-01-02 15:04")
 	ver := zator.Version()
 	_ = deploy.WriteVersion(a.Paths, deploy.Version{
@@ -40,7 +38,8 @@ func (a *App) Install() error {
 	return a.Save()
 }
 
-// Update обновляет встроенные ресурсы, сохраняя существующую конфигурацию.
+// Update обновляет встроенные ресурсы, сохраняя существующую конфигурацию
+// (пароль, auth_enabled, legacy token не трогаются).
 func (a *App) Update() error {
 	if !a.Installed() {
 		return fmt.Errorf("zator не установлен в %s", a.Paths.ZatorRoot)
@@ -51,8 +50,6 @@ func (a *App) Update() error {
 	if err := a.Load(); err != nil {
 		return err
 	}
-	// Web UI по умолчанию без токена: снимаем ранее автосгенерированный.
-	a.ClearToken()
 	if err := a.syncAssets(); err != nil {
 		return err
 	}
@@ -68,13 +65,46 @@ func (a *App) Update() error {
 	return a.Save()
 }
 
-// Uninstall удаляет каталог zator целиком. Каталог zapret2 не затрагивается.
-func (a *App) Uninstall() error {
+// UninstallOptions — поведение удаления.
+type UninstallOptions struct {
+	// Purge удаляет весь ZatorRoot (включая config/state/lists).
+	Purge bool
+	// SkipService не трогает unit-файлы служб.
+	SkipService bool
+}
+
+// Uninstall снимает runtime. Без Purge сохраняет config, state, lists, extra_strats.
+// Каталог zapret2 не затрагивается.
+func (a *App) Uninstall(opts UninstallOptions) error {
 	root := a.Paths.ZatorRoot
 	if root == "" || root == "/" || root == filepath.VolumeName(root)+string(filepath.Separator) {
 		return fmt.Errorf("небезопасный корневой каталог: %q", root)
 	}
-	return os.RemoveAll(root)
+	if !opts.SkipService {
+		_ = a.StopAndUninstallServices()
+	}
+	if opts.Purge {
+		return os.RemoveAll(root)
+	}
+	return a.removeRuntime()
+}
+
+// removeRuntime удаляет бинарник и встроенные ассеты, оставляя пользовательские данные.
+func (a *App) removeRuntime() error {
+	for _, p := range []string{
+		a.Paths.BinDir,
+		a.Paths.WebUIDir,
+		a.Paths.LuaDir,
+		a.Paths.DataDir,
+		filepath.Join(a.Paths.ZatorRoot, "files"),
+		filepath.Join(a.Paths.ExtraStratsDir, "cache"),
+		a.Paths.OrchestraDir,
+	} {
+		if err := os.RemoveAll(p); err != nil {
+			return fmt.Errorf("удаление %s: %w", p, err)
+		}
+	}
+	return nil
 }
 
 func (a *App) syncAssets() error {
@@ -92,6 +122,9 @@ func (a *App) syncAssets() error {
 	// locked.lua должен лежать в /opt/zator/lua (пути в config.default).
 	if err := copyFSKeepExisting(uiembed.Orchestra(), a.Paths.LuaDir); err != nil {
 		return fmt.Errorf("locked.lua → lua: %w", err)
+	}
+	if err := a.migrateOrchestraCacheToState(); err != nil {
+		return err
 	}
 	if err := copyFSKeepExisting(uiembed.Lists(), a.Paths.ListsDir); err != nil {
 		return fmt.Errorf("распаковка lists: %w", err)
@@ -178,6 +211,85 @@ func (a *App) ensureOrchestraState() error {
 			return fmt.Errorf("файл состояния %s: %w", p, err)
 		}
 		f.Close()
+	}
+	return nil
+}
+
+// migrateOrchestraCacheToState переносит локи из старого пути
+// extra_strats/cache/orchestra → state/orchestra (канон для Go и Lua).
+func (a *App) migrateOrchestraCacheToState() error {
+	oldDir := filepath.Join(a.Paths.ExtraStratsDir, "cache", "orchestra")
+	newDir := a.Paths.StateOrchestraDir()
+	if err := os.MkdirAll(filepath.Join(newDir, "scopes"), 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(oldDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "locked.lua" || strings.HasSuffix(name, ".lua") {
+			continue
+		}
+		src := filepath.Join(oldDir, name)
+		dst := filepath.Join(newDir, name)
+		if e.IsDir() {
+			if name != "scopes" {
+				continue
+			}
+			if err := copyDirKeepExisting(src, dst); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := os.Stat(dst); err == nil {
+			continue // state уже есть — не затираем
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyDirKeepExisting(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		s := filepath.Join(src, e.Name())
+		d := filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			if err := copyDirKeepExisting(s, d); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := os.Stat(d); err == nil {
+			continue
+		}
+		data, err := os.ReadFile(s)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(d, data, 0o644); err != nil {
+			return err
+		}
 	}
 	return nil
 }

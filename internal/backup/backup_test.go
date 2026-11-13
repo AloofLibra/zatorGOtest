@@ -94,7 +94,7 @@ func (e *env) seed(t *testing.T) {
 	write(t, filepath.Join(p.StateOrchestraDir(), "mode_override.tsv"), "1\tclone\n")
 	write(t, filepath.Join(p.StateOrchestraDir(), "blob_override.tsv"), "2\tmaxru\n")
 	write(t, filepath.Join(p.StateOrchestraDir(), "scopes", "mark_2.tsv"), "1\ttls\t5\n")
-	write(t, p.HistoryTSV, "history must not be backed up\n")
+	write(t, filepath.Join(p.StateOrchestraDir(), "history.tsv"), "history must not be backed up\n")
 }
 
 func names(t *testing.T, m *Manager, name string) []string {

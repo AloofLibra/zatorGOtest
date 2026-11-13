@@ -55,8 +55,8 @@ func TestNfqwsProbeWriteProbeLua(t *testing.T) {
 	if err := os.MkdirAll(p.LuaDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	src := `local LOCKED_PATH = "/opt/zator/extra_strats/cache/orchestra/locked.tsv"
-local X = "/opt/zator/extra_strats/cache/orchestra/foo"
+	src := `local LOCKED_PATH = "/opt/zator/state/orchestra/locked.tsv"
+local X = "/opt/zator/state/orchestra/foo"
 `
 	if err := os.WriteFile(filepath.Join(p.LuaDir, "locked.lua"), []byte(src), 0o644); err != nil {
 		t.Fatal(err)

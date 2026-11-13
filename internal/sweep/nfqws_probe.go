@@ -19,7 +19,7 @@ import (
 )
 
 // Жёстко прошитый в Lua путь к orchestra (см. assets/lua/locked.lua).
-const productionOrchestraLuaPath = "/opt/zator/extra_strats/cache/orchestra"
+const productionOrchestraLuaPath = "/opt/zator/state/orchestra"
 
 // NfqwsProbeConfig — параметры изолированного пробника nfqws2.
 type NfqwsProbeConfig struct {

@@ -253,7 +253,8 @@ func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, 
 		return nil, tag, err
 	}
 	// Новый бинарник сам разложит актуальные assets (webui и пр.).
-	cmd := exec.CommandContext(ctx, final, "install", "-zapret=false")
+	// -skip-service: не трогаем units; auth из существующего zator.json сохраняется.
+	cmd := exec.CommandContext(ctx, final, "install", "-zapret=false", "-skip-service")
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	if err != nil {

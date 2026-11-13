@@ -1,11 +1,13 @@
-local LOCKED_PATH = "/opt/zator/extra_strats/cache/orchestra/locked.tsv"
-local LOCKED_MANUAL_PATH = "/opt/zator/extra_strats/cache/orchestra/locked.manual.tsv"
+-- Канон: те же файлы, что пишет Go WebUI (state/orchestra).
+local LOCKED_PATH = "/opt/zator/state/orchestra/locked.tsv"
+local LOCKED_MANUAL_PATH = "/opt/zator/state/orchestra/locked.manual.tsv"
 -- Per-mark lock-файлы: <orchestra>/scopes/mark_N.tsv (3 колонки, без колонки scope).
 -- Список активных mark'ов берём из маппинга клиентов — он и так перечисляет
 -- все mark'и, чей трафик маркируется firewall'ом.
-local LOCKED_DIR = string.match(LOCKED_PATH, "^(.*)/[^/]+$") or "/opt/zator/extra_strats/cache/orchestra"
+local LOCKED_DIR = "/opt/zator/state/orchestra"
 local SCOPED_DIR = LOCKED_DIR .. "/scopes"
-local SCOPED_MAP_PATH = LOCKED_DIR .. "/../client_scope.tsv"
+-- client_scope.tsv остаётся в cache (пишет firewall/Go), не в state/orchestra.
+local SCOPED_MAP_PATH = "/opt/zator/extra_strats/cache/client_scope.tsv"
 local last_load = 0
 local cache_ttl = 2
 local LOCKED_TLS = {}

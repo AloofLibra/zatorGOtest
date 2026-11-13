@@ -160,7 +160,7 @@ async function saveSelect(setting: string, value: string, label: string) {
   try {
     await withBusy(`sel-${setting}`, async () => {
       announceRestart()
-      const res = await api('/cgi-bin/settings.cgi', formBody({ setting, value }))
+      const res = await api('/api/settings', formBody({ setting, value }))
       showToast(`${label}: ${value}.${restartSuffix(res)}`)
       await fetchAndApplyState()
     })
@@ -263,7 +263,7 @@ async function saveScope() {
   try {
     await withBusy('scope', async () => {
       announceRestart()
-      const res = await api<{ ok?: boolean; enabled?: boolean; warning?: string }>('/cgi-bin/settings.cgi', formBody({
+      const res = await api<{ ok?: boolean; enabled?: boolean; warning?: string }>('/api/settings', formBody({
         setting: 'client_scope',
         client_scope_enable: scopeForm.enable ? '1' : '0',
         client_scope_mark_mask: String(scopeForm.mask ?? '').trim(),
@@ -287,7 +287,7 @@ async function saveScope() {
 async function loadConfig() {
   try {
     await withBusy('cfg-load', async () => {
-      const data = await api<{ content?: string; path?: string; error?: string }>('/cgi-bin/settings.cgi?setting=config_raw')
+      const data = await api<{ content?: string; path?: string; error?: string }>('/api/settings?setting=config_raw')
       if (data.error) throw new Error(data.error)
       configText.value = data.content || ''
       configPath.value = data.path || ''
@@ -308,7 +308,7 @@ async function saveConfig() {
   try {
     await withBusy('cfg-save', async () => {
       announceRestart()
-      await api('/cgi-bin/settings.cgi', formBody({ setting: 'config_raw', value: configText.value }))
+      await api('/api/settings', formBody({ setting: 'config_raw', value: configText.value }))
       showToast('Конфиг сохранён')
     })
   } catch (e) {
@@ -319,7 +319,7 @@ async function saveConfig() {
 async function loadErrors() {
   try {
     await withBusy('err-load', async () => {
-      const data = await api<typeof errors.value>('/cgi-bin/settings.cgi?setting=nfqws2_errors')
+      const data = await api<typeof errors.value>('/api/settings?setting=nfqws2_errors')
       errors.value = {
         available: !!data.available,
         content: data.content || '',
@@ -358,7 +358,7 @@ async function applyUpdates() {
         release?: string
         restart_required?: boolean
       }>(
-        '/cgi-bin/settings.cgi',
+        '/api/settings',
         formBody({ setting: 'update_apply' }),
       )
       if (res.up_to_date) {
