@@ -68,6 +68,11 @@ export interface CheckItem {
 export interface CheckPayload {
   results?: CheckItem[]
   message?: string
+  profile?: number
+  scope?: string
+  lock?: string
+  zapret2_running?: boolean
+  waited_apply?: boolean
 }
 
 export interface TlsBlobSettings {

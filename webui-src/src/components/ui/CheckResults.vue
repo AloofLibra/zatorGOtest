@@ -16,6 +16,18 @@ const results = computed(() => {
 const isEmpty = computed(() =>
   props.emptyHidden && !props.payload?.message)
 
+const metaLine = computed(() => {
+  const p = props.payload
+  if (!p) return ''
+  const bits: string[] = []
+  if (p.lock) bits.push(`лок ${p.lock}`)
+  if (p.scope) bits.push(`scope ${p.scope}`)
+  if (p.zapret2_running === false) bits.push('zapret2 выключен')
+  if (p.zapret2_running === true) bits.push('zapret2 online')
+  if (p.waited_apply) bits.push('после apply')
+  return bits.join(' · ')
+})
+
 function verdictClass(verdict: string | undefined) {
   if (verdict === 'ok') return 'ok'
   if (verdict === 'warn') return 'warn'
@@ -39,8 +51,10 @@ function hasVerdict(item: CheckItem) {
 
 <template>
   <div :class="{ empty: isEmpty && !results.length }">
+    <p v-if="metaLine" class="panel-d" style="margin:0 0 0.4rem">{{ metaLine }}</p>
+    <p v-if="payload?.message" class="panel-d" style="margin:0 0 0.5rem">{{ payload.message }}</p>
     <template v-if="!results.length">
-      {{ payload?.message || emptyMessage }}
+      {{ !payload?.message ? emptyMessage : '' }}
     </template>
     <article v-for="(item, index) in results" :key="index" class="check-item">
       <div class="check-title">

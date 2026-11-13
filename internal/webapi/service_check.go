@@ -2,12 +2,19 @@ package webapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/service"
 )
+
+// luaLockCacheTTL — запас над cache_ttl=2 в assets/lua/locked.lua.
+const luaLockCacheTTL = 2300 * time.Millisecond
 
 // POST /cgi-bin/service.cgi — start|stop|restart службы zapret2.
 func (s *Server) handleService(w http.ResponseWriter, r *http.Request, p params) {
@@ -52,11 +59,13 @@ func (s *Server) checkCtx(r *http.Request) (context.Context, context.CancelFunc)
 }
 
 // GET|POST /cgi-bin/check.cgi — полная проверка либо одного профиля (?profile=N).
+// Для profile: возвращает lock/scope/zapret2_running; wait_apply=1 ждёт TTL Lua.
 func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request, p params) {
 	if !requireMethod(w, r, http.MethodGet, http.MethodPost) {
 		return
 	}
-	if _, err := scopeParam(p); err != nil {
+	scope, err := scopeParam(p)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -72,10 +81,66 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request, p params) {
 			return
 		}
 		id, _ := strconv.Atoi(profile)
-		resp = s.checker.CheckProfile(ctx, id)
+		waitApply := p.Get("wait_apply") == "1" || strings.EqualFold(p.Get("wait_apply"), "true")
+		if waitApply {
+			timer := time.NewTimer(luaLockCacheTTL)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				writeError(w, http.StatusGatewayTimeout, "Таймаут ожидания применения лока")
+				return
+			case <-timer.C:
+			}
+			resp.WaitedApply = true
+		}
+		checkResp := s.checker.CheckProfile(ctx, id)
+		checkResp.WaitedApply = resp.WaitedApply
+		resp = checkResp
+		s.annotateProfileCheck(&resp, scope, id)
 	}
 	if resp.Results == nil {
 		resp.Results = []netcheck.TargetResult{}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// annotateProfileCheck добавляет факты о локе и состоянии zapret2.
+func (s *Server) annotateProfileCheck(resp *netcheck.CheckResponse, scope string, profile int) {
+	resp.Profile = profile
+	resp.Scope = scope
+	resp.Lock = s.profileLockLabel(scope, profile)
+	running := service.IsNfqws2Running()
+	resp.Zapret2Running = &running
+
+	var bits []string
+	if resp.Message != "" {
+		bits = append(bits, resp.Message)
+	}
+	if !running {
+		bits = append(bits, "zapret2 не запущен — TLS-тест идёт без обхода DPI")
+	}
+	switch resp.Lock {
+	case "auto":
+		bits = append(bits, fmt.Sprintf("лок профиля %d: auto (проверяется текущий авто-режим)", profile))
+	case "0":
+		bits = append(bits, fmt.Sprintf("лок профиля %d: выключен (0)", profile))
+	default:
+		bits = append(bits, fmt.Sprintf("лок профиля %d: стратегия %s (scope=%s)", profile, resp.Lock, scope))
+	}
+	resp.Message = strings.Join(bits, ". ")
+}
+
+func (s *Server) profileLockLabel(scope string, profile int) string {
+	if s.store == nil {
+		return "auto"
+	}
+	id := strconv.Itoa(profile)
+	for _, proto := range config.ProfileProtos(profile) {
+		st, err := s.store.GetLock(scope, id, proto)
+		if err != nil || st.IsAuto() {
+			continue
+		}
+		return st.String()
+	}
+	return "auto"
 }

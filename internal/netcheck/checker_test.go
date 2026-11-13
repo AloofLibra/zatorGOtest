@@ -152,7 +152,7 @@ func TestCheckProfile_NoTLSProfiles(t *testing.T) {
 	}
 	for _, p := range []int{7, 8, 9, 0, 42} {
 		r := c.CheckProfile(context.Background(), p)
-		if r.Results == nil || len(r.Results) != 0 || r.Message != "" {
+		if r.Results == nil || len(r.Results) != 0 || r.Message != MessageNoTLSProfile {
 			t.Errorf("profile %d: %+v", p, r)
 		}
 	}

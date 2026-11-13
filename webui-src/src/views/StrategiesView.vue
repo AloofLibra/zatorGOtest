@@ -155,6 +155,7 @@ async function save(profile: string, p: ProfileInfo) {
       showToast(`Стратегия вне диапазона (1–${max}, или 0)`, 'error')
       return
     }
+    let checkPayload: Awaited<ReturnType<typeof profileCheck>> | null = null
     await withBusy(`lock-${profile}`, async () => {
       await setLock(profile, n, scope.value)
       draft.value[profile] = String(n)
@@ -163,15 +164,24 @@ async function save(profile: string, p: ProfileInfo) {
       syncDraftFromLocks(locks.value, true)
       if (n !== 0) {
         try {
-          strategyChecks[profile] = await profileCheck(profile, scope.value)
-        } catch {
-          // стратегия уже зафиксирована — проверка необязательна
+          // wait_apply: ждём TTL Lua, затем TLS/DNS-тест с метаданными лока
+          checkPayload = await profileCheck(profile, scope.value, { waitApply: true })
+          strategyChecks[profile] = checkPayload
+        } catch (e) {
+          showToast(`Лок записан, проверка не выполнена: ${(e as Error).message}`, 'warning')
         }
       }
     })
-    showToast(n === 0
-      ? `Профиль ${profile} выключен`
-      : `Профиль ${profile}: стратегия ${n}`)
+    if (n === 0) {
+      showToast(`Профиль ${profile} выключен`)
+      return
+    }
+    const v = checkPayload?.results?.[0]?.verdict
+    if (v === 'ok') showToast(`Профиль ${profile}: стратегия ${n} — цель доступна`)
+    else if (v === 'warn') showToast(`Профиль ${profile}: стратегия ${n} — с предупреждением`, 'warning')
+    else if (v === 'fail') showToast(`Профиль ${profile}: стратегия ${n} записана, цель недоступна`, 'warning')
+    else if (checkPayload?.message) showToast(`Профиль ${profile}: стратегия ${n}. ${checkPayload.message}`, 'info')
+    else showToast(`Профиль ${profile}: стратегия ${n}`)
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
@@ -202,7 +212,13 @@ async function check(profile: string, p: ProfileInfo) {
   }
   try {
     await withBusy(`check-${profile}`, async () => {
-      strategyChecks[profile] = await profileCheck(profile, scope.value)
+      const payload = await profileCheck(profile, scope.value, { waitApply: true })
+      strategyChecks[profile] = payload
+      const v = payload.results?.[0]?.verdict
+      if (v === 'ok') showToast(`Профиль ${profile}: цель доступна при локе ${payload.lock || p.current_lock || 'auto'}`)
+      else if (v === 'warn') showToast(`Профиль ${profile}: предупреждение при проверке`, 'warning')
+      else if (v === 'fail') showToast(`Профиль ${profile}: цель недоступна`, 'warning')
+      else if (payload.message) showToast(payload.message, 'info')
     })
   } catch (e) {
     showToast((e as Error).message, 'error')

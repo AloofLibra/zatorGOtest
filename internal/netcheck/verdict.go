@@ -100,7 +100,7 @@ func failReason(s12, s13 string) string {
 func Verdict(v12, v13 VersionDetail, dl *Download) (verdict, text string) {
 	t12, t13 := v12.Answered(), v13.Answered()
 	if !t12 && !t13 {
-		return VerdictFail, fmt.Sprintf("Нет ответа: %s. Стратегия, скорее всего, не работает. %s",
+		return VerdictFail, fmt.Sprintf("Нет ответа: %s. Цель недоступна с роутера (это не доказывает сбой лока). %s",
 			failReason(v12.State, v13.State), manualHint)
 	}
 	if !v12.CodeOK() && !v13.CodeOK() {

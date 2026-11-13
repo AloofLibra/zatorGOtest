@@ -177,6 +177,13 @@ type TargetResult struct {
 type CheckResponse struct {
 	Results []TargetResult `json:"results"`
 	Message string         `json:"message,omitempty"`
+
+	// Метаданные profile-check (заполняет webapi): что реально проверялось.
+	Profile        int    `json:"profile,omitempty"`
+	Scope          string `json:"scope,omitempty"`
+	Lock           string `json:"lock,omitempty"`            // auto | 0 | N
+	Zapret2Running *bool  `json:"zapret2_running,omitempty"` // nil = неизвестно
+	WaitedApply    bool   `json:"waited_apply,omitempty"`
 }
 
 // CodeOK сообщает, что HTTP-код 2xx или 3xx (z2r_tls_code_ok).

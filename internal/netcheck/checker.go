@@ -32,6 +32,8 @@ const (
 
 	// MessageUDPProfile — пояснение для UDP-профилей 5/6.
 	MessageUDPProfile = "Для UDP-профиля быстрая TLS-проверка неприменима. Проверьте работу в браузере или приложении."
+	// MessageNoTLSProfile — профили без привязанной HTTPS-цели.
+	MessageNoTLSProfile = "У этого профиля нет привязанной HTTPS-цели: быстрый TLS-тест недоступен. Лок применяется, проверку делайте вручную или SuperSweep."
 )
 
 // Target — цель проверки.
@@ -203,7 +205,7 @@ func (c *Checker) CheckProfile(ctx context.Context, profile int) CheckResponse {
 	}
 	t, ok := c.ProfileTarget(ctx, profile)
 	if !ok {
-		return CheckResponse{Results: []TargetResult{}}
+		return CheckResponse{Results: []TargetResult{}, Message: MessageNoTLSProfile}
 	}
 	return CheckResponse{Results: []TargetResult{c.CheckTarget(ctx, t.Label, t.URL)}}
 }

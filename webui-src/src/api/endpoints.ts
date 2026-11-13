@@ -50,9 +50,13 @@ export const serviceAction = (action: 'start' | 'stop' | 'restart') =>
 export const runCheck = () =>
   api<CheckPayload>('/api/check', { method: 'POST' })
 
-export const profileCheck = (profile: string, scope: string) =>
+export const profileCheck = (profile: string, scope: string, opts: { waitApply?: boolean } = {}) =>
   api<CheckPayload>('/api/check',
-    formBody({ profile, scope }))
+    formBody({
+      profile,
+      scope,
+      wait_apply: opts.waitApply ? '1' : undefined,
+    }))
 
 export const fetchTlsBlobSettings = () =>
   api<TlsBlobSettings>('/api/settings')
