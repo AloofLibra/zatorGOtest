@@ -243,8 +243,8 @@ func TestRenderSysV(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"#!/bin/sh", "NAME=zapret2", "PIDFILE=/opt/var/run/zapret2.pid", "nohup", "nfqws2",
-		"restart-fw) fw restart", "status)",
+		"#!/bin/sh", "NAME=zapret2", "PIDFILE=/opt/var/run/zapret2.pid", "LOGFILE=", "nohup", "nfqws2",
+		"не запустился", "restart-fw) fw restart", "status)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("в sysv-скрипте нет %q:\n%s", want, got)

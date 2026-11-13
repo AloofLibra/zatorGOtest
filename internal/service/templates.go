@@ -27,6 +27,7 @@ type TemplateData struct {
 	Description string   // описание
 	Command     []string // исполняемый файл и аргументы
 	PIDFile     string   // PID-файл (SysV/Entware)
+	LogFile     string   // лог stdout/stderr для SysV/Entware
 	InitScript  string   // путь init-скрипта (для restart-fw)
 	FWHook      string   // необязательный скрипт межсетевого экрана
 	Path        string   // значение PATH
@@ -121,6 +122,7 @@ PATH={{.Path}}
 export PATH
 NAME={{shq .Name}}
 PIDFILE={{shq .PIDFile}}
+LOGFILE={{shq .LogFile}}
 {{- if .FWHook}}
 FWHOOK={{shq .FWHook}}
 {{- end}}
@@ -145,14 +147,35 @@ start() {
 	fi
 	fw start
 	mkdir -p "$(dirname "$PIDFILE")"
-	nohup {{.ShellCommand}} >/dev/null 2>&1 &
+	if [ -n "$LOGFILE" ]; then
+		mkdir -p "$(dirname "$LOGFILE")"
+		: >>"$LOGFILE"
+	else
+		LOGFILE=/dev/null
+	fi
+	# Keenetic/Entware: не глотать stderr — иначе webui падает молча, а install врёт «запущен».
+	if command -v nohup >/dev/null 2>&1; then
+		nohup {{.ShellCommand}} >>"$LOGFILE" 2>&1 &
+	else
+		{{.ShellCommand}} >>"$LOGFILE" 2>&1 &
+	fi
 	echo $! > "$PIDFILE"
+	sleep 1
+	if ! is_running; then
+		echo "$NAME не запустился (лог: $LOGFILE)" >&2
+		rm -f "$PIDFILE"
+		return 1
+	fi
 	echo "$NAME запущен"
 }
 
 stop() {
 	if is_running; then
 		kill "$(cat "$PIDFILE")" 2>/dev/null
+		sleep 1
+		if is_running; then
+			kill -9 "$(cat "$PIDFILE")" 2>/dev/null
+		fi
 	fi
 	rm -f "$PIDFILE"
 	fw stop
@@ -169,7 +192,6 @@ case "$1" in
 		;;
 	*) echo "usage: $0 {start|stop|restart|restart-fw|status}"; exit 1 ;;
 esac
-exit 0
 `
 
 const keeneticHookTemplate = `#!/bin/sh
@@ -271,6 +293,9 @@ func (m *manager) templateData(u Unit) TemplateData {
 		runDir = "/opt/var/run"
 	}
 	d.PIDFile = runDir + "/" + string(u) + ".pid"
+	if m.cfg.Paths.StateDir != "" {
+		d.LogFile = slash(filepath.Join(m.cfg.Paths.StateDir, string(u)+".log"))
+	}
 	return d
 }
 

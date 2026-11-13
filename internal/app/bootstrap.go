@@ -250,6 +250,13 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 			hard = append(hard, fmt.Sprintf("install %s: %v", u, err))
 		} else if err := mgr.Restart(ctx, u); err != nil {
 			hard = append(hard, fmt.Sprintf("start %s: %v", u, err))
+		} else {
+			time.Sleep(500 * time.Millisecond)
+			st, err := mgr.Status(ctx, u)
+			if err != nil || !st.Running {
+				logHint := filepath.ToSlash(filepath.Join(a.Paths.StateDir, string(u)+".log"))
+				hard = append(hard, "zator-webui не запущен после start (лог: "+logHint+")")
+			}
 		}
 	}
 
@@ -258,7 +265,7 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 		return fmt.Errorf("%s", joinErrors(all))
 	}
 	if len(soft) > 0 {
-		// Web UI поднят — zapret-проблемы не валят install (иначе launcher die).
+		// Web UI реально жив — zapret-проблемы не валят install (иначе launcher die).
 		return &SoftServiceError{Msgs: soft}
 	}
 	return nil
