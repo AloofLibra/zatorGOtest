@@ -73,7 +73,11 @@ func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) 
 		return map[string]any{"state": st, "enabled": st == "включен"}, nil
 	case "udp_games", "udp_games_state":
 		st := cfg.UDPGamesText()
-		return map[string]any{"state": st, "enabled": st == "Включен"}, nil
+		return map[string]any{
+			"state":   st,
+			"enabled": st == "Включен",
+			"ports":   config.UDPGamesPorts,
+		}, nil
 	case "wssize_ramp":
 		return s.wssizeGet(cfg), nil
 	case "auto_mode", "auto_mode_state":

@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { applySetting, clearLock, setLock, profileCheck } from '../api/endpoints'
+import type { ProfileInfo } from '../api/types'
+import { gatedReason, isProfileGated } from '../gating'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { fetchAndApplyState } from '../stores/state'
 import { locks, refreshAll, scope, scopes, statusLoaded, strategyChecks } from '../stores/status'
 import { refreshTlsBlobSettings, tlsBlobSettings } from '../stores/settings'
-import { announceRestart, restartSuffix, showToast } from '../stores/toast'
+import { restartSuffix, showToast } from '../stores/toast'
 import SupersweepPanel from '../components/strategies/SupersweepPanel.vue'
 
+const OVERRIDE_PROFILES = new Set(['1', '2', '3', '4', '8'])
+
 const router = useRouter()
+const route = useRoute()
 const draft = ref<Record<string, string>>({})
 const fakeMode = ref<Record<string, string>>({})
 const tlsProfile = ref<Record<string, string>>({})
@@ -28,6 +33,7 @@ watch(tlsBlobSettings, (t) => {
   if (!t) return
   for (const p of locks.value || []) {
     const id = String(p.profile)
+    if (!OVERRIDE_PROFILES.has(id)) continue
     fakeMode.value[id] = t.profile_modes?.[id] || 'classic'
     tlsProfile.value[id] = t.profile_blobs?.[id] ?? ''
     cloneSize.value[id] = t.profile_sizes?.[id] || ''
@@ -36,10 +42,26 @@ watch(tlsBlobSettings, (t) => {
 
 const scopeOptions = computed(() => scopes.value.scopes || ['default'])
 
+onMounted(() => {
+  const q = String(route.query.scope || '')
+  if (q && q !== scope.value) {
+    scope.value = q
+    refreshAll().catch((e) => showToast((e as Error).message, 'error'))
+  }
+})
+
 function changeScope(v: string) {
   scope.value = v || 'default'
   router.replace({ query: { scope: scope.value } })
   refreshAll().catch((e) => showToast((e as Error).message, 'error'))
+}
+
+function canOverride(p: ProfileInfo) {
+  return OVERRIDE_PROFILES.has(String(p.profile))
+}
+
+function gated(p: ProfileInfo) {
+  return isProfileGated(p)
 }
 
 async function refresh() {
@@ -50,7 +72,11 @@ async function refresh() {
   }
 }
 
-async function save(profile: string) {
+async function save(profile: string, p: ProfileInfo) {
+  if (gated(p)) {
+    showToast(gatedReason(p), 'error')
+    return
+  }
   const raw = draft.value[profile]?.trim()
   if (!raw) {
     showToast('Укажите номер стратегии', 'error')
@@ -72,7 +98,11 @@ async function save(profile: string) {
   }
 }
 
-async function reset(profile: string) {
+async function reset(profile: string, p: ProfileInfo) {
+  if (gated(p)) {
+    showToast(gatedReason(p), 'error')
+    return
+  }
   try {
     await withBusy(`clear-${profile}`, async () => {
       await clearLock(profile, scope.value)
@@ -85,7 +115,11 @@ async function reset(profile: string) {
   }
 }
 
-async function check(profile: string) {
+async function check(profile: string, p: ProfileInfo) {
+  if (gated(p)) {
+    showToast(gatedReason(p), 'error')
+    return
+  }
   try {
     await withBusy(`check-${profile}`, async () => {
       strategyChecks[profile] = await profileCheck(profile, scope.value)
@@ -102,7 +136,6 @@ function focusSupersweep() {
 async function saveFake(profile: string) {
   try {
     await withBusy(`fake-${profile}`, async () => {
-      announceRestart()
       const res = await applySetting.fake_mode(profile, fakeMode.value[profile] || 'classic')
       showToast(`Режим фейков профиля ${profile}.${restartSuffix(res)}`)
       await refreshTlsBlobSettings()
@@ -115,7 +148,6 @@ async function saveFake(profile: string) {
 async function saveTlsProfile(profile: string) {
   try {
     await withBusy(`tlsprof-${profile}`, async () => {
-      announceRestart()
       const res = await applySetting.tls_blob_profile(profile, tlsProfile.value[profile] ?? '')
       showToast(`TLS профиля ${profile}.${restartSuffix(res)}`)
       await refreshTlsBlobSettings()
@@ -128,7 +160,6 @@ async function saveTlsProfile(profile: string) {
 async function saveCloneSize(profile: string) {
   try {
     await withBusy(`clone-${profile}`, async () => {
-      announceRestart()
       const res = await applySetting.clone_size(profile, cloneSize.value[profile] || '')
       showToast(`Лимит клона профиля ${profile}.${restartSuffix(res)}`)
       await refreshTlsBlobSettings()
@@ -169,7 +200,7 @@ async function saveCloneSize(profile: string) {
 
     <div v-if="!statusLoaded" class="loading">Загрузка…</div>
     <div v-else class="strategy-grid">
-      <article v-for="p in locks" :key="p.profile" class="strategy">
+      <article v-for="p in locks" :key="p.profile" class="strategy" :class="{ 'is-gated': gated(p) }">
         <div>
           <h3>{{ p.profile }}. {{ p.label }}</h3>
           <p v-if="p.description" class="meta">{{ p.description }}</p>
@@ -180,21 +211,22 @@ async function saveCloneSize(profile: string) {
             <template v-if="p.is_udp_games"> · games {{ p.udp_games_enabled ? 'вкл' : 'выкл' }}</template>
             <template v-if="p.is_dns_desync"> · dns {{ p.dns_desync_enabled ? 'вкл' : 'выкл' }}</template>
           </div>
+          <p v-if="gated(p)" class="panel-d" style="color:var(--warn);margin-top:0.45rem">{{ gatedReason(p) }}</p>
         </div>
         <div class="row">
           <input v-model="draft[String(p.profile)]" type="number" min="0" :max="p.max_strategy || 999"
-            :disabled="busyActive" placeholder="номер" style="max-width:7rem">
-          <button type="button" class="primary" :disabled="busyActive"
+            :disabled="busyActive || gated(p)" placeholder="номер" style="max-width:7rem">
+          <button type="button" class="primary" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `lock-${p.profile}` }"
-            @click="save(String(p.profile))">Зафиксировать</button>
-          <button type="button" class="ghost" :disabled="busyActive"
+            @click="save(String(p.profile), p)">Зафиксировать</button>
+          <button type="button" class="ghost" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `clear-${p.profile}` }"
-            @click="reset(String(p.profile))">Авто</button>
-          <button type="button" class="ghost" :disabled="busyActive"
+            @click="reset(String(p.profile), p)">Авто</button>
+          <button type="button" class="ghost" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `check-${p.profile}` }"
-            @click="check(String(p.profile))">Проверка</button>
+            @click="check(String(p.profile), p)">Проверка</button>
         </div>
-        <div class="grid-2" style="margin-top:0.75rem">
+        <div v-if="canOverride(p)" class="grid-2" style="margin-top:0.75rem">
           <label class="field">
             <span>Режим фейков</span>
             <select v-model="fakeMode[String(p.profile)]" :disabled="busyActive">

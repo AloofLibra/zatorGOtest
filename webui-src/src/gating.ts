@@ -30,10 +30,10 @@ export function gatedReason(profile: ProfileInfo) {
 
 // Панель настроек, включающая профиль (для перехода по клику из подсказки)
 export function gatedPanel(profile: ProfileInfo): string | null {
-  if (isAutoModeGated(profile)) return 'auto-mode'
-  if (profile.is_fallback && !profile.fallback_enabled) return 'fallback'
-  if (profile.is_udp_games && !profile.udp_games_enabled) return 'udp-games'
-  if (profile.is_dns_desync && !profile.dns_desync_enabled) return 'dns-desync'
+  if (isAutoModeGated(profile)) return 'modes'
+  if (profile.is_fallback && !profile.fallback_enabled) return 'modes'
+  if (profile.is_udp_games && !profile.udp_games_enabled) return 'modes'
+  if (profile.is_dns_desync && !profile.dns_desync_enabled) return 'modes'
   return null
 }
 

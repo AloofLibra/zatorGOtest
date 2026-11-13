@@ -29,29 +29,29 @@ const groups = computed(() => {
     {
       title: 'Система',
       items: [
-        { k: 'ZatorGO', v: ver?.zator_version || '—', s: ver?.update_available ? 'есть обновление' : ver?.webui_date, c: ver?.update_available ? 'info' : '', to: '/settings#sec-updates' },
+        { k: 'ZatorGO', v: ver?.zator_version || '—', s: ver?.update_available ? 'есть обновление' : ver?.webui_date, c: ver?.update_available ? 'info' : '', to: '/settings/updates' },
         { k: 'zapret2', v: d.zapret2_running ? 'Запущен' : 'Остановлен', s: ver?.zapret2_version, c: d.zapret2_running ? 'ok' : 'bad' },
-        { k: 'Провайдер', v: String(d.provider || '—').split(' - ')[0], s: String(d.provider || '').includes(' - ') ? String(d.provider).split(' - ').slice(1).join(' - ') : '', to: '/settings#sec-provider' },
+        { k: 'Провайдер', v: String(d.provider || '—').split(' - ')[0], s: String(d.provider || '').includes(' - ') ? String(d.provider).split(' - ').slice(1).join(' - ') : '', to: '/settings/provider' },
       ],
     },
     {
       title: 'Обход DPI',
       items: [
         { k: 'Стратегии', v: d.strategy_locks_status || '—', to: '/strategies' },
-        { k: 'Авторотация', v: d.auto_mode || '—', c: d.auto_mode === 'включен' ? 'ok' : '', to: '/settings#sec-modes' },
-        { k: 'Fallback', v: fb, c: fb === 'включен' ? 'ok' : '', to: '/settings#sec-modes' },
-        { k: 'Hostlist', v: d.hostlist_mode || '—', to: '/settings#sec-modes' },
-        { k: 'TLS blob', v: d.tls_blob_mode || '—', to: '/settings#sec-tls' },
-        { k: 'WireGuard', v: d.wireguard || '—', to: '/settings#sec-wg' },
+        { k: 'Авторотация', v: d.auto_mode || '—', c: d.auto_mode === 'включен' ? 'ok' : '', to: '/settings/modes' },
+        { k: 'Fallback', v: fb, c: fb === 'включен' ? 'ok' : '', to: '/settings/modes' },
+        { k: 'Hostlist', v: d.hostlist_mode || '—', to: '/settings/modes' },
+        { k: 'TLS blob', v: d.tls_blob_mode || '—', to: '/settings/tls' },
+        { k: 'WireGuard', v: d.wireguard || '—', to: '/settings/wg' },
       ],
     },
     {
       title: 'Сеть',
       items: [
-        { k: 'Firewall', v: d.fwtype || '—', to: '/settings#sec-firewall' },
-        { k: 'Offload', v: d.flowoffload || '—', to: '/settings#sec-firewall' },
-        { k: 'Scopes', v: scopeOn ? 'mark' : 'выкл', s: scopeOn ? `mask ${scope.mask ?? scopes.value?.mask ?? '—'}` : undefined, to: '/settings#sec-scopes' },
-        { k: 'DNS антиспуф', v: dns ? (dns.dns_desync_enabled ? 'вкл' : 'выкл') : '—', to: '/settings#sec-modes' },
+        { k: 'Firewall', v: d.fwtype || '—', to: '/settings/firewall' },
+        { k: 'Offload', v: d.flowoffload || '—', to: '/settings/firewall' },
+        { k: 'Scopes', v: scopeOn ? 'mark' : 'выкл', s: scopeOn ? `mask ${scope.mask ?? scopes.value?.mask ?? '—'}` : undefined, to: '/settings/scopes' },
+        { k: 'DNS антиспуф', v: dns ? (dns.dns_desync_enabled ? 'вкл' : 'выкл') : '—', to: '/settings/modes' },
       ],
     },
   ]

@@ -170,12 +170,16 @@ async function saveSelect(setting: string, value: string, label: string) {
 }
 
 async function saveTls() {
+  if (tlsMode.value !== 'fake_default_tls' && !tlsBlob.value) {
+    showToast('Выберите файл TLS blob', 'error')
+    return
+  }
   try {
     await withBusy('tls', async () => {
       announceRestart()
       const res = tlsMode.value === 'fake_default_tls'
         ? await applySetting.tls_blob('fake_default_tls')
-        : await applySetting.tls_blob(tlsBlob.value || 'custom_tls.bin')
+        : await applySetting.tls_blob(tlsBlob.value)
       showToast(`TLS blob сохранён.${restartSuffix(res)}`)
       await refreshTlsBlobSettings()
       await refreshAll()
@@ -442,11 +446,24 @@ async function restoreBackup(name: string) {
   }
 }
 
+const panelAliases: Record<string, string> = {
+  updates: 'sec-updates', provider: 'sec-provider', backups: 'sec-backups',
+  modes: 'sec-modes', 'auto-mode': 'sec-modes', fallback: 'sec-modes', hostlist: 'sec-modes',
+  'udp-games': 'sec-modes', 'dns-desync': 'sec-modes', 'rst-guard': 'sec-modes',
+  reasm: 'sec-modes', quic443: 'sec-modes',
+  tls: 'sec-tls', 'tls-blob': 'sec-tls',
+  wg: 'sec-wg', wireguard: 'sec-wg',
+  wssize: 'sec-wssize', 'wssize-ramp': 'sec-wssize',
+  firewall: 'sec-firewall', fwtype: 'sec-firewall', flowoffload: 'sec-firewall',
+  ports: 'sec-ports', scopes: 'sec-scopes', 'client-scope': 'sec-scopes',
+  config: 'sec-config', errors: 'sec-errors',
+}
+
 function scrollToPanel() {
-  const panel = route.params.panel || (route.hash || '').replace('#', '')
-  if (!panel) return
-  const id = String(panel).startsWith('sec-') ? String(panel) : `sec-${panel}`
-  const el = document.getElementById(id) || document.getElementById(`settings-${panel}`)
+  const raw = String(route.params.panel || (route.hash || '').replace(/^#/, '') || '')
+  if (!raw) return
+  const id = panelAliases[raw] || (raw.startsWith('sec-') ? raw : `sec-${raw}`)
+  const el = document.getElementById(id) || document.getElementById(`settings-${raw}`)
   el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
@@ -474,7 +491,11 @@ onMounted(() => {
     </div>
 
     <nav class="settings-nav" aria-label="Разделы настроек">
-      <a v-for="s in sections" :key="s.id" :href="`#${s.id}`">{{ s.label }}</a>
+      <router-link
+        v-for="s in sections"
+        :key="s.id"
+        :to="`/settings/${s.id.replace(/^sec-/, '')}`"
+      >{{ s.label }}</router-link>
     </nav>
 
     <div v-if="!settingsLoaded" class="loading">Загрузка…</div>
