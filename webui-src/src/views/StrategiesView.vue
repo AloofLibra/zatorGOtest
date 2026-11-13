@@ -238,6 +238,13 @@ async function saveCloneSize(profile: string) {
             :class="{ 'is-busy': busyButton === `check-${p.profile}` }"
             @click="check(String(p.profile), p)">Проверка</button>
         </div>
+        <CheckResults
+          v-if="!gated(p) && strategyChecks[String(p.profile)]"
+          class="inline-check"
+          :payload="strategyChecks[String(p.profile)]"
+          empty-message="Нет результатов проверки."
+          :empty-hidden="false"
+        />
         <div v-if="canOverride(p)" class="grid-2" style="margin-top:0.75rem">
           <label class="field">
             <span>Режим фейков</span>
@@ -271,13 +278,6 @@ async function saveCloneSize(profile: string) {
               @click="saveCloneSize(String(p.profile))">Сохранить лимит</button>
           </div>
         </div>
-        <CheckResults
-          v-if="!gated(p) && strategyChecks[String(p.profile)]"
-          class="inline-check"
-          :payload="strategyChecks[String(p.profile)]"
-          empty-message="Нет результатов проверки."
-          :empty-hidden="false"
-        />
       </article>
     </div>
   </section>
