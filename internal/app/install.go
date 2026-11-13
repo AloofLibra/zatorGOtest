@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/AloofLibra/zator"
-	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/deploy"
 	"github.com/AloofLibra/zator/internal/uiembed"
 )
@@ -181,22 +180,17 @@ func copyFSKeepExisting(src fs.FS, dst string) error {
 }
 
 // seedZapretConfig записывает ZapretConfig из шаблона, если config отсутствует
-// или NFQWS2_OPT пуст (битый leftover после wipe zator без сноса zapret2).
+// и каталог zapret2 существует.
 func (a *App) seedZapretConfig(template []byte) error {
 	cfg := a.Paths.ZapretConfig
 	if cfg == "" {
 		return nil
 	}
-	if st, err := os.Stat(a.Paths.ZapretRoot); err != nil || !st.IsDir() {
+	if _, err := os.Stat(cfg); err == nil {
 		return nil
 	}
-	if _, err := os.Stat(cfg); err == nil {
-		if c, e := config.Load(cfg); e == nil {
-			if opt, ok := c.NFQWS2Opt(); ok && strings.TrimSpace(opt) != "" {
-				return nil
-			}
-		}
-		// пустой/битый OPT — пересоздаём из шаблона
+	if st, err := os.Stat(a.Paths.ZapretRoot); err != nil || !st.IsDir() {
+		return nil
 	}
 	if err := os.WriteFile(cfg, template, 0o644); err != nil {
 		return fmt.Errorf("запись %s: %w", cfg, err)

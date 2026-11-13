@@ -94,9 +94,11 @@ func (a *App) PrepareZapretRuntime() (fwHook string, err error) {
 	if err := os.MkdirAll(a.Paths.ZapretRoot, 0o755); err != nil {
 		return "", err
 	}
-	if data, e := uiembed.ConfigDefault(); e == nil {
-		if e := a.seedZapretConfig(data); e != nil {
-			return "", e
+	if _, err := os.Stat(cfgPath); err != nil {
+		if data, e := uiembed.ConfigDefault(); e == nil {
+			if e := a.seedZapretConfig(data); e != nil {
+				return "", e
+			}
 		}
 	}
 	cfg, err := config.Load(cfgPath)
@@ -105,7 +107,20 @@ func (a *App) PrepareZapretRuntime() (fwHook string, err error) {
 	}
 	argsFile := filepath.Join(a.Paths.ZapretRoot, "nfqws2.args")
 	if err := cfg.WriteNfqws2Args(argsFile); err != nil {
-		return "", err
+		// leftover config без NFQWS2_OPT после wipe zator — пересоздаём из шаблона
+		if data, e := uiembed.ConfigDefault(); e == nil {
+			if e := os.WriteFile(cfgPath, data, 0o644); e == nil {
+				if cfg2, e2 := config.Load(cfgPath); e2 == nil {
+					if e2 = cfg2.WriteNfqws2Args(argsFile); e2 == nil {
+						cfg = cfg2
+						err = nil
+					}
+				}
+			}
+		}
+		if err != nil {
+			return "", err
+		}
 	}
 	qcfg := firewall.QueueHookFromGetter(func(k string) string { return cfg.GetDefault(k, "") })
 	hook, err := firewall.WriteQueueHook(a.Paths.ZapretRoot, qcfg)
