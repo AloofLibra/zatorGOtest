@@ -12,14 +12,14 @@ import (
 )
 
 const (
-	minPasswordLen = 4
+	minPasswordLen = 8
 	bcryptCost     = bcrypt.DefaultCost
 	sessionBytes   = 32
 )
 
 var (
 	// ErrPasswordTooShort — пароль короче минимума.
-	ErrPasswordTooShort = errors.New("app: пароль слишком короткий (минимум 4 символа)")
+	ErrPasswordTooShort = errors.New("app: пароль слишком короткий (минимум 8 символов)")
 	// ErrNoPassword — нет заданного пароля.
 	ErrNoPassword = errors.New("app: пароль не задан")
 )

@@ -7,6 +7,7 @@ import {
   DOMAIN_LISTS, DOMAIN_META, domainChecks, domainLists, domainsLoaded, refreshDomainList, refreshDomains, type DomainListName,
 } from '../stores/domains'
 import { modeSettings } from '../stores/settings'
+import { scope, scopes } from '../stores/status'
 import { showToast } from '../stores/toast'
 import { confirmDialog } from '../stores/confirm'
 
@@ -33,9 +34,21 @@ const meta = computed(() => DOMAIN_META[active.value])
 onMounted(() => {
   if (!domainsLoaded.value) refreshDomains()
 })
+const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
+const autoLocked = computed(() => hostlistAuto.value && (active.value === 'custom_rkn' || active.value === 'substring'))
+const scopeOptions = computed(() => scopes.value.scopes || ['default'])
+
 watch(active, (name) => {
   if (!domainLists[name]) refreshDomainList(name)
 })
+watch(scope, () => {
+  void refreshDomainList('custom_rkn')
+})
+
+function changeScope(v: string) {
+  scope.value = v || 'default'
+  router.replace({ query: { ...route.query, scope: scope.value } })
+}
 
 watch(list, (payload) => {
   if (!payload?.items) return
@@ -63,7 +76,7 @@ async function add() {
   if (!d) return
   try {
     await withBusy('domain-add', async () => {
-      await domains.add(active.value, d)
+      await domains.add(active.value, d, scope.value)
       input.value = ''
       await refreshDomainList(active.value)
     })
@@ -74,6 +87,7 @@ async function add() {
 }
 
 async function remove(domain: string) {
+  if (autoLocked.value) return
   const ok = await confirmDialog({
     title: 'Удалить запись?',
     message: `Удалить «${domain}» из списка?`,
@@ -82,11 +96,11 @@ async function remove(domain: string) {
   if (!ok) return
   try {
     await withBusy('domain-rm', async () => {
-      const res = await domains.remove(active.value, domain)
+      const res = await domains.remove(active.value, domain, scope.value)
       delete strategyDraft.value[domain]
       await refreshDomainList(active.value)
       const warn = String((res as { warning?: string }).warning || '')
-      if (warn) showToast(warn, 'error')
+      if (warn) showToast(warn, 'warning')
       else showToast('Удалено')
     })
   } catch (e) {
@@ -98,7 +112,7 @@ async function importList() {
   if (!bulk.value.trim()) return
   try {
     await withBusy('domain-import', async () => {
-      const res = await domains.import(active.value, bulk.value)
+      const res = await domains.import(active.value, bulk.value, scope.value)
       bulk.value = ''
       await refreshDomainList(active.value)
       showToast(`Импорт: +${res.added || 0}`)
@@ -125,10 +139,10 @@ async function setStrategy(domain: string) {
   try {
     await withBusy(`domain-st-${domain}`, async () => {
       if (!raw || raw === '0') {
-        await domains.clear_strategy(domain)
+        await domains.clear_strategy(domain, scope.value)
         strategyDraft.value[domain] = ''
       } else {
-        await domains.set_strategy(domain, raw)
+        await domains.set_strategy(domain, raw, scope.value)
         strategyDraft.value[domain] = raw
       }
       await refreshDomainList(active.value)
@@ -140,6 +154,7 @@ async function setStrategy(domain: string) {
 }
 
 async function clearAll() {
+  if (autoLocked.value) return
   const ok = await confirmDialog({
     title: 'Очистить список?',
     message: 'Все записи будут удалены.',
@@ -148,11 +163,11 @@ async function clearAll() {
   if (!ok) return
   try {
     await withBusy('domain-clear', async () => {
-      const res = await domains.clear(active.value)
+      const res = await domains.clear(active.value, scope.value)
       strategyDraft.value = {}
       await refreshDomainList(active.value)
       const warn = String((res as { warning?: string }).warning || '')
-      showToast(warn || 'Список очищен', warn ? 'error' : undefined)
+      showToast(warn || 'Список очищен', warn ? 'warning' : undefined)
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -169,8 +184,6 @@ async function checkDomain(domain: string) {
     showToast((e as Error).message, 'error')
   }
 }
-
-const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
 </script>
 
 <template>
@@ -181,6 +194,12 @@ const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
         <p>Списки hostlist: исключения, custom RKN и подстроки. Переключайте вкладки ниже.</p>
       </div>
       <div class="actions">
+        <label v-if="scopes.enabled" class="field" style="margin:0">
+          <span>Scope</span>
+          <select :value="scope" :disabled="busyActive" @change="changeScope(($event.target as HTMLSelectElement).value)">
+            <option v-for="s in scopeOptions" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </label>
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'domains-refresh' }"
           @click="refreshLists">Обновить</button>
       </div>
@@ -199,26 +218,26 @@ const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
         <span class="chip">{{ list?.items?.length ?? 0 }}</span>
       </div>
       <p class="panel-d">{{ list?.description || meta.addLabel }}</p>
-      <p v-if="hostlistAuto && (active === 'custom_rkn' || active === 'substring')" class="panel-d" style="color:var(--warn)">
-        Autohostlist включён: ручное добавление в этот список заблокировано. Выключите автосбор в Настройках → Режимы.
+      <p v-if="autoLocked" class="panel-d" style="color:var(--warn)">
+        Autohostlist включён: ручное изменение этого списка заблокировано. Выключите автосбор в Настройках → Режимы.
       </p>
 
       <form class="row" @submit.prevent="add">
-        <input v-model="input" :placeholder="meta.placeholder" :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))" style="flex:1;min-width:12rem">
-        <button type="submit" class="primary" :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))" :class="{ 'is-busy': busyButton === 'domain-add' }">Добавить</button>
+        <input v-model="input" :placeholder="meta.placeholder" :disabled="busyActive || autoLocked" style="flex:1;min-width:12rem">
+        <button type="submit" class="primary" :disabled="busyActive || autoLocked" :class="{ 'is-busy': busyButton === 'domain-add' }">Добавить</button>
         <button type="button" class="ghost danger"
-          :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))"
+          :disabled="busyActive || autoLocked"
           @click="clearAll">Очистить</button>
       </form>
 
       <div class="field" style="margin-top:0.9rem">
         <span>Импорт списком</span>
         <textarea v-model="bulk"
-          :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))"
+          :disabled="busyActive || autoLocked"
           rows="4" placeholder="по одному на строку"></textarea>
         <div class="actions" style="margin-top:0.5rem">
           <button type="button"
-            :disabled="busyActive || (hostlistAuto && (active === 'custom_rkn' || active === 'substring'))"
+            :disabled="busyActive || autoLocked"
             :class="{ 'is-busy': busyButton === 'domain-import' }"
             @click="importList">Импортировать</button>
         </div>
@@ -245,7 +264,7 @@ const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
           <button v-if="active === 'custom_rkn'" type="button" class="ghost" :disabled="busyActive"
             :class="{ 'is-busy': busyButton === `domain-check-${item.value}` }"
             @click="checkDomain(item.value)">Проверить</button>
-          <button type="button" class="ghost danger" :disabled="busyActive"
+          <button type="button" class="ghost danger" :disabled="busyActive || autoLocked"
             @click="remove(item.value)">Удалить</button>
         </div>
         <p v-if="domainChecks[item.value]" class="panel-d" style="grid-column:1/-1;margin:0.35rem 0 0">

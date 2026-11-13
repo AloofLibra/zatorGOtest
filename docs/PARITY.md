@@ -27,7 +27,7 @@
 | domains (netrogat/custom/substring) | done |
 | backups create/list/download/delete/upload | done |
 | scopes | done |
-| settings (~35) | done (см. gaps) |
+| settings (~35) | done |
 | supersweep start/status/cancel | done (NoopProbe по умолчанию) |
 | update_check | done (`internal/deploy`) |
 | recommendations | done (`internal/telemetry`) |

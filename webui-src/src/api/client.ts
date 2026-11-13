@@ -46,7 +46,8 @@ export async function api<T = Record<string, unknown>>(path: string, options: Ap
         err.status = 401
         throw err
       }
-      throw new Error(String(data.error || `HTTP ${response.status}`))
+      const detail = typeof data.detail === 'string' && data.detail ? `: ${data.detail}` : ''
+      throw new Error(String(data.error || `HTTP ${response.status}`) + detail)
     }
     // Часть CGI отдаёт 200 с ok:false / error — не считаем это успехом.
     if (data && typeof data === 'object' && 'ok' in data && data.ok === false) {

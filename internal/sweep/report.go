@@ -50,7 +50,7 @@ type DomainReport struct {
 }
 
 // Report — снимок прогресса для WebUI (GET settings.cgi?setting=supersweep).
-// Формат совпадает с API_CONTRACT.md.
+// Формат совпадает с docs/API.md.
 type Report struct {
 	Available bool           `json:"available"`
 	State     State          `json:"state"`

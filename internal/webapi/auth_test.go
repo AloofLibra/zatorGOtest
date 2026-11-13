@@ -17,12 +17,13 @@ func TestLoginLogoutAndMiddleware(t *testing.T) {
 		t.Fatalf("open status: %v", out)
 	}
 
-	if err := e.app.SetPassword("s3cret"); err != nil {
+	if err := e.app.SetPassword("s3cret12"); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.app.Save(); err != nil {
 		t.Fatal(err)
 	}
+	beforeLogout := e.app.Config.SessionToken
 
 	resp, out = e.get("/api/status")
 	wantError(t, resp, out, http.StatusUnauthorized, "Требуется авторизация")
@@ -35,7 +36,7 @@ func TestLoginLogoutAndMiddleware(t *testing.T) {
 	resp, out = e.post("/api/login", "password", "wrong")
 	wantError(t, resp, out, http.StatusUnauthorized, "Неверный пароль")
 
-	form := url.Values{"password": {"s3cret"}}
+	form := url.Values{"password": {"s3cret12"}}
 	resp, raw := e.do(http.MethodPost, "/api/login", form, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login: %d %s", resp.StatusCode, raw)
@@ -75,10 +76,17 @@ func TestLoginLogoutAndMiddleware(t *testing.T) {
 		t.Fatalf("SPA deep-link без auth: %d %s", resp.StatusCode, body[:min(80, len(body))])
 	}
 
-	// Logout без cookie всё равно чистит Set-Cookie (public).
+	// Logout без cookie: чистит Set-Cookie, но НЕ ротирует session_token (anti-CSRF).
+	sessionBefore := e.app.Config.SessionToken
+	if sessionBefore == "" || sessionBefore == beforeLogout {
+		// после logout с cookie токен уже сменился — это ок
+	}
 	resp, raw = e.do(http.MethodPost, "/api/logout", url.Values{}, nil)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("public logout: %d %s", resp.StatusCode, raw)
+		t.Fatalf("logout без cookie: %d %s", resp.StatusCode, raw)
+	}
+	if e.app.Config.SessionToken != sessionBefore {
+		t.Fatalf("logout без auth не должен RotateSession: %q → %q", sessionBefore, e.app.Config.SessionToken)
 	}
 	cleared := false
 	for _, c := range resp.Cookies() {
@@ -86,7 +94,6 @@ func TestLoginLogoutAndMiddleware(t *testing.T) {
 			cleared = true
 		}
 	}
-	// httptest может отдать MaxAge через Expires; также смотрим Set-Cookie заголовок.
 	if !cleared {
 		for _, h := range resp.Header.Values("Set-Cookie") {
 			if strings.Contains(h, CookieName+"=") && (strings.Contains(h, "Max-Age=0") || strings.Contains(strings.ToLower(h), "max-age=-1")) {
@@ -95,7 +102,7 @@ func TestLoginLogoutAndMiddleware(t *testing.T) {
 		}
 	}
 	if !cleared {
-		t.Fatalf("logout без cookie не очистил сессию: %v", resp.Header.Values("Set-Cookie"))
+		t.Fatalf("logout без cookie не очистил Set-Cookie: %v", resp.Header.Values("Set-Cookie"))
 	}
 }
 

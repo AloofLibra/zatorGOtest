@@ -1,5 +1,5 @@
 // Package webapi реализует HTTP API Web UI zator: порт CGI-скриптов
-// webui/cgi-bin/*.cgi (см. API_CONTRACT.md) поверх пакетов config, orchestra,
+// webui/cgi-bin/*.cgi (см. docs/API.md) поверх пакетов config, orchestra,
 // service, netcheck и sweep, плюс раздачу статических файлов Web UI.
 //
 // Каждый эндпоинт доступен по двум путям: /cgi-bin/<name>.cgi (совместимость с

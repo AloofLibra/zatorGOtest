@@ -274,7 +274,7 @@ async function saveScope() {
       const enabled = res.enabled ?? !!scopes.value?.enabled
       scopeForm.enable = !!enabled
       if (res.warning) {
-        showToast(res.warning, 'error')
+        showToast(res.warning, 'warning')
       } else {
         showToast(enabled ? 'Client scopes включены' : 'Client scopes выключены')
       }

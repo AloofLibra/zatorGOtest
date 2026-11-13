@@ -37,7 +37,8 @@ func NormalizeDesyncLine(raw string, strategy int) (string, error) {
 			p = "--lua-desync=" + p
 		}
 		body := strings.TrimPrefix(p, "--lua-desync=")
-		if body == "" || strings.ContainsAny(body, "\n\r") {
+		// Запрет shell-metachar: NFQWS2_OPT="…" в config — кавычка/backtick/$ ломают quoting.
+		if body == "" || strings.ContainsAny(body, "\n\r\"'`$;\\|&<>()") {
 			return "", fmt.Errorf("некорректный фрагмент desync")
 		}
 		body = strategyTokenRe.ReplaceAllString(body, "")

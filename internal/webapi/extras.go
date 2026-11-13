@@ -2,6 +2,7 @@ package webapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +14,54 @@ import (
 	"github.com/AloofLibra/zator/internal/fsutil"
 	"github.com/AloofLibra/zator/internal/service"
 )
+
+// validateConfigRawShellSafety отклоняет очевидный shell breakout в zapret2/config
+// (source'ится shell-скриптами). Не парсер shell — практичный фильтр.
+func validateConfigRawShellSafety(content string) error {
+	for _, line := range strings.Split(content, "\n") {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		if strings.Contains(trim, "$(") || strings.Contains(trim, "`") {
+			return fmt.Errorf("запрещены подстановки $(...) и backtick в config")
+		}
+		if hasUnquotedShellMeta(trim) {
+			return fmt.Errorf("опасные shell-метасимволы (;|&) вне кавычек")
+		}
+	}
+	return nil
+}
+
+func hasUnquotedShellMeta(line string) bool {
+	inDQ, inSQ, esc := false, false, false
+	for _, r := range line {
+		if esc {
+			esc = false
+			continue
+		}
+		if r == '\\' && inDQ {
+			esc = true
+			continue
+		}
+		if r == '"' && !inSQ {
+			inDQ = !inDQ
+			continue
+		}
+		if r == '\'' && !inDQ {
+			inSQ = !inSQ
+			continue
+		}
+		if inDQ || inSQ {
+			continue
+		}
+		switch r {
+		case ';', '|', '&', '\n', '\r':
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	maxConfigRawBytes = 2 << 20 // 2 MiB
@@ -55,6 +104,9 @@ func (s *Server) postConfigRaw(r *http.Request, p params) (map[string]any, error
 	}
 	if !strings.Contains(content, "NFQWS2_OPT") {
 		return nil, errf(http.StatusBadRequest, "В конфиге нет NFQWS2_OPT — отказ в записи")
+	}
+	if err := validateConfigRawShellSafety(content); err != nil {
+		return nil, errf(http.StatusBadRequest, err.Error())
 	}
 	path := s.paths.ZapretConfig
 	s.cfgMu.Lock()
@@ -127,21 +179,24 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 	}
 	if installed > 0 && !upToDate {
 		out["restart_required"] = true
-		s.scheduleWebUIRestart()
+		s.schedulePostUpdateRestarts()
 		out["webui_restart_scheduled"] = true
+		out["zapret2_restart_scheduled"] = true
 	}
 	return out, nil
 }
 
-// scheduleWebUIRestart — отложенный рестарт webui, чтобы ответ успел уйти клиенту.
-func (s *Server) scheduleWebUIRestart() {
+// schedulePostUpdateRestarts — отложенный рестарт webui + zapret2 (новый Lua в nfqws2).
+func (s *Server) schedulePostUpdateRestarts() {
 	if s.svc == nil {
 		return
 	}
 	go func() {
 		time.Sleep(1500 * time.Millisecond)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
+		_ = s.svc.Restart(ctx, service.UnitZapret2)
+		_ = s.svc.Restart(ctx, service.UnitValidator)
 		_ = s.svc.Restart(ctx, service.UnitWebUI)
 	}()
 }

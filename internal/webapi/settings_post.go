@@ -598,6 +598,7 @@ func (s *Server) postClientScope(r *http.Request, p params) (map[string]any, err
 		return nil, err
 	}
 	c, _ := s.readConfig()
+	_ = s.app.SyncCustomDHooks(c)
 	return map[string]any{
 		"ok": true, "restarted": s.maybeRestart(r.Context(), p),
 		"enabled": c.ClientScopeText() == "включен", "warning": warning,
@@ -654,5 +655,7 @@ func (s *Server) postWssizeRamp(r *http.Request, p params) (map[string]any, erro
 	if err != nil {
 		return nil, err
 	}
+	c, _ := s.readConfig()
+	_ = s.app.SyncCustomDHooks(c)
 	return map[string]any{"ok": true, "restarted": s.maybeRestart(r.Context(), p)}, nil
 }

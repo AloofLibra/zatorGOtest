@@ -6,7 +6,7 @@ import { logout as apiLogout } from './api/endpoints'
 import { clearLoginGate, forceLogin, needLogin } from './stores/auth'
 import { busyActive } from './stores/busy'
 import { fetchAndApplyState } from './stores/state'
-import { statusLoaded } from './stores/status'
+import { authRequired, statusLoaded } from './stores/status'
 import { showToast } from './stores/toast'
 import { theme, type ThemeMode } from './stores/theme'
 import ToastHost from './components/ui/ToastHost.vue'
@@ -69,6 +69,7 @@ async function submitLogin() {
 }
 
 async function logout() {
+  if (!authRequired.value) return
   logoutBusy.value = true
   try {
     try {
@@ -132,6 +133,7 @@ onMounted(() => { void bootstrap() })
           </div>
         </div>
         <button
+          v-if="authRequired"
           type="button"
           class="ghost logout-btn"
           :disabled="logoutBusy || busyActive"

@@ -8,13 +8,13 @@ import (
 
 func TestSetPasswordVerifyAndUpdatePreserves(t *testing.T) {
 	a := newTestApp(t)
-	if err := a.SetPassword("secret1"); err != nil {
+	if err := a.SetPassword("secret12"); err != nil {
 		t.Fatal(err)
 	}
 	if !a.Config.AuthEnabled || !a.Config.HasPassword() || a.Config.SessionToken == "" {
 		t.Fatalf("after set: %+v", a.Config)
 	}
-	if !a.VerifyPassword("secret1") || a.VerifyPassword("wrong") {
+	if !a.VerifyPassword("secret12") || a.VerifyPassword("wrong") {
 		t.Fatal("verify")
 	}
 	session := a.Config.SessionToken
@@ -32,7 +32,7 @@ func TestSetPasswordVerifyAndUpdatePreserves(t *testing.T) {
 
 func TestDisableEnableAuth(t *testing.T) {
 	a := newTestApp(t)
-	if err := a.SetPassword("secret1"); err != nil {
+	if err := a.SetPassword("secret12"); err != nil {
 		t.Fatal(err)
 	}
 	a.ClearAuth()
@@ -100,7 +100,7 @@ func TestMigrateOrchestraCacheToState(t *testing.T) {
 
 func TestUninstallKeepVsPurge(t *testing.T) {
 	a := newTestApp(t)
-	if err := a.SetPassword("secret1"); err != nil {
+	if err := a.SetPassword("secret12"); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Install(); err != nil {

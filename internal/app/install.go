@@ -246,12 +246,16 @@ func (a *App) migrateOrchestraCacheToState() error {
 			}
 			continue
 		}
-		if _, err := os.Stat(dst); err == nil {
-			continue // state уже есть — не затираем
+		// Пустой/нулевой state (от ensureOrchestraState) не блокирует перенос legacy.
+		if st, err := os.Stat(dst); err == nil && st.Size() > 0 {
+			continue // непустое state — не затираем
 		}
 		data, err := os.ReadFile(src)
 		if err != nil {
 			return err
+		}
+		if len(data) == 0 {
+			continue
 		}
 		if err := os.WriteFile(dst, data, 0o644); err != nil {
 			return err

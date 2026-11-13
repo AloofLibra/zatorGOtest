@@ -115,9 +115,47 @@ func (a *App) PrepareZapretRuntime() (fwHook string, err error) {
 	if err != nil {
 		return "", err
 	}
+	_ = a.SyncCustomDHooks(cfg)
 	// Пустые hostlist-файлы, чтобы nfqws2 не падал на open().
 	_ = a.ensureHostlistPlaceholders()
 	return hook, nil
+}
+
+// SyncCustomDHooks пишет wssize + client-scope хуки в init.d/*/custom.d (sysv и openwrt).
+func (a *App) SyncCustomDHooks(cfg *config.Config) error {
+	if cfg == nil {
+		var err error
+		cfg, err = config.Load(a.Paths.ZapretConfig)
+		if err != nil {
+			return err
+		}
+	}
+	root := a.Paths.ZatorRoot
+	wcfg, err := firewall.WssizeConfigFromGetter(cfg.Get, root)
+	if err != nil {
+		return err
+	}
+	wscript, err := firewall.RenderWssizeHook(wcfg, root)
+	if err != nil {
+		return err
+	}
+	ccfg, err := firewall.ClientScopeConfigFromGetter(cfg.Get, root)
+	if err != nil {
+		return err
+	}
+	cscript, err := firewall.RenderClientScopeHook(ccfg)
+	if err != nil {
+		return err
+	}
+	for _, flavor := range []firewall.CustomDFlavor{firewall.CustomDSysV, firewall.CustomDOpenWrt} {
+		if _, err := firewall.WriteCustomD(a.Paths.ZapretRoot, flavor, firewall.CustomDWssizeName, wscript); err != nil {
+			return err
+		}
+		if _, err := firewall.WriteCustomD(a.Paths.ZapretRoot, flavor, firewall.CustomDClientScopeName, cscript); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) ensureHostlistPlaceholders() error {

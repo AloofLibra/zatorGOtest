@@ -99,11 +99,15 @@ func TestDomainsSubstring(t *testing.T) {
 	resp, out = e.post("/cgi-bin/domains.cgi", "list", "netrogat_substring", "action", "add", "domain", "cdn")
 	wantOK(t, resp, out)
 
-	// hostlist=авто блокирует ручное пополнение RKN-списков, но не исключений.
+	// hostlist=авто блокирует ручное изменение RKN-списков, но не исключений.
 	e.post("/cgi-bin/settings.cgi", "setting", "hostlist_state", "value", "1")
 	resp, out = e.post("/cgi-bin/domains.cgi", "list", "substring", "action", "add", "domain", "xx")
 	wantError(t, resp, out, 409, autoHostlistMsg)
 	resp, out = e.post("/cgi-bin/domains.cgi", "list", "custom_rkn", "action", "import", "domain", "a.com")
+	wantError(t, resp, out, 409, autoHostlistMsg)
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "substring", "action", "remove", "domain", "Tube")
+	wantError(t, resp, out, 409, autoHostlistMsg)
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "substring", "action", "clear")
 	wantError(t, resp, out, 409, autoHostlistMsg)
 	resp, out = e.post("/cgi-bin/domains.cgi", "list", "netrogat", "action", "add", "domain", "ok.com")
 	wantOK(t, resp, out)

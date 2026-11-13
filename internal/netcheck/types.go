@@ -160,7 +160,7 @@ func (d Download) Speed() float64 {
 }
 
 // TargetResult — результат проверки одной цели; формат элемента
-// check.results из API_CONTRACT.md.
+// check.results из docs/API.md.
 type TargetResult struct {
 	Label       string        `json:"label"`
 	Target      string        `json:"target"`

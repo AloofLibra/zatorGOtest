@@ -41,7 +41,7 @@ type profileMeta struct {
 	defaultMax                int
 }
 
-// profileTable — значения из API_CONTRACT.md и lib/config.sh
+// profileTable — значения из docs/API.md и исторического lib/config.sh
 // (config_profile_title / config_profile_proto_list).
 var profileTable = [MaxProfile + 1]profileMeta{
 	1:  {"YouTube TCP", "Основной TCP профиль для YouTube", "TCP 443 (YouTube)", []string{"tls", "http"}, 44},

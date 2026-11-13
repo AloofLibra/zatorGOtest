@@ -49,7 +49,7 @@ func TestJSONContentTypeAndAlias(t *testing.T) {
 
 func TestAuth(t *testing.T) {
 	e := newEnv(t, envOpts{})
-	if err := e.app.SetPassword("s3cret"); err != nil {
+	if err := e.app.SetPassword("s3cret12"); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.app.Save(); err != nil {
@@ -75,7 +75,7 @@ func TestAuth(t *testing.T) {
 
 	// Basic: только пароль.
 	req, _ := http.NewRequest(http.MethodGet, e.ts.URL+"/api/status", nil)
-	req.SetBasicAuth("admin", "s3cret")
+	req.SetBasicAuth("admin", "s3cret12")
 	r, err := e.ts.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)

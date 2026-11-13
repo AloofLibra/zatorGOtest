@@ -311,6 +311,9 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		return out, nil
 
 	case "remove":
+		if err := s.autoGuard(d); err != nil {
+			return nil, err
+		}
 		value, err := d.normalize(p.Get("domain"))
 		if err != nil {
 			return nil, err
@@ -334,6 +337,9 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		return out, nil
 
 	case "rename":
+		if err := s.autoGuard(d); err != nil {
+			return nil, err
+		}
 		old, err := d.normalize(p.Get("domain"))
 		if err != nil {
 			return nil, err

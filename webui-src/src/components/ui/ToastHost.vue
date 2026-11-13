@@ -22,7 +22,7 @@ watch(toast, (value) => {
   visible.value = false
   requestAnimationFrame(() => { visible.value = true })
   window.clearTimeout(hideTimer)
-  hideTimer = window.setTimeout(dismiss, value.type === 'error' ? 8000 : 3500)
+  hideTimer = window.setTimeout(dismiss, value.type === 'error' || value.type === 'warning' ? 8000 : 3500)
 })
 
 onBeforeUnmount(() => window.clearTimeout(hideTimer))

@@ -35,7 +35,8 @@ type Paths struct {
 	StateDir  string
 	ConfigDir string
 
-	// OrchestraDir — каталог orchestra (Lua-стратегии и файлы блокировок).
+	// OrchestraDir — legacy-каталог /opt/zator/orchestra (создаётся при install).
+	// Канон локов и overrides: StateOrchestraDir() = state/orchestra.
 	OrchestraDir string
 
 	// ExtraStratsDir — пользовательские списки стратегий (TCP_Custom.txt и т.п.).

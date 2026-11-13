@@ -1,6 +1,7 @@
 import { reactive, ref } from 'vue'
 import { fetchDomainsList } from '../api/endpoints'
 import type { CheckPayload, DomainsListPayload } from '../api/types'
+import { scope } from './status'
 import { showToast } from './toast'
 
 export const DOMAIN_LISTS = ['netrogat', 'custom_rkn', 'substring', 'netrogat_substring'] as const
@@ -27,7 +28,7 @@ export const domainsLoaded = ref(false)
 
 export async function refreshDomainList(name: DomainListName): Promise<boolean> {
   try {
-    domainLists[name] = await fetchDomainsList(name)
+    domainLists[name] = await fetchDomainsList(name, scope.value || 'default')
     return true
   } catch (error) {
     showToast((error as Error).message, 'error')

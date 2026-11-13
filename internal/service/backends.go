@@ -278,14 +278,12 @@ func (b entwareBackend) uninstall(ctx context.Context, u Unit) error {
 	script := b.m.initScriptFor(u)
 	_ = b.m.run(ctx, script, "stop")
 	if u == UnitZapret2 {
+		// Не удаляем upstream init в /opt/zapret2 — только S90/хуки zator.
 		if err := os.Remove(b.s90Link()); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("service: %w", err)
 		}
 		if err := b.removeHook(); err != nil {
 			return err
-		}
-		if err := os.Remove(script); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("service: %w", err)
 		}
 		return nil
 	}

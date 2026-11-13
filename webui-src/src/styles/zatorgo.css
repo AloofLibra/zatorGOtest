@@ -491,6 +491,8 @@ a.metric:hover {
 }
 .toast.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
 .toast.success { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.toast.warning { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.toast.info { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 
 .modal-overlay {
   position: fixed;

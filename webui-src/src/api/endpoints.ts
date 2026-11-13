@@ -161,25 +161,29 @@ export const applySetting = {
         mode: settings.mode, scale: String(settings.scale) })),
 }
 
-export const fetchDomainsList = (list: string) =>
-  api<DomainsListPayload>(`/api/domains?${new URLSearchParams({ list })}`)
+export const fetchDomainsList = (list: string, scope = 'default') =>
+  api<DomainsListPayload>(`/api/domains?${new URLSearchParams({ list, scope })}`)
 
 const domainsPost = (body: Record<string, string>) =>
   api<ApplyResult & DomainsImportResult>('/api/domains', formBody(body))
 
 export const domains = {
-  add: (list: string, domain: string) => domainsPost({ list, action: 'add', domain }),
-  remove: (list: string, domain: string) => domainsPost({ list, action: 'remove', domain }),
-  rename: (list: string, domain: string, new_domain: string) =>
-    domainsPost({ list, action: 'rename', domain, new_domain }),
-  import: (list: string, domain: string) => domainsPost({ list, action: 'import', domain }),
-  clear: (list: string) => domainsPost({ list, action: 'clear' }),
+  add: (list: string, domain: string, scope = 'default') =>
+    domainsPost({ list, action: 'add', domain, scope }),
+  remove: (list: string, domain: string, scope = 'default') =>
+    domainsPost({ list, action: 'remove', domain, scope }),
+  rename: (list: string, domain: string, new_domain: string, scope = 'default') =>
+    domainsPost({ list, action: 'rename', domain, new_domain, scope }),
+  import: (list: string, domain: string, scope = 'default') =>
+    domainsPost({ list, action: 'import', domain, scope }),
+  clear: (list: string, scope = 'default') => domainsPost({ list, action: 'clear', scope }),
   check: (domain: string) =>
     api<ApplyResult>('/api/domains',
       formBody({ list: 'custom_rkn', action: 'check', domain })),
-  set_strategy: (domain: string, strategy: string) =>
-    domainsPost({ list: 'custom_rkn', action: 'set_strategy', domain, strategy }),
-  clear_strategy: (domain: string) => domainsPost({ list: 'custom_rkn', action: 'clear_strategy', domain }),
+  set_strategy: (domain: string, strategy: string, scope = 'default') =>
+    domainsPost({ list: 'custom_rkn', action: 'set_strategy', domain, strategy, scope }),
+  clear_strategy: (domain: string, scope = 'default') =>
+    domainsPost({ list: 'custom_rkn', action: 'clear_strategy', domain, scope }),
 }
 
 export const logout = () => api<{ ok: boolean }>('/api/logout', formBody({}))

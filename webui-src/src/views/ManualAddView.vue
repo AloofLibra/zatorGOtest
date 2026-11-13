@@ -105,7 +105,7 @@ async function submitStrategy() {
       const warn = String((res as { warning?: string }).warning || '')
       showToast(
         warn || `Стратегия ${res.strategy} добавлена в профиль ${profile.value}.${restartSuffix(res)}`,
-        warn ? 'error' : undefined,
+        warn ? 'warning' : undefined,
       )
       await refreshAll()
     })
@@ -132,7 +132,7 @@ async function submitBlob() {
         || (res as { select_error?: string }).select_error || '')
       showToast(
         warn || `Blob ${res.name} сохранён.${restartSuffix(res)}`,
-        warn ? 'error' : undefined,
+        warn ? 'warning' : undefined,
       )
       await refreshTlsBlobSettings()
       await refreshWgBlobSettings()

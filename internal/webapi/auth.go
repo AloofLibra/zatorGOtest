@@ -4,12 +4,14 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
+	"time"
 )
 
 func isPublicAuthPath(p string) bool {
 	switch p {
-	case "/api/login", "/cgi-bin/login.cgi",
-		"/api/logout", "/cgi-bin/logout.cgi":
+	case "/api/login", "/cgi-bin/login.cgi":
+		// logout намеренно НЕ public: без сессии только чистим cookie, без RotateSession.
 		return true
 	default:
 		return false
@@ -60,6 +62,11 @@ func isStaticAsset(p string) bool {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Logout: всегда пропускаем до handler — там сами решим rotate vs clear-cookie-only.
+		if r.URL.Path == "/api/logout" || r.URL.Path == "/cgi-bin/logout.cgi" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if isPublicAuthPath(r.URL.Path) || isStaticAsset(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
@@ -128,6 +135,74 @@ func (s *Server) authorized(r *http.Request) (ok, setCookie bool) {
 	return false, false
 }
 
+// --- login rate limit (in-memory, per-IP) ---
+
+const (
+	loginMaxFails   = 8
+	loginLockWindow = 5 * time.Minute
+)
+
+type loginAttempt struct {
+	fails    int
+	lockedUntil time.Time
+}
+
+var (
+	loginMu       sync.Mutex
+	loginAttempts = map[string]*loginAttempt{}
+)
+
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	host := r.RemoteAddr
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		return host[:i]
+	}
+	return host
+}
+
+func loginAllowed(ip string) bool {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	a := loginAttempts[ip]
+	if a == nil {
+		return true
+	}
+	if time.Now().Before(a.lockedUntil) {
+		return false
+	}
+	if !a.lockedUntil.IsZero() && time.Now().After(a.lockedUntil) {
+		delete(loginAttempts, ip)
+	}
+	return true
+}
+
+func loginFail(ip string) {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	a := loginAttempts[ip]
+	if a == nil {
+		a = &loginAttempt{}
+		loginAttempts[ip] = a
+	}
+	a.fails++
+	if a.fails >= loginMaxFails {
+		a.lockedUntil = time.Now().Add(loginLockWindow)
+		a.fails = 0
+	}
+}
+
+func loginOK(ip string) {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	delete(loginAttempts, ip)
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request, p params) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
@@ -137,23 +212,29 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request, p params) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "auth_required": false})
 		return
 	}
+	ip := clientIP(r)
+	if !loginAllowed(ip) {
+		writeError(w, http.StatusTooManyRequests, "Слишком много попыток входа. Подождите несколько минут.")
+		return
+	}
 	pass := p.Get("password")
 	if !s.app.VerifyPassword(pass) {
+		loginFail(ip)
 		writeError(w, http.StatusUnauthorized, "Неверный пароль")
 		return
 	}
-	if s.app.Config.SessionToken == "" {
-		if err := s.app.RotateSession(); err != nil {
-			writeErr(w, err)
-			return
-		}
-		if err := s.app.Save(); err != nil {
-			writeErr(w, err)
-			return
-		}
+	loginOK(ip)
+	// Всегда ротируем session при успешном входе (украденный токен перестаёт работать).
+	if err := s.app.RotateSession(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.app.Save(); err != nil {
+		writeErr(w, err)
+		return
 	}
 	s.setSessionCookie(w)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "auth_required": true})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, _ params) {
@@ -161,9 +242,18 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, _ params) 
 		writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
 		return
 	}
-	// Public: всегда чистим cookie, даже если сессия уже протухла.
-	_ = s.app.RotateSession()
-	_ = s.app.Save()
+	// Без auth — только сброс cookie в браузере.
+	if !s.app.Config.AuthRequired() {
+		s.clearSessionCookie(w)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "auth_required": false})
+		return
+	}
+	ok, _ := s.authorized(r)
+	if ok {
+		_ = s.app.RotateSession()
+		_ = s.app.Save()
+	}
+	// Без валидной сессии: только clear cookie, session_token НЕ трогаем (anti-CSRF logout).
 	s.clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

@@ -256,6 +256,7 @@ export interface ValueSetting {
 }
 
 export interface StatePayload {
+  auth_required?: boolean
   status: StatusPayload
   version: VersionInfo
   scopes: ScopesPayload

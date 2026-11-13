@@ -19,6 +19,8 @@ export function announceRestart() {
   if (status.value?.zapret2_running) showToast('Применяем настройку — перезапускаем zapret2…', 'info')
 }
 
-export function restartSuffix(payload: { restarted?: boolean } | null) {
-  return payload?.restarted ? ' zapret2 перезапущен.' : ' Применится при следующем запуске zapret2.'
+export function restartSuffix(payload: { restarted?: boolean; restart_required?: boolean } | null) {
+  if (payload?.restarted) return ' zapret2 перезапущен.'
+  if (payload?.restart_required === false) return ''
+  return ' Применится при следующем запуске zapret2.'
 }
