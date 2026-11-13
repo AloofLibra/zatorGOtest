@@ -9,6 +9,7 @@ import { fetchAndApplyState } from '../stores/state'
 import { locks, refreshAll, scope, scopes, statusLoaded, strategyChecks } from '../stores/status'
 import { refreshTlsBlobSettings, tlsBlobSettings } from '../stores/settings'
 import { restartSuffix, showToast } from '../stores/toast'
+import CheckResults from '../components/ui/CheckResults.vue'
 import SupersweepPanel from '../components/strategies/SupersweepPanel.vue'
 
 const OVERRIDE_PROFILES = new Set(['1', '2', '3', '4', '8'])
@@ -90,9 +91,19 @@ async function save(profile: string, p: ProfileInfo) {
   try {
     await withBusy(`lock-${profile}`, async () => {
       await setLock(profile, n, scope.value)
+      delete strategyChecks[profile]
       await refreshAll()
+      if (n !== 0) {
+        try {
+          strategyChecks[profile] = await profileCheck(profile, scope.value)
+        } catch {
+          // стратегия уже зафиксирована — проверка необязательна
+        }
+      }
     })
-    showToast(`Профиль ${profile}: стратегия ${n}`)
+    showToast(n === 0
+      ? `Профиль ${profile} выключен`
+      : `Профиль ${profile}: стратегия ${n}`)
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
@@ -107,6 +118,7 @@ async function reset(profile: string, p: ProfileInfo) {
     await withBusy(`clear-${profile}`, async () => {
       await clearLock(profile, scope.value)
       draft.value[profile] = ''
+      delete strategyChecks[profile]
       await refreshAll()
     })
     showToast(`Профиль ${profile}: авто`)
@@ -259,9 +271,13 @@ async function saveCloneSize(profile: string) {
               @click="saveCloneSize(String(p.profile))">Сохранить лимит</button>
           </div>
         </div>
-        <div v-if="strategyChecks[String(p.profile)]" class="meta">
-          {{ strategyChecks[String(p.profile)].message || (strategyChecks[String(p.profile)].results || []).map(r => r.verdict || r.text).join(' · ') }}
-        </div>
+        <CheckResults
+          v-if="!gated(p) && strategyChecks[String(p.profile)]"
+          class="inline-check"
+          :payload="strategyChecks[String(p.profile)]"
+          empty-message="Нет результатов проверки."
+          :empty-hidden="false"
+        />
       </article>
     </div>
   </section>

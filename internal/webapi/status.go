@@ -281,11 +281,17 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request, p params) {
 
 func (s *Server) clientScopeDiag(cfg *config.Config) map[string]any {
 	enabled := cfg.ClientScopeText() == "включен"
+	mask := strings.TrimSpace(cfg.GetDefault("CLIENT_SCOPE_MARK_MASK", "0xff00"))
+	if mask == "" {
+		mask = "0xff00"
+	}
+	shift := atoiDefault(cfg.GetDefault("CLIENT_SCOPE_MARK_SHIFT", "8"), 8)
+	maxScope := atoiDefault(cfg.GetDefault("CLIENT_SCOPE_MARK_MAX", "255"), 255)
 	out := map[string]any{
 		"mode":              "off",
-		"mask":              cfg.GetDefault("CLIENT_SCOPE_MARK_MASK", "0xff00"),
-		"shift":             atoiDefault(cfg.GetDefault("CLIENT_SCOPE_MARK_SHIFT", "8"), 8),
-		"max_scope":         atoiDefault(cfg.GetDefault("CLIENT_SCOPE_MARK_MAX", "255"), 255),
+		"mask":              mask,
+		"shift":             shift,
+		"max_scope":         maxScope,
 		"scoped_lock_count": 0,
 		"conflicts":         0,
 		"last_seen_scope":   "",
@@ -297,9 +303,15 @@ func (s *Server) clientScopeDiag(cfg *config.Config) map[string]any {
 	if cc, err := firewall.ClientScopeConfigFromGetter(cfg.Get, s.paths.ZatorRoot); err == nil {
 		if cc.Mask != 0 {
 			out["mask"] = firewall.FormatMark(cc.Mask)
+		} else if out["mask"] == "" {
+			out["mask"] = "0xff00"
 		}
-		out["shift"] = int(cc.Shift)
-		out["max_scope"] = int(cc.Max)
+		if cc.Shift > 0 || cfg.GetDefault("CLIENT_SCOPE_MARK_SHIFT", "") != "" {
+			out["shift"] = int(cc.Shift)
+		}
+		if cc.Max > 0 {
+			out["max_scope"] = int(cc.Max)
+		}
 		if err := cc.Validate(); err != nil && enabled {
 			out["fallback_reason"] = err.Error()
 		}

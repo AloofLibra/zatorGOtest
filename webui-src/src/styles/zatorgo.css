@@ -544,6 +544,42 @@ a.metric:hover {
   .rail-foot { margin-top: 0; }
   .grid-2 { grid-template-columns: 1fr; }
 }
+.inline-check {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.inline-check.empty { display: none; }
+.checks { display: grid; gap: 0.65rem; }
+.check-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  background: color-mix(in srgb, var(--bg1) 70%, transparent);
+  display: grid;
+  gap: 0.45rem;
+}
+.check-title {
+  display: flex;
+  gap: 0.65rem;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.check-title strong, .check-title span { min-width: 0; overflow-wrap: anywhere; }
+.check-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  font-size: 0.84rem;
+}
+.check-pair span { min-width: 0; overflow-wrap: anywhere; }
+.check-pair .ok, .ok { color: var(--ok); }
+.check-pair .warn, .warn { color: var(--warn); }
+.check-pair .bad, .bad { color: var(--danger); }
+
 @media (max-width: 560px) {
   .nav { grid-template-columns: 1fr 1fr; }
   .theme-seg { grid-template-columns: repeat(3, 1fr); }
