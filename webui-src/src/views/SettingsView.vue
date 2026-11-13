@@ -252,9 +252,9 @@ async function saveScope() {
       const res = await api<{ ok?: boolean; enabled?: boolean; warning?: string }>('/cgi-bin/settings.cgi', formBody({
         setting: 'client_scope',
         client_scope_enable: scopeForm.enable ? '1' : '0',
-        client_scope_mark_mask: scopeForm.mask,
-        client_scope_mark_shift: scopeForm.shift,
-        client_scope_mark_max: scopeForm.max,
+        client_scope_mark_mask: String(scopeForm.mask ?? '').trim(),
+        client_scope_mark_shift: String(scopeForm.shift ?? '').trim(),
+        client_scope_mark_max: String(scopeForm.max ?? '').trim(),
       }))
       await fetchAndApplyState()
       const enabled = res.enabled ?? !!scopes.value?.enabled

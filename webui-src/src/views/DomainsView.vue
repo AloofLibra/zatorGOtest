@@ -82,7 +82,7 @@ async function importList() {
 }
 
 async function setStrategy(domain: string) {
-  const raw = (strategyDraft.value[domain] || '').trim()
+  const raw = String(strategyDraft.value[domain] ?? '').trim()
   try {
     await withBusy(`domain-st-${domain}`, async () => {
       if (!raw || raw === '0') {

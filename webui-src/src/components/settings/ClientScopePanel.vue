@@ -39,9 +39,9 @@ async function save(nextEnabled: boolean) {
       const res = await api<{ ok?: boolean; enabled?: boolean; warning?: string }>('/cgi-bin/settings.cgi', formBody({
         setting: 'client_scope',
         client_scope_enable: nextEnabled ? '1' : '0',
-        client_scope_mark_mask: mask.value.trim(),
-        client_scope_mark_shift: shift.value.trim(),
-        client_scope_mark_max: max.value.trim(),
+        client_scope_mark_mask: String(mask.value ?? '').trim(),
+        client_scope_mark_shift: String(shift.value ?? '').trim(),
+        client_scope_mark_max: String(max.value ?? '').trim(),
       }))
       await fetchAndApplyState()
       enabled.value = res.enabled ?? nextEnabled

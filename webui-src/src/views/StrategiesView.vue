@@ -16,14 +16,21 @@ const OVERRIDE_PROFILES = new Set(['1', '2', '3', '4', '8'])
 
 const router = useRouter()
 const route = useRoute()
-const draft = ref<Record<string, string>>({})
+/** Vue 3.4+ для input[type=number] кладёт в v-model number — всегда нормализуем в строку. */
+type DraftMap = Record<string, string | number>
+const draft = ref<DraftMap>({})
 const fakeMode = ref<Record<string, string>>({})
 const tlsProfile = ref<Record<string, string>>({})
 const cloneSize = ref<Record<string, string>>({})
 const overrideDirty = ref<Record<string, boolean>>({})
 
+function draftText(profile: string): string {
+  const v = draft.value[profile]
+  return v === undefined || v === null ? '' : String(v).trim()
+}
+
 function syncDraftFromLocks(list: ProfileInfo[] | undefined | null, force = false) {
-  const next: Record<string, string> = force ? {} : { ...draft.value }
+  const next: DraftMap = force ? {} : { ...draft.value }
   for (const p of list || []) {
     const id = String(p.profile)
     if (force || next[id] === undefined) {
@@ -98,26 +105,28 @@ async function save(profile: string, p: ProfileInfo) {
     showToast(gatedReason(p), 'error')
     return
   }
-  const raw = draft.value[profile]?.trim()
-  if (!raw) {
-    showToast('Укажите номер стратегии', 'error')
-    return
-  }
-  const n = Number(raw)
-  if (!Number.isInteger(n) || n < 0) {
-    showToast('Некорректный номер стратегии', 'error')
-    return
-  }
-  const max = Number(p.max_strategy || 0)
-  if (n !== 0 && max > 0 && n > max) {
-    showToast(`Стратегия вне диапазона (1–${max}, или 0)`, 'error')
-    return
-  }
   try {
+    const raw = draftText(profile)
+    if (!raw) {
+      showToast('Укажите номер стратегии', 'error')
+      return
+    }
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n < 0) {
+      showToast('Некорректный номер стратегии', 'error')
+      return
+    }
+    const max = Number(p.max_strategy || 0)
+    if (n !== 0 && max > 0 && n > max) {
+      showToast(`Стратегия вне диапазона (1–${max}, или 0)`, 'error')
+      return
+    }
     await withBusy(`lock-${profile}`, async () => {
       await setLock(profile, n, scope.value)
+      draft.value[profile] = String(n)
       delete strategyChecks[profile]
       await refreshAll()
+      syncDraftFromLocks(locks.value, true)
       if (n !== 0) {
         try {
           strategyChecks[profile] = await profileCheck(profile, scope.value)
@@ -249,8 +258,11 @@ async function saveCloneSize(profile: string) {
           <p v-if="gated(p)" class="panel-d" style="color:var(--warn);margin-top:0.45rem">{{ gatedReason(p) }}</p>
         </div>
         <div class="row">
-          <input v-model="draft[String(p.profile)]" type="number" min="0" :max="p.max_strategy || 999"
-            :disabled="busyActive || gated(p)" placeholder="номер" style="max-width:7rem">
+          <input
+            type="number" min="0" :max="p.max_strategy || 999"
+            :value="draft[String(p.profile)] ?? ''"
+            :disabled="busyActive || gated(p)" placeholder="номер" style="max-width:7rem"
+            @input="draft[String(p.profile)] = ($event.target as HTMLInputElement).value">
           <button type="button" class="primary" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `lock-${p.profile}` }"
             @click="save(String(p.profile), p)">Зафиксировать</button>
