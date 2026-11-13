@@ -25,6 +25,9 @@ const metaLine = computed(() => {
   if (p.zapret2_running === false) bits.push('zapret2 выключен')
   if (p.zapret2_running === true) bits.push('zapret2 online')
   if (p.waited_apply) bits.push('после apply')
+  if (p.applied === true) bits.push('лок подтверждён')
+  if (p.applied === false) bits.push('лок НЕ совпал')
+  if (p.retried) bits.push('retry')
   return bits.join(' · ')
 })
 

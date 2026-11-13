@@ -73,6 +73,18 @@ export interface CheckPayload {
   lock?: string
   zapret2_running?: boolean
   waited_apply?: boolean
+  applied?: boolean
+  retried?: boolean
+}
+
+export interface LockResult {
+  ok?: boolean
+  previous?: string
+  lock?: string
+  changed?: boolean
+  scope?: string
+  profile?: number
+  warning?: string
 }
 
 export interface TlsBlobSettings {

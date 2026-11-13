@@ -85,6 +85,40 @@ func (c *Checker) CheckTarget(ctx context.Context, label, rawURL string) TargetR
 	return buildResult(label, rawURL, v12, v13, dl)
 }
 
+// CheckTargetReliable — CheckTarget + один повтор при timeout/conn/tls fail.
+func (c *Checker) CheckTargetReliable(ctx context.Context, label, rawURL string) (TargetResult, bool) {
+	first := c.CheckTarget(ctx, label, rawURL)
+	if first.Verdict != VerdictFail || ctx.Err() != nil {
+		return first, false
+	}
+	if !transientFail(first) {
+		return first, false
+	}
+	t := time.NewTimer(450 * time.Millisecond)
+	select {
+	case <-ctx.Done():
+		t.Stop()
+		return first, false
+	case <-t.C:
+	}
+	second := c.CheckTarget(ctx, label, rawURL)
+	if second.Verdict == VerdictFail {
+		return second, true
+	}
+	second.Text = second.Text + " (со 2-й попытки)"
+	return second, true
+}
+
+func transientFail(r TargetResult) bool {
+	for _, st := range []string{r.TLS12Detail.State, r.TLS13Detail.State} {
+		switch st {
+		case StateTimeout, StateConn, StateTLS, StateNone:
+			return true
+		}
+	}
+	return false
+}
+
 func buildResult(label, target string, v12, v13 VersionDetail, dl *Download) TargetResult {
 	verdict, text := Verdict(v12, v13, dl)
 	return TargetResult{
@@ -195,7 +229,7 @@ func (c *Checker) ProfileTarget(ctx context.Context, profile int) (Target, bool)
 
 // CheckProfile — check.cgi?profile=N: проверка одной цели профиля.
 // Профили 5/6 — пустой список и пояснение; 10 — серия DNS-проб антиспуфа;
-// прочие — пустой список.
+// прочие — пустой список. Profile 2: при fail Googlevideo — контроль YouTube.
 func (c *Checker) CheckProfile(ctx context.Context, profile int) CheckResponse {
 	switch profile {
 	case 5, 6:
@@ -207,7 +241,20 @@ func (c *Checker) CheckProfile(ctx context.Context, profile int) CheckResponse {
 	if !ok {
 		return CheckResponse{Results: []TargetResult{}, Message: MessageNoTLSProfile}
 	}
-	return CheckResponse{Results: []TargetResult{c.CheckTarget(ctx, t.Label, t.URL)}}
+	primary, retried := c.CheckTargetReliable(ctx, t.Label, t.URL)
+	resp := CheckResponse{Results: []TargetResult{primary}, Retried: retried}
+	if profile == 2 && primary.Verdict == VerdictFail && ctx.Err() == nil {
+		ctrl, r2 := c.CheckTargetReliable(ctx, LabelYouTube+" (контроль)", URLYouTube)
+		resp.Retried = resp.Retried || r2
+		resp.Results = append(resp.Results, ctrl)
+		switch ctrl.Verdict {
+		case VerdictOK, VerdictWarn:
+			resp.Message = "Googlevideo недоступен, YouTube отвечает — сбой на цели профиля 2 (не общий обрыв сети)"
+		default:
+			resp.Message = "Недоступны Googlevideo и YouTube — общий сбой сети/DNS/DPI, не только стратегия профиля 2"
+		}
+	}
+	return resp
 }
 
 // --- YouTube / googlevideo ---

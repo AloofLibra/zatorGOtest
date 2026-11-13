@@ -1,7 +1,7 @@
 import { api, downloadBlob, formBody } from './client'
 import type {
   ApplyResult, BackupsPayload, CheckPayload, DomainsImportResult, DomainsListPayload,
-  FallbackSettings, ModeSettingData, PortInfo, PortsSettings, ProfileInfo, ProviderSettings,
+  FallbackSettings, LockResult, ModeSettingData, PortInfo, PortsSettings, ProfileInfo, ProviderSettings,
   ScopesPayload, StatePayload, StatusPayload, TlsBlobSettings, UdpGamesSettings, UpdateCheckResult,
   WgBlobSettings, WgStateSettings, Recommendations, SupersweepPayload, WssizeRampSettings,
 } from './types'
@@ -37,11 +37,11 @@ export const supersweepCancel = () =>
 export const fetchScopes = () => api<ScopesPayload>('/api/scopes')
 
 export const setLock = (profile: string, strategy: number, scope: string) =>
-  api<Record<string, never>>('/api/set-lock',
+  api<LockResult>('/api/set-lock',
     formBody({ profile, strategy, scope }))
 
 export const clearLock = (profile: string, scope: string) =>
-  api<Record<string, never>>('/api/clear-lock',
+  api<LockResult>('/api/clear-lock',
     formBody({ profile, scope }))
 
 export const serviceAction = (action: 'start' | 'stop' | 'restart') =>
@@ -50,12 +50,17 @@ export const serviceAction = (action: 'start' | 'stop' | 'restart') =>
 export const runCheck = () =>
   api<CheckPayload>('/api/check', { method: 'POST' })
 
-export const profileCheck = (profile: string, scope: string, opts: { waitApply?: boolean } = {}) =>
+export const profileCheck = (
+  profile: string,
+  scope: string,
+  opts: { waitApply?: boolean; expectLock?: string } = {},
+) =>
   api<CheckPayload>('/api/check',
     formBody({
       profile,
       scope,
       wait_apply: opts.waitApply ? '1' : undefined,
+      expect_lock: opts.expectLock || undefined,
     }))
 
 export const fetchTlsBlobSettings = () =>

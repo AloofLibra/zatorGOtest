@@ -184,6 +184,8 @@ type CheckResponse struct {
 	Lock           string `json:"lock,omitempty"`            // auto | 0 | N
 	Zapret2Running *bool  `json:"zapret2_running,omitempty"` // nil = неизвестно
 	WaitedApply    bool   `json:"waited_apply,omitempty"`
+	Applied        *bool  `json:"applied,omitempty"` // expect_lock совпал со store
+	Retried        bool   `json:"retried,omitempty"` // была повторная TLS-попытка
 }
 
 // CodeOK сообщает, что HTTP-код 2xx или 3xx (z2r_tls_code_ok).

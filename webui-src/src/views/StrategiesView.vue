@@ -156,32 +156,40 @@ async function save(profile: string, p: ProfileInfo) {
       return
     }
     let checkPayload: Awaited<ReturnType<typeof profileCheck>> | null = null
+    let lockRes: Awaited<ReturnType<typeof setLock>> | null = null
     await withBusy(`lock-${profile}`, async () => {
-      await setLock(profile, n, scope.value)
+      lockRes = await setLock(profile, n, scope.value)
       draft.value[profile] = String(n)
       delete strategyChecks[profile]
       await refreshAll()
       syncDraftFromLocks(locks.value, true)
       if (n !== 0) {
         try {
-          // wait_apply: ждём TTL Lua, затем TLS/DNS-тест с метаданными лока
-          checkPayload = await profileCheck(profile, scope.value, { waitApply: true })
+          checkPayload = await profileCheck(profile, scope.value, {
+            waitApply: true,
+            expectLock: String(n),
+          })
           strategyChecks[profile] = checkPayload
         } catch (e) {
           showToast(`Лок записан, проверка не выполнена: ${(e as Error).message}`, 'warning')
         }
       }
     })
+    const changed = lockRes?.changed ? `${lockRes.previous || '?'}→${lockRes.lock}` : `лок ${n}`
     if (n === 0) {
-      showToast(`Профиль ${profile} выключен`)
+      showToast(`Профиль ${profile} выключен (${changed})`)
+      return
+    }
+    if (checkPayload?.applied === false) {
+      showToast(`Профиль ${profile}: store не подтвердил лок ${n} (сейчас ${checkPayload.lock})`, 'error')
       return
     }
     const v = checkPayload?.results?.[0]?.verdict
-    if (v === 'ok') showToast(`Профиль ${profile}: стратегия ${n} — цель доступна`)
-    else if (v === 'warn') showToast(`Профиль ${profile}: стратегия ${n} — с предупреждением`, 'warning')
-    else if (v === 'fail') showToast(`Профиль ${profile}: стратегия ${n} записана, цель недоступна`, 'warning')
-    else if (checkPayload?.message) showToast(`Профиль ${profile}: стратегия ${n}. ${checkPayload.message}`, 'info')
-    else showToast(`Профиль ${profile}: стратегия ${n}`)
+    if (v === 'ok') showToast(`Профиль ${profile}: ${changed} — цель доступна`)
+    else if (v === 'warn') showToast(`Профиль ${profile}: ${changed} — с предупреждением`, 'warning')
+    else if (v === 'fail') showToast(`Профиль ${profile}: ${changed} записан, цель недоступна`, 'warning')
+    else if (checkPayload?.message) showToast(`Профиль ${profile}: ${changed}. ${checkPayload.message}`, 'info')
+    else showToast(`Профиль ${profile}: ${changed}`)
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
@@ -193,13 +201,15 @@ async function reset(profile: string, p: ProfileInfo) {
     return
   }
   try {
+    let prev = p.current_lock || 'auto'
     await withBusy(`clear-${profile}`, async () => {
-      await clearLock(profile, scope.value)
+      const res = await clearLock(profile, scope.value)
+      prev = res.previous || prev
       draft.value[profile] = ''
       delete strategyChecks[profile]
       await refreshAll()
     })
-    showToast(`Профиль ${profile}: авто`)
+    showToast(`Профиль ${profile}: ${prev}→auto`)
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
@@ -212,10 +222,18 @@ async function check(profile: string, p: ProfileInfo) {
   }
   try {
     await withBusy(`check-${profile}`, async () => {
-      const payload = await profileCheck(profile, scope.value, { waitApply: true })
+      const expect = String(p.current_lock || 'auto')
+      const payload = await profileCheck(profile, scope.value, {
+        waitApply: true,
+        expectLock: expect === 'auto' ? undefined : expect,
+      })
       strategyChecks[profile] = payload
+      if (payload.applied === false) {
+        showToast(`Лок в store ${payload.lock} ≠ UI ${expect}`, 'error')
+        return
+      }
       const v = payload.results?.[0]?.verdict
-      if (v === 'ok') showToast(`Профиль ${profile}: цель доступна при локе ${payload.lock || p.current_lock || 'auto'}`)
+      if (v === 'ok') showToast(`Профиль ${profile}: цель доступна при локе ${payload.lock || expect}`)
       else if (v === 'warn') showToast(`Профиль ${profile}: предупреждение при проверке`, 'warning')
       else if (v === 'fail') showToast(`Профиль ${profile}: цель недоступна`, 'warning')
       else if (payload.message) showToast(payload.message, 'info')

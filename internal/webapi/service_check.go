@@ -96,7 +96,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request, p params) {
 		checkResp := s.checker.CheckProfile(ctx, id)
 		checkResp.WaitedApply = resp.WaitedApply
 		resp = checkResp
-		s.annotateProfileCheck(&resp, scope, id)
+		s.annotateProfileCheck(&resp, scope, id, p.Get("expect_lock"))
 	}
 	if resp.Results == nil {
 		resp.Results = []netcheck.TargetResult{}
@@ -105,7 +105,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request, p params) {
 }
 
 // annotateProfileCheck добавляет факты о локе и состоянии zapret2.
-func (s *Server) annotateProfileCheck(resp *netcheck.CheckResponse, scope string, profile int) {
+func (s *Server) annotateProfileCheck(resp *netcheck.CheckResponse, scope string, profile int, expectLock string) {
 	resp.Profile = profile
 	resp.Scope = scope
 	resp.Lock = s.profileLockLabel(scope, profile)
@@ -126,6 +126,18 @@ func (s *Server) annotateProfileCheck(resp *netcheck.CheckResponse, scope string
 		bits = append(bits, fmt.Sprintf("лок профиля %d: выключен (0)", profile))
 	default:
 		bits = append(bits, fmt.Sprintf("лок профиля %d: стратегия %s (scope=%s)", profile, resp.Lock, scope))
+	}
+	if expect := strings.TrimSpace(expectLock); expect != "" {
+		ok := resp.Lock == expect
+		resp.Applied = &ok
+		if ok {
+			bits = append(bits, "лок в store совпал с ожидаемым "+expect)
+		} else {
+			bits = append(bits, fmt.Sprintf("лок в store %s ≠ ожидаемый %s", resp.Lock, expect))
+		}
+	}
+	if resp.Retried {
+		bits = append(bits, "TLS-проба с повтором")
 	}
 	resp.Message = strings.Join(bits, ". ")
 }

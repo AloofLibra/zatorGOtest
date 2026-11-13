@@ -481,11 +481,20 @@ func (s *Server) handleSetLock(w http.ResponseWriter, r *http.Request, p params)
 		writeError(w, http.StatusBadRequest, "Не удалось определить протокол профиля")
 		return
 	}
+	prev := s.profileLockLabel(scope, id)
 	if err := s.applyProfileLock(scope, id, orchestra.Strategy(n)); err != nil {
 		writeLockFailure(w, err, "Не удалось сохранить состояние профиля")
 		return
 	}
-	out := map[string]any{"ok": true}
+	lock := orchestra.Strategy(n).String()
+	out := map[string]any{
+		"ok":       true,
+		"previous": prev,
+		"lock":     lock,
+		"changed":  prev != lock,
+		"scope":    scope,
+		"profile":  id,
+	}
 	if id == 6 {
 		if w := s.voicePorts(r.Context(), n != 0); w != "" {
 			out["warning"] = w
@@ -522,11 +531,19 @@ func (s *Server) handleClearLock(w http.ResponseWriter, r *http.Request, p param
 		writeError(w, http.StatusBadRequest, "Не удалось определить протокол профиля")
 		return
 	}
+	prev := s.profileLockLabel(scope, id)
 	if err := s.applyProfileLock(scope, id, orchestra.StrategyAuto); err != nil {
 		writeLockFailure(w, err, "Не удалось сбросить состояние профиля")
 		return
 	}
-	out := map[string]any{"ok": true}
+	out := map[string]any{
+		"ok":       true,
+		"previous": prev,
+		"lock":     "auto",
+		"changed":  prev != "auto",
+		"scope":    scope,
+		"profile":  id,
+	}
 	if id == 6 {
 		if w := s.voicePorts(r.Context(), true); w != "" {
 			out["warning"] = w

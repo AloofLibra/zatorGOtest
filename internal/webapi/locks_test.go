@@ -64,8 +64,8 @@ func TestSetLockAndClearLock(t *testing.T) {
 
 	resp, out := e.post("/cgi-bin/set-lock.cgi", "profile", "1", "strategy", "7")
 	wantOK(t, resp, out)
-	if len(out) != 1 {
-		t.Errorf("тело set-lock должно быть {ok:true}, получено %v", out)
+	if out["lock"] != "7" || out["previous"] != "auto" || out["changed"] != true {
+		t.Errorf("set-lock meta = %v", out)
 	}
 	// Профиль 1 = tls + http.
 	for _, proto := range []string{"tls", "http"} {
