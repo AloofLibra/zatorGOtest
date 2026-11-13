@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
@@ -95,11 +94,9 @@ func (a *App) PrepareZapretRuntime() (fwHook string, err error) {
 	if err := os.MkdirAll(a.Paths.ZapretRoot, 0o755); err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(cfgPath); err != nil {
-		if data, e := uiembed.ConfigDefault(); e == nil {
-			if e := a.seedZapretConfig(data); e != nil {
-				return "", e
-			}
+	if data, e := uiembed.ConfigDefault(); e == nil {
+		if e := a.seedZapretConfig(data); e != nil {
+			return "", e
 		}
 	}
 	cfg, err := config.Load(cfgPath)
@@ -183,6 +180,8 @@ func (a *App) ensureHostlistPlaceholders() error {
 }
 
 // StartServices ставит в автозагрузку и запускает zapret2 и Web UI.
+// Ошибки prepare/zapret не блокируют установку Web UI: панель должна
+// подняться даже при битом /opt/zapret2/config после wipe.
 func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 	if opts.SkipService {
 		return nil
@@ -196,17 +195,7 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 		_, _ = a.PrepareZapretRuntime()
 		return nil
 	}
-	fwHook, err := a.PrepareZapretRuntime()
-	if err != nil {
-		return err
-	}
-	qnum := "200"
-	if cfg, err := config.Load(a.Paths.ZapretConfig); err == nil {
-		if v := strings.TrimSpace(cfg.GetDefault("QNUM", "")); v != "" {
-			qnum = v
-		}
-	}
-	_ = qnum // номер очереди уже в nfqws2.args (--qnum=)
+	fwHook, prepErr := a.PrepareZapretRuntime()
 	mgr, err := service.New(service.Config{
 		Paths:    a.Paths,
 		Platform: a.Platform,
@@ -218,30 +207,55 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 		return fmt.Errorf("службы: %w", err)
 	}
 
-	units := []service.Unit{service.UnitZapret2, service.UnitValidator}
+	var soft, hard []string
+	if prepErr != nil {
+		soft = append(soft, "prepare zapret: "+prepErr.Error())
+	}
+
+	zapretUnits := []service.Unit{service.UnitZapret2, service.UnitValidator}
+	if prepErr == nil {
+		for _, u := range zapretUnits {
+			if err := mgr.Install(ctx, u); err != nil {
+				soft = append(soft, fmt.Sprintf("install %s: %v", u, err))
+				continue
+			}
+			if err := mgr.Restart(ctx, u); err != nil {
+				soft = append(soft, fmt.Sprintf("start %s: %v", u, err))
+			}
+		}
+		time.Sleep(800 * time.Millisecond)
+		if st, err := mgr.Status(ctx, service.UnitZapret2); err == nil && !st.Running {
+			soft = append(soft, "nfqws2 не запущен после start (проверьте /opt/zapret2/nfqws2.args и логи)")
+		}
+	}
+
 	if opts.webUI() {
-		units = append(units, service.UnitWebUI)
-	}
-	var errs []string
-	for _, u := range units {
+		u := service.UnitWebUI
 		if err := mgr.Install(ctx, u); err != nil {
-			errs = append(errs, fmt.Sprintf("install %s: %v", u, err))
-			continue
-		}
-		if err := mgr.Restart(ctx, u); err != nil {
-			errs = append(errs, fmt.Sprintf("start %s: %v", u, err))
+			hard = append(hard, fmt.Sprintf("install %s: %v", u, err))
+		} else if err := mgr.Restart(ctx, u); err != nil {
+			hard = append(hard, fmt.Sprintf("start %s: %v", u, err))
 		}
 	}
-	// Дать процессам подняться и проверить nfqws2.
-	time.Sleep(800 * time.Millisecond)
-	if st, err := mgr.Status(ctx, service.UnitZapret2); err == nil && !st.Running {
-		errs = append(errs, "nfqws2 не запущен после start (проверьте /opt/zapret2/nfqws2.args и логи)")
+
+	if len(hard) > 0 {
+		all := append(append([]string{}, hard...), soft...)
+		return fmt.Errorf("%s", joinErrors(all))
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%s", joinErrors(errs))
+	if len(soft) > 0 {
+		// Web UI поднят — zapret-проблемы не валят install (иначе launcher die).
+		return &SoftServiceError{Msgs: soft}
 	}
 	return nil
 }
+
+// SoftServiceError — zapret/runtime предупреждения при живом Web UI.
+type SoftServiceError struct {
+	Msgs []string
+}
+
+func (e *SoftServiceError) Error() string { return joinErrors(e.Msgs) }
+func (e *SoftServiceError) Soft() bool    { return true }
 
 func joinErrors(errs []string) string {
 	out := ""

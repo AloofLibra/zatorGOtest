@@ -187,8 +187,12 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 			Version:     zver,
 		})
 		if err != nil {
-			fmt.Fprintf(stderr, "zapret2: %v\n", err)
-			return 1
+			if soft, ok := err.(*app.SoftServiceError); ok {
+				fmt.Fprintf(stderr, "предупреждение zapret2/службы: %v\n", soft)
+			} else {
+				fmt.Fprintf(stderr, "zapret2: %v\n", err)
+				return 1
+			}
 		}
 		if res != nil {
 			skip := ""
@@ -199,8 +203,12 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		}
 	} else if !*skipService {
 		if err := a.StartServices(context.Background(), app.BootstrapOptions{}); err != nil {
-			fmt.Fprintf(stderr, "автозапуск служб: %v\n", err)
-			return 1
+			if soft, ok := err.(*app.SoftServiceError); ok {
+				fmt.Fprintf(stderr, "предупреждение служб: %v\n", soft)
+			} else {
+				fmt.Fprintf(stderr, "автозапуск служб: %v\n", err)
+				return 1
+			}
 		}
 	}
 	fmt.Fprintf(stdout, "Web UI: %s\n", a.WebUIURL(""))

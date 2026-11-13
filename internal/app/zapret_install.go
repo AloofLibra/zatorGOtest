@@ -75,7 +75,10 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 		}
 		return res, nil
 	}
-	if err := a.StartServices(cctx, BootstrapOptions{}); err != nil {
+	// Отдельный бюджет на службы: download мог съесть почти весь cctx.
+	sctx, scancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
+	defer scancel()
+	if err := a.StartServices(sctx, BootstrapOptions{}); err != nil {
 		return res, err
 	}
 	return res, nil
