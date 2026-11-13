@@ -66,18 +66,21 @@ onMounted(() => {
   }
 })
 
-function changeScope(v: string) {
+async function changeScope(v: string) {
   scope.value = v || 'default'
   router.replace({ query: { scope: scope.value } })
   for (const key of Object.keys(strategyChecks)) delete strategyChecks[key]
   draft.value = {}
   overrideDirty.value = {}
-  refreshAll()
-    .then(() => {
+  try {
+    await withBusy('scope-change', async () => {
+      await refreshAll()
       syncDraftFromLocks(locks.value, true)
       syncOverridesFromSettings(true)
     })
-    .catch((e) => showToast((e as Error).message, 'error'))
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
 }
 
 function markOverrideDirty(profile: string) {

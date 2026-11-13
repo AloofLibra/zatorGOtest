@@ -114,7 +114,7 @@ func (s *Server) statusPayload(ctx context.Context, scope string) map[string]any
 		sp := statusProfile{
 			Profile: pr.ID, Label: pr.Label, Description: pr.Description,
 			CurrentLock: lock, MaxStrategy: pr.MaxStrategy,
-			Scope: src, LockSource: src,
+			Scope: scope, LockSource: src,
 		}
 		switch pr.ID {
 		case config.ProfileUDPGames:
@@ -391,29 +391,54 @@ func autoConflict(cfg *config.Config, id int) error {
 }
 
 // applyProfileLock пишет фиксацию во все протоколы профиля.
+// При ошибке на N-м протоколе откатывает уже записанные 0..N-1.
 func (s *Server) applyProfileLock(scope string, id int, st orchestra.Strategy) error {
-	for _, proto := range config.ProfileProtos(id) {
+	protos := config.ProfileProtos(id)
+	profile := strconv.Itoa(id)
+	prev := make([]orchestra.Strategy, len(protos))
+	for i, proto := range protos {
+		got, err := s.store.GetLock(scope, profile, proto)
+		if err != nil {
+			prev[i] = orchestra.StrategyAuto
+		} else {
+			prev[i] = got
+		}
+	}
+	for i, proto := range protos {
 		var err error
 		if st.IsAuto() {
-			err = s.store.ClearLock(scope, strconv.Itoa(id), proto)
+			err = s.store.ClearLock(scope, profile, proto)
 		} else {
-			err = s.store.SetLock(scope, strconv.Itoa(id), proto, st)
+			err = s.store.SetLock(scope, profile, proto, st)
 		}
 		if err != nil {
+			for j := 0; j < i; j++ {
+				_ = s.restoreProfileProto(scope, profile, protos[j], prev[j])
+			}
 			return err
 		}
 	}
 	return nil
 }
 
+func (s *Server) restoreProfileProto(scope, profile, proto string, st orchestra.Strategy) error {
+	if st.IsAuto() {
+		return s.store.ClearLock(scope, profile, proto)
+	}
+	return s.store.SetLock(scope, profile, proto, st)
+}
+
 // voicePorts правит голосовые порты профиля 6 и перезапускает zapret2.
-func (s *Server) voicePorts(ctx context.Context, on bool) {
+// Возвращает предупреждение при ошибке (лок уже сохранён).
+func (s *Server) voicePorts(ctx context.Context, on bool) string {
 	err := s.editConfigs(func(c *config.Config) error {
 		return c.SetPortToken("udp", config.VoicePorts, on)
 	})
-	if err == nil {
-		s.restartIfRunning(ctx)
+	if err != nil {
+		return "Голосовые порты не обновлены: " + err.Error()
 	}
+	s.restartIfRunning(ctx)
+	return ""
 }
 
 // POST /cgi-bin/set-lock.cgi
@@ -447,6 +472,10 @@ func (s *Server) handleSetLock(w http.ResponseWriter, r *http.Request, p params)
 		writeError(w, http.StatusBadRequest, "Стратегия вне диапазона")
 		return
 	}
+	if err := profileModeGuard(cfg, id); err != nil {
+		writeErr(w, err)
+		return
+	}
 	if len(config.ProfileProtos(id)) == 0 {
 		writeError(w, http.StatusBadRequest, "Не удалось определить протокол профиля")
 		return
@@ -455,10 +484,13 @@ func (s *Server) handleSetLock(w http.ResponseWriter, r *http.Request, p params)
 		writeLockFailure(w, err, "Не удалось сохранить состояние профиля")
 		return
 	}
+	out := map[string]any{"ok": true}
 	if id == 6 {
-		s.voicePorts(r.Context(), n != 0)
+		if w := s.voicePorts(r.Context(), n != 0); w != "" {
+			out["warning"] = w
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, out)
 }
 
 // POST /cgi-bin/clear-lock.cgi
@@ -481,6 +513,10 @@ func (s *Server) handleClearLock(w http.ResponseWriter, r *http.Request, p param
 		writeErr(w, err)
 		return
 	}
+	if err := profileModeGuard(cfg, id); err != nil {
+		writeErr(w, err)
+		return
+	}
 	if len(config.ProfileProtos(id)) == 0 {
 		writeError(w, http.StatusBadRequest, "Не удалось определить протокол профиля")
 		return
@@ -489,10 +525,13 @@ func (s *Server) handleClearLock(w http.ResponseWriter, r *http.Request, p param
 		writeLockFailure(w, err, "Не удалось сбросить состояние профиля")
 		return
 	}
+	out := map[string]any{"ok": true}
 	if id == 6 {
-		s.voicePorts(r.Context(), true)
+		if w := s.voicePorts(r.Context(), true); w != "" {
+			out["warning"] = w
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func writeLockFailure(w http.ResponseWriter, err error, msg string) {

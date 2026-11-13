@@ -61,7 +61,11 @@ func (s *Server) postStrategyRegister(r *http.Request, p params) (map[string]any
 	locked := false
 	lockWarning := ""
 	if p.Get("lock") == "1" {
-		if err := s.applyProfileLock(scopeOrDefault(p), id, orchestra.Strategy(assigned)); err != nil {
+		sc, err := scopeParam(p)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.applyProfileLock(sc, id, orchestra.Strategy(assigned)); err != nil {
 			// Стратегия уже в конфиге — не откатываем и не отдаём 500.
 			lockWarning = "Стратегия добавлена, но зафиксировать не удалось: " + err.Error()
 		} else {
@@ -97,14 +101,6 @@ func profileModeGuard(cfg *config.Config, id int) error {
 		}
 	}
 	return nil
-}
-
-func scopeOrDefault(p params) string {
-	sc, err := scopeParam(p)
-	if err != nil || sc == "" {
-		return orchestra.ScopeDefault
-	}
-	return sc
 }
 
 // POST /cgi-bin/blob-upload.cgi?kind=tls|wg&name=….bin[&select=1]

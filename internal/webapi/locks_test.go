@@ -94,7 +94,9 @@ func TestSetLockAndClearLock(t *testing.T) {
 		t.Errorf("profile 2 = %v", p)
 	}
 
-	// Fallback-профили пишутся в locked.manual.tsv.
+	// Fallback-профили пишутся в locked.manual.tsv (сначала включаем режим).
+	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "fallback_state", "value", "1")
+	wantOK(t, resp, out)
 	resp, out = e.post("/cgi-bin/set-lock.cgi", "profile", "8", "strategy", "5")
 	wantOK(t, resp, out)
 	if data, _ := os.ReadFile(e.app.Paths.LockedManualTSV); !strings.Contains(string(data), "8\ttls\t5") {
@@ -128,6 +130,8 @@ func TestSetLockValidation(t *testing.T) {
 		{"missing strategy", []string{"profile", "1"}, 400, "Некорректная стратегия"},
 		{"out of range", []string{"profile", "4", "strategy", "29"}, 400, "Стратегия вне диапазона"},
 		{"out of range 9", []string{"profile", "9", "strategy", "9"}, 400, "Стратегия вне диапазона"},
+		{"fallback off", []string{"profile", "8", "strategy", "1"}, 409, "Сначала включите безразборный режим"},
+		{"udp games off", []string{"profile", "7", "strategy", "1"}, 409, "Сначала включите игровой UDP"},
 		{"unknown profile", []string{"profile", "11", "strategy", "0"}, 400, "Не удалось определить протокол профиля"},
 	}
 	for _, tc := range tests {

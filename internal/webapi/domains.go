@@ -360,7 +360,10 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 			return nil, err
 		}
 		if d.custom {
-			s.renameLocks(old, next)
+			if err := s.renameLocks(old, next); err != nil {
+				_ = save(lines) // откат имени в списке — лок не перенесён
+				return nil, errf(http.StatusInternalServerError, "Не удалось перенести стратегию домена: "+err.Error())
+			}
 		}
 		return map[string]any{"ok": true, "domain": next}, nil
 
@@ -462,17 +465,32 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 }
 
 // renameLocks переносит фиксации домена (default и per-mark) на новое имя.
-func (s *Server) renameLocks(old, next string) {
+// При ошибке SetLock откатывает уже записанные new-локи и не трогает old.
+func (s *Server) renameLocks(old, next string) error {
 	scopes, err := s.store.ListScopes()
 	if err != nil {
-		return
+		return err
 	}
+	type moved struct {
+		scope string
+		st    orchestra.Strategy
+	}
+	var done []moved
 	for _, sc := range scopes {
 		st, err := s.store.GetLock(sc, old, "tls")
 		if err != nil || st.IsAuto() {
 			continue
 		}
-		_ = s.store.SetLock(sc, next, "tls", st)
+		if err := s.store.SetLock(sc, next, "tls", st); err != nil {
+			for _, m := range done {
+				_ = s.store.ClearLock(m.scope, next, "tls")
+			}
+			return err
+		}
+		done = append(done, moved{scope: sc, st: st})
 	}
-	_ = s.store.ClearEverywhere(old, "tls")
+	if err := s.store.ClearEverywhere(old, "tls"); err != nil {
+		return err
+	}
+	return nil
 }

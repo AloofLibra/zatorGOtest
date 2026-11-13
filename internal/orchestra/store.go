@@ -80,7 +80,7 @@ func (s *Store) ScopePath(scope string) (string, error) {
 	return filepath.Join(s.ScopesDir(), "mark_"+strconv.Itoa(n)+".tsv"), nil
 }
 
-// StatusText возвращает "Есть", если непустой locked.tsv или locked.manual.tsv,
+// StatusText возвращает "Есть", если есть любая фиксация (default/manual/scopes),
 // иначе "Нет" (strategy_locks_status_text).
 func (s *Store) StatusText() string {
 	if s.HasLocks() {
@@ -89,11 +89,26 @@ func (s *Store) StatusText() string {
 	return StatusAbsent
 }
 
-// HasLocks сообщает, что locked.tsv или locked.manual.tsv не пусты.
+// HasLocks сообщает, что есть непустой locked.tsv, locked.manual.tsv
+// или хотя бы один per-mark файл в scopes/.
 func (s *Store) HasLocks() bool {
 	for _, p := range []string{s.LockedPath(), s.ManualPath()} {
 		if st, err := os.Stat(p); err == nil && st.Size() > 0 {
 			return true
+		}
+	}
+	entries, err := os.ReadDir(s.ScopesDir())
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if scopeFileRe.MatchString(e.Name()) {
+			if info, err := e.Info(); err == nil && info.Size() > 0 {
+				return true
+			}
 		}
 	}
 	return false

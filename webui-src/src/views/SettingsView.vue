@@ -191,11 +191,20 @@ async function saveTls() {
 
 async function saveWg(restart = true) {
   try {
+    const repeats = Number(wgRepeats.value)
+    if (!Number.isInteger(repeats) || repeats < 2 || repeats > 99) {
+      showToast('Repeats WireGuard: целое число 2–99', 'error')
+      return
+    }
+    if (wgOn.value && !String(wgBlob.value || '').trim()) {
+      showToast('Выберите WG blob перед включением', 'error')
+      return
+    }
     await withBusy('wg', async () => {
       if (restart) announceRestart()
       await applySetting.wg_state(wgOn.value, restart)
       if (wgBlob.value) await applySetting.wg_blob(wgBlob.value, false)
-      await applySetting.wg_repeats(wgRepeats.value, restart)
+      await applySetting.wg_repeats(repeats, restart)
       showToast('WireGuard сохранён')
       await refreshWgBlobSettings()
       await refreshWgStateSettings()
@@ -208,9 +217,14 @@ async function saveWg(restart = true) {
 
 async function addPort() {
   try {
+    const raw = String(portValue.value ?? '').trim()
+    if (!raw) {
+      showToast('Укажите порт или список портов', 'error')
+      return
+    }
     await withBusy('port-add', async () => {
       announceRestart()
-      const res = await applySetting.ports_add(portProto.value, portValue.value)
+      const res = await applySetting.ports_add(portProto.value, raw)
       portValue.value = ''
       showToast(`Порты добавлены.${restartSuffix(res)}`)
       await refreshPorts()
@@ -478,9 +492,10 @@ watch(() => [route.params.panel, route.hash, settingsLoaded.value], async () => 
   scrollToPanel()
 }, { immediate: true })
 
-onMounted(() => {
-  loadConfig()
-  loadErrors()
+onMounted(async () => {
+  // Последовательно: параллельный withBusy раньше сбрасывал busy чужим finally.
+  await loadConfig()
+  await loadErrors()
 })
 </script>
 

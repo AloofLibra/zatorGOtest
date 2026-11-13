@@ -44,14 +44,14 @@ type profileMeta struct {
 // profileTable — значения из API_CONTRACT.md и lib/config.sh
 // (config_profile_title / config_profile_proto_list).
 var profileTable = [MaxProfile + 1]profileMeta{
-	1:  {"YouTube TCP", "Основной TCP профиль для YouTube", "TCP 443 (YouTube)", []string{"tls", "http"}, 43},
-	2:  {"Googlevideo", "Видео-домены YouTube", "TCP 443 (Googlevideo)", []string{"tls"}, 43},
-	3:  {"RKN Лист", "Основные блокировки сайтов", "TCP 443 (RKN)", []string{"tls"}, 43},
+	1:  {"YouTube TCP", "Основной TCP профиль для YouTube", "TCP 443 (YouTube)", []string{"tls", "http"}, 44},
+	2:  {"Googlevideo", "Видео-домены YouTube", "TCP 443 (Googlevideo)", []string{"tls"}, 44},
+	3:  {"RKN Лист", "Основные блокировки сайтов", "TCP 443 (RKN)", []string{"tls"}, 44},
 	4:  {"Discord TCP", "TCP профиль Discord", "TCP 443 (Discord)", []string{"tls"}, 28},
 	5:  {"YouTube QUIC", "UDP 443 для YouTube", "UDP 443 (QUIC)", []string{"udp"}, 32},
 	6:  {"Voice UDP", "Discord/STUN и голосовые сервисы", "UDP Voice (Discord/STUN)", []string{"udp"}, 32},
 	7:  {"UDP Games", "Игровой UDP (порты 1026-65531)", "UDP Games (1026-65531)", []string{"udp"}, 20},
-	8:  {"Fallback TLS", "Безразборный режим TLS (profile 8)", "Fallback TLS", []string{"tls"}, 43},
+	8:  {"Fallback TLS", "Безразборный режим TLS (profile 8)", "Fallback TLS", []string{"tls"}, 44},
 	9:  {"Fallback HTTP", "Безразборный режим HTTP (profile 9)", "Fallback HTTP", []string{"http"}, 8},
 	10: {"DNS Антиспуф", "Защита UDP:53 от подмены DNS-ответов (клон с малым TTL)", "DNS антиспуф UDP:53", []string{"udp"}, 20},
 }
@@ -60,7 +60,7 @@ var profileTable = [MaxProfile + 1]profileMeta{
 func ValidProfile(id int) bool { return id >= MinProfile && id <= MaxProfile }
 
 // DefaultMaxStrategy возвращает максимум стратегий профиля для штатного
-// config.default (43,43,43,28,32,32,20,43,8,20); 0 для неизвестного профиля.
+// config.default (44,44,44,28,32,32,20,44,8,20); 0 для неизвестного профиля.
 func DefaultMaxStrategy(id int) int {
 	if !ValidProfile(id) {
 		return 0

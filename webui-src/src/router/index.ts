@@ -34,9 +34,10 @@ router.beforeEach(() => {
     showToast('Дождитесь загрузки состояния', 'error')
     return false
   }
+  // Busy не блокирует навигацию: вкладки уже помечаются is-locked в App.vue.
+  // Жёсткий return false оставлял UI «навсегда», если CGI завис без таймаута.
   if (busyActive.value) {
-    showToast('Дождитесь завершения текущей операции', 'error')
-    return false
+    showToast('Идёт операция — подождите завершения', 'info')
   }
   return true
 })

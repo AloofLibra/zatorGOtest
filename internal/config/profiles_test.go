@@ -98,9 +98,8 @@ func TestProfileHelpers(t *testing.T) {
 	}
 }
 
-// Шаблон z2r_tcp_tls_common в актуальном config.default содержит strategy=44,
-// поэтому разобранные максимумы TCP-профилей 1/2/3/8 равны 44 (в API_CONTRACT.md
-// и DefaultMaxStrategy — историческое 43).
+// Шаблон z2r_tcp_tls_common в актуальном config.default содержит strategy=44 —
+// разобранные максимумы TCP-профилей 1/2/3/8 и DefaultMaxStrategy совпадают.
 func TestProfileMaxStrategyFromDefaultConfig(t *testing.T) {
 	c := loadDefault(t)
 	want := []int{44, 44, 44, 28, 32, 32, 20, 44, 8, 20}
@@ -181,8 +180,8 @@ func TestProfileMaxStrategyOrDefault(t *testing.T) {
 	if got := empty.ProfileMaxStrategy(1); got != 0 {
 		t.Errorf("raw = %d, want 0", got)
 	}
-	if got := empty.ProfileMaxStrategyOrDefault(1); got != 43 {
-		t.Errorf("or-default = %d, want 43", got)
+	if got := empty.ProfileMaxStrategyOrDefault(1); got != 44 {
+		t.Errorf("or-default = %d, want 44", got)
 	}
 	for i, p := range empty.Profiles() {
 		if p.MaxStrategy != DefaultMaxStrategy(i+1) {

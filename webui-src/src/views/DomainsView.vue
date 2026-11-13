@@ -81,8 +81,20 @@ async function importList() {
   }
 }
 
+async function refreshLists() {
+  try {
+    await withBusy('domains-refresh', refreshDomains)
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
 async function setStrategy(domain: string) {
   const raw = String(strategyDraft.value[domain] ?? '').trim()
+  if (raw && (!/^\d+$/.test(raw) || Number(raw) < 0)) {
+    showToast('Некорректный номер стратегии', 'error')
+    return
+  }
   try {
     await withBusy(`domain-st-${domain}`, async () => {
       if (!raw || raw === '0') {
@@ -140,7 +152,7 @@ const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
       </div>
       <div class="actions">
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'domains-refresh' }"
-          @click="withBusy('domains-refresh', refreshDomains)">Обновить</button>
+          @click="refreshLists">Обновить</button>
       </div>
     </div>
 

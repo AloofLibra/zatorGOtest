@@ -56,6 +56,8 @@ func (s *Server) postConfigRaw(r *http.Request, p params) (map[string]any, error
 		return nil, errf(http.StatusBadRequest, "В конфиге нет NFQWS2_OPT — отказ в записи")
 	}
 	path := s.paths.ZapretConfig
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
