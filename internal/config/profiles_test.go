@@ -22,7 +22,7 @@ func loadDefault(t *testing.T) *Config {
 }
 
 func TestDefaultProfiles(t *testing.T) {
-	wantMax := []int{43, 43, 43, 28, 32, 32, 20, 43, 8, 20}
+	wantMax := []int{44, 44, 44, 28, 32, 32, 20, 44, 8, 20}
 	profiles := DefaultProfiles()
 	if len(profiles) != 10 {
 		t.Fatalf("len = %d, want 10", len(profiles))
