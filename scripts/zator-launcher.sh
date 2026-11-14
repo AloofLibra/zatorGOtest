@@ -3,7 +3,7 @@
 set -eu
 
 ZATOR_OWNER="${ZATOR_OWNER:-Koviand}"
-ZATOR_REPO="${ZATOR_REPO:-zatorGOtest}"
+ZATOR_REPO="${ZATOR_REPO:-zatorGO}"
 ZATOR_RELEASE="${ZATOR_RELEASE:-latest}"
 ZATOR_ROOT="${ZATOR_ROOT:-/opt/zator}"
 ZATOR_BIN_DIR="${ZATOR_BIN_DIR:-$ZATOR_ROOT/bin}"

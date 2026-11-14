@@ -14,7 +14,7 @@
 - свой установщик zapret2 (**без** `install_easy.sh`);
 - своя раскладка `/opt/zator` + `/opt/zapret2`.
 
-Релизы и автообновления: **[Koviand/zatorGOtest](https://github.com/Koviand/zatorGOtest)**.
+Релизы и автообновления: **[Koviand/zatorGO](https://github.com/Koviand/zatorGO)**.
 
 ---
 
@@ -23,7 +23,7 @@
 На роутере / VPS (нужен root и доступ в интернет):
 
 ```sh
-curl -fsSL https://github.com/Koviand/zatorGOtest/releases/latest/download/zator-launcher.sh -o zator-launcher.sh
+curl -fsSL https://github.com/Koviand/zatorGO/releases/latest/download/zator-launcher.sh -o zator-launcher.sh
 chmod +x zator-launcher.sh
 ./zator-launcher.sh
 ```
@@ -44,11 +44,11 @@ chmod +x zator-launcher.sh
 - из Web UI: **Настройки → Обновления → Проверить / Установить**;
 - из CLI: `zator update`.
 
-Источник обновлений: `Koviand/zatorGOtest`. Переопределение:
+Источник обновлений: `Koviand/zatorGO`. Переопределение:
 
 ```sh
 export ZATOR_OWNER=Koviand
-export ZATOR_REPO=zatorGOtest
+export ZATOR_REPO=zatorGO
 # или ZATOR_LATEST_URL=https://api.github.com/repos/.../releases/latest
 ```
 
@@ -56,7 +56,7 @@ export ZATOR_REPO=zatorGOtest
 
 ```sh
 zator uninstall -y --purge
-curl -fsSL https://github.com/Koviand/zatorGOtest/releases/latest/download/zator-launcher.sh -o zator-launcher.sh
+curl -fsSL https://github.com/Koviand/zatorGO/releases/latest/download/zator-launcher.sh -o zator-launcher.sh
 chmod +x zator-launcher.sh
 ./zator-launcher.sh
 ```

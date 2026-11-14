@@ -106,10 +106,12 @@ onMounted(() => { void bootstrap() })
     <aside class="rail">
       <div class="brand">
         <div class="brand-row">
-          <img class="brand-logo" :src="'./icon.png'" width="40" height="40" alt="">
-          <div class="brand-mark">Zator<span>GO</span></div>
+          <img class="brand-logo" :src="'./icon.png'" width="38" height="38" alt="">
+          <div class="brand-text">
+            <div class="brand-mark">Zator<span>GO</span></div>
+            <div class="brand-sub">Панель управления zapret2</div>
+          </div>
         </div>
-        <div class="brand-sub">Панель управления zapret2</div>
       </div>
       <nav class="nav" aria-label="Разделы">
         <router-link

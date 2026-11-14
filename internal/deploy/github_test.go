@@ -21,7 +21,7 @@ func TestLatestJSONURLUsesKoviand(t *testing.T) {
 	t.Setenv(EnvRepo, "")
 	t.Setenv(EnvLatestURL, "")
 	got := LatestJSONURL()
-	want := "https://github.com/Koviand/zatorGOtest/releases/download/latest/latest.json"
+	want := "https://github.com/Koviand/zatorGO/releases/download/latest/latest.json"
 	if got != want {
 		t.Fatalf("LatestJSONURL() = %q, want %q", got, want)
 	}
@@ -40,7 +40,7 @@ func TestLatestJSONURLEnvOverride(t *testing.T) {
 
 func TestFetchGitHubLatest(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/Koviand/zatorGOtest/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/Koviand/zatorGO/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tag_name":     "v0.1.5",
 			"published_at": "2026-11-13T05:00:00Z",
@@ -55,7 +55,7 @@ func TestFetchGitHubLatest(t *testing.T) {
 	defer func() { GitHubAPIBase = prev }()
 
 	t.Setenv(EnvOwner, "Koviand")
-	t.Setenv(EnvRepo, "zatorGOtest")
+	t.Setenv(EnvRepo, "zatorGO")
 
 	u := New(paths.New(t.TempDir(), t.TempDir()))
 	u.Offline = false
@@ -94,7 +94,7 @@ func TestApplyGitHubBinaryRejectsBadSHA(t *testing.T) {
 
 	mux := http.NewServeMux()
 	var srvURL string
-	mux.HandleFunc("/repos/Koviand/zatorGOtest/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/Koviand/zatorGO/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tag_name": "v0.1.16",
 			"assets": []map[string]any{
@@ -126,7 +126,7 @@ func TestApplyGitHubBinaryRejectsBadSHA(t *testing.T) {
 	defer func() { GitHubAPIBase = prev }()
 
 	t.Setenv(EnvOwner, "Koviand")
-	t.Setenv(EnvRepo, "zatorGOtest")
+	t.Setenv(EnvRepo, "zatorGO")
 
 	root := t.TempDir()
 	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))

@@ -43,7 +43,7 @@ import (
 const (
 	// DefaultOwner и DefaultRepo — репозиторий релизов ZatorGO.
 	DefaultOwner = "Koviand"
-	DefaultRepo  = "zatorGOtest"
+	DefaultRepo  = "zatorGO"
 	// EnvOwner / EnvRepo переопределяют репозиторий релизов (как в лаунчере).
 	EnvOwner = "ZATOR_OWNER"
 	EnvRepo  = "ZATOR_REPO"
@@ -70,7 +70,7 @@ const (
 	maxLatestBytes = 1 << 20
 )
 
-// DefaultLatestURL — адрес latest.json по умолчанию (репозиторий Koviand/zatorGOtest).
+// DefaultLatestURL — адрес latest.json по умолчанию (репозиторий Koviand/zatorGO).
 var DefaultLatestURL = fetch.GitHubReleaseURL(DefaultOwner, DefaultRepo, "latest", "latest.json")
 
 // ReleaseOwner / ReleaseRepo возвращают owner/repo релизов с учётом env.
@@ -325,7 +325,7 @@ func knownVersion(v string) bool {
 }
 
 // FetchLatest скачивает и разбирает latest.json. Если ассета нет — fallback
-// на GitHub Releases API репозитория Koviand/zatorGOtest (или ZATOR_OWNER/REPO).
+// на GitHub Releases API репозитория Koviand/zatorGO (или ZATOR_OWNER/REPO).
 // В офлайн-режиме — ErrOffline.
 func (u *Updater) FetchLatest(ctx context.Context) (*Latest, []byte, error) {
 	if u.Offline {

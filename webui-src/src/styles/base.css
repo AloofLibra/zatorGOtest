@@ -437,7 +437,8 @@ button.primary.is-busy::after,
   gap: 0.35em;
 }
 
-.brand-logo {
+/* legacy brand-logo (старый #brand-link); сайдбар использует .brand .brand-logo в zatorgo.css */
+#brand-link .brand-logo {
   height: 1em;
   width: auto;
   align-self: center;
