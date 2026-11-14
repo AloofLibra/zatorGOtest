@@ -176,11 +176,11 @@ onMounted(() => {
 
       <div class="section-label">Контекст</div>
       <div class="console-links">
-        <router-link class="console-link" to="/settings#sec-provider">
+        <router-link class="console-link" to="/settings/provider">
           <strong>Провайдер</strong>
           <span>{{ status?.provider || '—' }}</span>
         </router-link>
-        <router-link class="console-link" to="/settings#sec-modes">
+        <router-link class="console-link" to="/settings/modes">
           <strong>Hostlist</strong>
           <span>{{ status?.hostlist_mode || '—' }}</span>
         </router-link>
@@ -192,11 +192,11 @@ onMounted(() => {
           <strong>Локи стратегий</strong>
           <span>{{ status?.strategy_locks_status || '—' }}</span>
         </router-link>
-        <router-link class="console-link" to="/settings#sec-firewall">
+        <router-link class="console-link" to="/settings/firewall">
           <strong>Firewall</strong>
           <span>{{ status?.fwtype || '—' }} · FO {{ status?.flowoffload || '—' }}</span>
         </router-link>
-        <router-link class="console-link" to="/settings#sec-modes">
+        <router-link class="console-link" to="/settings/modes">
           <strong>Авторежим</strong>
           <span>{{ status?.auto_mode || '—' }}</span>
         </router-link>

@@ -10,7 +10,6 @@ import { locks, refreshAll, scope, scopes, statusLoaded, strategyChecks } from '
 import { refreshTlsBlobSettings, tlsBlobSettings } from '../stores/settings'
 import { restartSuffix, showToast } from '../stores/toast'
 import CheckResults from '../components/ui/CheckResults.vue'
-import SupersweepPanel from '../components/strategies/SupersweepPanel.vue'
 
 const OVERRIDE_PROFILES = new Set(['1', '2', '3', '4', '8'])
 
@@ -243,10 +242,6 @@ async function check(profile: string, p: ProfileInfo) {
   }
 }
 
-function focusSupersweep() {
-  document.getElementById('supersweep-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-}
-
 async function saveFake(profile: string) {
   try {
     await withBusy(`fake-${profile}`, async () => {
@@ -302,8 +297,7 @@ async function saveCloneSize(profile: string) {
           </select>
         </label>
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh-locks' }" @click="refresh">Обновить</button>
-        <router-link class="ghost btn-link" to="/manual">Вручную</router-link>
-        <button type="button" class="ghost" @click="focusSupersweep">Суперсвип</button>
+        <router-link class="ghost btn-link" to="/manual#supersweep-panel">Суперсвип</router-link>
       </div>
     </div>
 
@@ -388,14 +382,5 @@ async function saveCloneSize(profile: string) {
         </div>
       </article>
     </div>
-
-    <div class="section-label" style="margin-top:1.35rem">Суперсвип · вторично</div>
-    <SupersweepPanel
-      class="secondary"
-      :scope="scope"
-      :scopes="scopeOptions"
-      @started="refresh"
-      @cancelled="refresh"
-    />
   </section>
 </template>

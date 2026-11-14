@@ -19,6 +19,8 @@ export const router = createRouter({
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior(to) {
+    // /settings/:panel скроллит SettingsView сама — иначе top:0 перебивает якорь.
+    if (to.name === 'settings' && to.params.panel) return false
     if (to.hash) return { el: to.hash, behavior: 'smooth' }
     return { top: 0 }
   },

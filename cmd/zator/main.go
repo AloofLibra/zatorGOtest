@@ -30,7 +30,7 @@ const usage = `zator — управление zapret2 через Web UI
   version     показать версию
   status      показать состояние установки и платформу
   install     установить zator (каталоги, Web UI, конфигурация)
-  update      обновить встроенные ресурсы
+  update      обновить ресурсы и бинарник с GitHub (-force — всегда скачать)
   uninstall   удалить runtime (-y); --purge сносит весь каталог
   auth        пароль и включение/отключение проверки доступа
   webui       запустить Web UI (порт по умолчанию 17682)
@@ -56,7 +56,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "install":
 		return cmdInstall(rest, stdout, stderr)
 	case "update":
-		return cmdUpdate(stdout, stderr)
+		return cmdUpdate(rest, stdout, stderr)
 	case "uninstall":
 		return cmdUninstall(rest, stdout, stderr)
 	case "auth":
@@ -232,10 +232,21 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func cmdUpdate(stdout, stderr io.Writer) int {
+func cmdUpdate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	force := fs.Bool("force", false, "скачать релиз даже если версия совпадает")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
 	a, err := app.Load()
 	if err != nil {
 		fmt.Fprintf(stderr, "ошибка конфигурации: %v\n", err)
+		return 1
+	}
+	if !a.Installed() {
+		fmt.Fprintf(stderr, "zator не установлен в %s — сначала: zator install\n", a.Paths.ZatorRoot)
 		return 1
 	}
 	if info, err := a.CreatePreUpdateBackup(); err != nil {
@@ -243,7 +254,7 @@ func cmdUpdate(stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintf(stdout, "pre-update backup: %s\n", info.Name)
 	}
-	// Сначала локальные встроенные ресурсы, затем (если онлайн) релизный tar.
+	// Сначала локальные встроенные ресурсы, затем (если онлайн) релизный tar/бинарник.
 	if err := a.Update(); err != nil {
 		fmt.Fprintf(stderr, "обновление ресурсов не удалось: %v\n", err)
 		return 1
@@ -270,32 +281,41 @@ func cmdUpdate(stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "post-update verify: %v\n", err)
 			if rerr := a.RollbackPreUpdateBackup(); rerr != nil {
 				fmt.Fprintf(stderr, "rollback: %v\n", rerr)
-				return 1
+			} else {
+				fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
 			}
-			fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
+			return 1
 		}
 		return 0
 	}
-	rep, err := u.Run(context.Background(), deploy.RunOptions{Variant: deploy.VariantFull})
+	rep, err := u.Run(context.Background(), deploy.RunOptions{
+		Variant: deploy.VariantFull,
+		Force:   *force,
+	})
 	if err != nil {
-		fmt.Fprintf(stderr, "проверка релизов: %v\n", err)
+		fmt.Fprintf(stderr, "проверка/применение релиза: %v\n", err)
 		return 1
 	}
 	if rep != nil && rep.UpToDate {
-		fmt.Fprintln(stdout, "релизы: уже актуальная версия")
+		fmt.Fprintln(stdout, "релизы: уже актуальная версия (для принудительного скачивания: zator update -force)")
 		return 0
 	}
 	if rep != nil && rep.Apply != nil {
-		fmt.Fprintf(stdout, "релиз применён: установлено файлов %d\n", rep.Apply.Installed)
+		fmt.Fprintf(stdout, "релиз применён: установлено файлов %d", rep.Apply.Installed)
+		if rep.Archive != "" {
+			fmt.Fprintf(stdout, " (%s)", rep.Archive)
+		}
+		fmt.Fprintln(stdout)
 		if err := a.VerifyAfterUpdate(); err != nil {
 			fmt.Fprintf(stderr, "post-update verify: %v\n", err)
 			if rerr := a.RollbackPreUpdateBackup(); rerr != nil {
 				fmt.Fprintf(stderr, "rollback: %v\n", rerr)
-				return 1
+			} else {
+				fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
 			}
-			fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
-			return 0
+			return 1
 		}
+		fmt.Fprintln(stdout, "post-update verify: ok")
 	}
 	return 0
 }

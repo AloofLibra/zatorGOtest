@@ -230,7 +230,7 @@ defineExpose({ refresh })
           </article>
         </div>
         <h3>Применённые победители</h3>
-        <p class="supersweep-meta">Применение зафиксировано в этом прогоне; текущие локи смотрите в карточках стратегий ниже.</p>
+        <p class="supersweep-meta">Применение зафиксировано в этом прогоне; текущие локи — во вкладке «Стратегии».</p>
         <ul v-if="data.applied.length">
           <li v-for="(row, index) in data.applied" :key="index">{{ row.kind === 'profile' ? 'Профиль' : 'Домен' }} {{ row.target }} → стратегия {{ row.strategy }}</li>
         </ul>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api, formBody } from '../api/client'
 import { applySetting, backups as backupsApi, fetchSetting } from '../api/endpoints'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
@@ -19,6 +19,7 @@ import { refreshAll, scopes, status } from '../stores/status'
 import { announceRestart, restartSuffix, showToast } from '../stores/toast'
 
 const route = useRoute()
+const router = useRouter()
 
 const sections = [
   { id: 'sec-updates', label: 'Обновления', group: 'Система' },
@@ -553,23 +554,52 @@ const panelAliases: Record<string, string> = {
   config: 'sec-config', errors: 'sec-errors',
 }
 
-function scrollToPanel() {
+function panelIdFromRoute(): string {
   const raw = String(route.params.panel || (route.hash || '').replace(/^#/, '') || '')
-  if (!raw) return
-  const id = panelAliases[raw] || (raw.startsWith('sec-') ? raw : `sec-${raw}`)
-  const el = document.getElementById(id) || document.getElementById(`settings-${raw}`)
-  el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  if (!raw) return ''
+  return panelAliases[raw] || (raw.startsWith('sec-') ? raw : `sec-${raw}`)
 }
 
-watch(() => [route.params.panel, route.hash, settingsLoaded.value], async () => {
+function scrollToPanel(forceId?: string) {
+  const id = forceId || panelIdFromRoute()
+  if (!id || !settingsLoaded.value) return
+  const el = document.getElementById(id)
+  if (!el) return
+  // Учёт sticky status-strip + settings-nav
+  const nav = document.querySelector('.settings-nav') as HTMLElement | null
+  const strip = document.querySelector('.status-strip') as HTMLElement | null
+  const offset = (nav?.offsetHeight || 0) + (strip?.offsetHeight || 0) + 12
+  const top = el.getBoundingClientRect().top + window.scrollY - offset
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+}
+
+function goSection(id: string, ev?: Event) {
+  ev?.preventDefault()
+  const slug = id.replace(/^sec-/, '')
+  const target = `/settings/${slug}`
+  if (route.path === target || route.fullPath.endsWith(`/settings/${slug}`)) {
+    void nextTick(() => scrollToPanel(id))
+    return
+  }
+  void router.push(target).then(() => {
+    void nextTick(() => {
+      requestAnimationFrame(() => scrollToPanel(id))
+    })
+  })
+}
+
+watch(() => [route.params.panel, route.hash, settingsLoaded.value] as const, async () => {
+  if (!settingsLoaded.value) return
   await nextTick()
-  scrollToPanel()
+  requestAnimationFrame(() => scrollToPanel())
 }, { immediate: true })
 
 onMounted(async () => {
   // Последовательно: параллельный withBusy раньше сбрасывал busy чужим finally.
   await loadConfig()
   await loadErrors()
+  await nextTick()
+  scrollToPanel()
 })
 </script>
 
@@ -586,11 +616,13 @@ onMounted(async () => {
     </div>
 
     <nav class="settings-nav" aria-label="Разделы настроек">
-      <router-link
+      <a
         v-for="s in sections"
         :key="s.id"
-        :to="`/settings/${s.id.replace(/^sec-/, '')}`"
-      >{{ s.label }}</router-link>
+        href="#"
+        :class="{ 'is-active': panelIdFromRoute() === s.id }"
+        @click="goSection(s.id, $event)"
+      >{{ s.label }}</a>
     </nav>
 
     <div v-if="!settingsLoaded" class="loading">Загрузка…</div>

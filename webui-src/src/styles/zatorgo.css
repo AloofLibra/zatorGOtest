@@ -763,8 +763,15 @@ a.metric:hover { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)
   border-radius: 6px;
   color: var(--muted);
   border: 1px solid transparent;
+  cursor: pointer;
 }
 .settings-nav a:hover { color: var(--ink); border-color: var(--line); }
+.settings-nav a.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-weight: 600;
+}
 
 .btn-link {
   display: inline-flex;

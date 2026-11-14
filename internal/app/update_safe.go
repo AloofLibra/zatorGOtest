@@ -81,17 +81,27 @@ func (a *App) restorePreUpdateBinary() error {
 	return fsutil.AtomicWriteFile(dst, data, 0o755)
 }
 
-// VerifyAfterUpdate — проверка после Apply: bin, config, непустые валидные args.
+// VerifyAfterUpdate — проверка после Apply.
+// Жёсткий fail только без бинарника zator (иначе rollback откатывал рабочий
+// релиз из‑за временного/мягкого состояния nfqws2.args на Keenetic).
+// Проблемы zapret2/config и args пишутся в warnings и detail, но update не валят.
 func (a *App) VerifyAfterUpdate() error {
-	var errs []string
+	bin := filepath.Join(a.Paths.BinDir, "zator")
+	if _, err := os.Stat(bin); err != nil {
+		msg := "нет бинарника zator"
+		a.WritePostUpdateVerify(false, msg)
+		return fmt.Errorf("post-update verify: %s", msg)
+	}
+
+	var soft []string
 	if _, err := os.Stat(a.Paths.ZapretConfig); err != nil {
-		errs = append(errs, "нет zapret2/config")
+		soft = append(soft, "нет zapret2/config")
 	}
 	argsPath := filepath.Join(a.Paths.ZapretRoot, "nfqws2.args")
 	if st, err := os.Stat(argsPath); err != nil || st.Size() == 0 {
-		errs = append(errs, "нет или пуст nfqws2.args")
+		soft = append(soft, "нет или пуст nfqws2.args")
 	} else if raw, err := os.ReadFile(argsPath); err != nil {
-		errs = append(errs, "не читается nfqws2.args")
+		soft = append(soft, "не читается nfqws2.args")
 	} else {
 		var toks []string
 		for _, ln := range strings.Split(string(raw), "\n") {
@@ -101,20 +111,16 @@ func (a *App) VerifyAfterUpdate() error {
 			}
 		}
 		if err := config.ValidateNfqws2Args(toks); err != nil {
-			errs = append(errs, "nfqws2.args: "+err.Error())
+			soft = append(soft, "nfqws2.args: "+err.Error())
 		}
 	}
-	if _, err := deploy.ReadVersion(a.Paths); err != nil {
-		_ = err // version.env может появиться позже — мягко
-	}
-	bin := filepath.Join(a.Paths.BinDir, "zator")
-	if _, err := os.Stat(bin); err != nil {
-		errs = append(errs, "нет бинарника zator")
-	}
-	if len(errs) > 0 {
-		msg := strings.Join(errs, "; ")
-		a.WritePostUpdateVerify(false, msg)
-		return fmt.Errorf("post-update verify: %s", msg)
+	_, _ = deploy.ReadVersion(a.Paths) // version.env опционален
+
+	if len(soft) > 0 {
+		detail := "ok; soft: " + strings.Join(soft, "; ")
+		a.WritePostUpdateVerify(true, detail)
+		a.WriteServiceWarnings(soft)
+		return nil
 	}
 	a.WritePostUpdateVerify(true, "ok")
 	return nil

@@ -260,7 +260,13 @@ func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, 
 	}
 	os.Remove(dest)
 	if err := os.Rename(tmp, final); err != nil {
-		return nil, tag, err
+		// ETXTBSY / занятый inode: перезапись поверх (Linux обычно допускает rename
+		// запущенного бинарника; fallback — WriteFile).
+		if werr := os.WriteFile(final, data, 0o755); werr != nil {
+			_ = os.Remove(tmp)
+			return nil, tag, fmt.Errorf("deploy: замена бинарника: %v; fallback: %w", err, werr)
+		}
+		_ = os.Remove(tmp)
 	}
 	// Новый бинарник сам разложит актуальные assets (webui и пр.).
 	// -skip-service: не трогаем units; auth из существующего zator.json сохраняется.

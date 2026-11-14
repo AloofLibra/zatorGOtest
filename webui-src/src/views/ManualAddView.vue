@@ -1,13 +1,30 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { applySetting, domains, fetchDomainsList, registerStrategy, uploadBlob } from '../api/endpoints'
 import type { DomainsListPayload } from '../api/types'
 import { gatedReason, isProfileGated } from '../gating'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { confirmDialog } from '../stores/confirm'
 import { refreshTlsBlobSettings, refreshWgBlobSettings, tlsBlobSettings, wgBlobSettings } from '../stores/settings'
-import { locks, refreshAll, scope } from '../stores/status'
+import { locks, refreshAll, scope, scopes } from '../stores/status'
 import { restartSuffix, showToast } from '../stores/toast'
+import SupersweepPanel from '../components/strategies/SupersweepPanel.vue'
+
+const route = useRoute()
+const scopeOptions = computed(() => scopes.value.scopes || ['default'])
+
+function scrollToSupersweep() {
+  document.getElementById('supersweep-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+}
+
+function focusSupersweepFromHash() {
+  const hash = String(route.hash || '').replace(/^#/, '')
+  if (hash !== 'supersweep-panel') return
+  nextTick(() => scrollToSupersweep())
+}
+
+watch(() => route.hash, () => focusSupersweepFromHash())
 
 const googlevideo = ref<DomainsListPayload | null>(null)
 
@@ -94,6 +111,7 @@ onMounted(async () => {
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
+  focusSupersweepFromHash()
 })
 
 async function refreshGooglevideo() {
@@ -210,7 +228,10 @@ async function submitBlob() {
     <div class="page-head">
       <div>
         <h1>Вручную</h1>
-        <p>Тестовые desync, загрузка blob и googlevideo CDN.</p>
+        <p>Тестовые desync, blob, googlevideo и суперсвип.</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" @click="scrollToSupersweep">К суперсвипу</button>
       </div>
     </div>
 
@@ -348,5 +369,13 @@ async function submitBlob() {
         </div>
       </article>
     </div>
+
+    <div class="section-label" style="margin-top:1.35rem">Суперсвип</div>
+    <SupersweepPanel
+      :scope="scope"
+      :scopes="scopeOptions"
+      @started="refreshAll"
+      @cancelled="refreshAll"
+    />
   </section>
 </template>

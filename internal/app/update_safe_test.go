@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/AloofLibra/zator/internal/paths"
@@ -87,12 +88,21 @@ func TestVerifyAfterUpdateRequiresArgs(t *testing.T) {
 	}
 	p.ZapretConfig = filepath.Join(p.ZapretRoot, "config")
 	a := NewWith(p, platform.Platform{})
+	_ = os.MkdirAll(p.StateDir, 0o755)
 	_ = os.MkdirAll(p.BinDir, 0o755)
 	_ = os.MkdirAll(p.ZapretRoot, 0o755)
-	_ = os.WriteFile(filepath.Join(p.BinDir, "zator"), []byte("x"), 0o755)
 	_ = os.WriteFile(p.ZapretConfig, []byte("QNUM=200\n"), 0o644)
 	if err := a.VerifyAfterUpdate(); err == nil {
-		t.Fatal("expected fail without args")
+		t.Fatal("expected fail without bin")
+	}
+	_ = os.WriteFile(filepath.Join(p.BinDir, "zator"), []byte("x"), 0o755)
+	// Пустые args — soft warning, не hard fail (иначе Keenetic rollback после update).
+	if err := a.VerifyAfterUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	st, detail := a.PostUpdateVerifyStatus()
+	if st != "ok" || !strings.Contains(detail, "nfqws2.args") {
+		t.Fatalf("status=%q detail=%q", st, detail)
 	}
 	_ = os.WriteFile(filepath.Join(p.ZapretRoot, "nfqws2.args"), []byte("--qnum=200\n--new\n"), 0o644)
 	if err := a.VerifyAfterUpdate(); err != nil {
