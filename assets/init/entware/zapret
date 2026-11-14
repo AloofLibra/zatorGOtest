@@ -10,6 +10,9 @@
 SCRIPT=$(readlink -f "$0")
 EXEDIR=$(dirname "$SCRIPT")
 ZAPRET_BASE=$(readlink -f "$EXEDIR/../..")
+# Keenetic/Entware: iptables/ipset живут в /opt/sbin — без PATH apply_fw молча ломается.
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+export PATH
 . "$EXEDIR/functions"
 
 # z2r: оверрайды апстримных contains и run_daemon — см. AGENTS.md (High-Risk Areas).
@@ -69,41 +72,38 @@ run_daemon()
 NAME=zapret
 DESC=anti-zapret
 
+# Подтянуть ipset/xt_* модули Keenetic (без bitmap:port правила NFQUEUE не ставятся).
+z2r_load_ko()
+{
+	local name="$1" path="/lib/modules/$(uname -r)/$1.ko"
+	lsmod 2>/dev/null | grep -q "^${name} " && return 0
+	[ -f "$path" ] || return 1
+	insmod "$path" 2>/dev/null || return 1
+	echo "$name.ko loaded"
+	return 0
+}
+
 do_start()
 {
+	z2r_load_ko ip_set
+	z2r_load_ko ip_set_bitmap_port
+	z2r_load_ko ip_set_hash_ip
+	z2r_load_ko ip_set_hash_net
+	z2r_load_ko ip_set_hash_ipport
+	z2r_load_ko xt_set
 
-   if lsmod | grep "xt_multiport " &> /dev/null ;  then
-		echo "xt_multiport.ko is already loaded"
-    else
-        if insmod /lib/modules/$(uname -r)/xt_multiport.ko &> /dev/null; then
-			echo "xt_multiport.ko loaded"
-        else
-			echo -e "\033[0;31mCannot find xt_multiport.ko kernel module, this make some problems. Or not.\033[0m"
-        fi
+	if ! z2r_load_ko xt_multiport; then
+		echo -e "\033[0;31mCannot find xt_multiport.ko kernel module, this make some problems. Or not.\033[0m"
 	fi
-     
-	if lsmod | grep "xt_connbytes " &> /dev/null ;  then
-        echo "xt_connbytes.ko is already loaded"
-    else
-        if insmod /lib/modules/$(uname -r)/xt_connbytes.ko &> /dev/null; then
-			echo "xt_connbytes.ko loaded"
-        else
-			echo "Cannot find xt_connbytes.ko kernel module, aborting"
-			exit 1
-        fi
+	if ! z2r_load_ko xt_connbytes; then
+		echo "Cannot find xt_connbytes.ko kernel module, aborting"
+		exit 1
 	fi
-	
-	if lsmod | grep "xt_NFQUEUE " &> /dev/null ;  then
-        echo "xt_NFQUEUE.ko is already loaded"
-    else
-        if insmod /lib/modules/$(uname -r)/xt_NFQUEUE.ko &> /dev/null; then
-            echo "xt_NFQUEUE.ko loaded"
-        else
-            echo "Cannot find xt_NFQUEUE.ko kernel module, aborting"
-            exit 1
-        fi
-    fi		 
-	
+	if ! z2r_load_ko xt_NFQUEUE; then
+		echo "Cannot find xt_NFQUEUE.ko kernel module, aborting"
+		exit 1
+	fi
+
 	zapret_run_daemons
 	[ "$INIT_APPLY_FW" != "1" ] || { zapret_apply_firewall; }
 }

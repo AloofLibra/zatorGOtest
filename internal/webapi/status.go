@@ -271,6 +271,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request, p params) {
 		"provider":      section("provider"),
 		"fwtype":        section("fwtype"),
 		"flowoffload":   section("flowoffload"),
+		"ifaces":        section("ifaces"),
 		"client_scope":  section("client_scope"),
 		"nfqws2_errors": section("nfqws2_errors"),
 		"backups":       backups,

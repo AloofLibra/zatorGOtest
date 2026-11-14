@@ -1,7 +1,7 @@
 import { api, downloadBlob, formBody } from './client'
 import type {
   ApplyResult, BackupsPayload, CheckPayload, DomainsImportResult, DomainsListPayload,
-  FallbackSettings, LockResult, ModeSettingData, PortInfo, PortsSettings, ProfileInfo, ProviderSettings,
+  FallbackSettings, IfacesSettings, LockResult, ModeSettingData, PortInfo, PortsSettings, ProfileInfo, ProviderSettings,
   ScopesPayload, StatePayload, StatusPayload, TlsBlobSettings, UdpGamesSettings, UpdateCheckResult,
   WgBlobSettings, WgStateSettings, Recommendations, SupersweepPayload, WssizeRampSettings,
 } from './types'
@@ -81,6 +81,7 @@ export const fetchSetting = {
   provider: () => api<ProviderSettings>('/api/settings?setting=provider'),
   update_check: () => api<UpdateCheckResult>('/api/settings?setting=update_check'),
   wssize_ramp: () => api<WssizeRampSettings>('/api/settings?setting=wssize_ramp'),
+  ifaces: () => api<IfacesSettings>('/api/settings?setting=ifaces'),
 }
 
 export const registerStrategy = (opts: {
@@ -168,6 +169,11 @@ export const applySetting = {
     api<ApplyResult & WssizeRampSettings>('/api/settings',
       formBody({ setting: 'wssize_ramp', value: settings.enabled ? '1' : '0',
         mode: settings.mode, scale: String(settings.scale) })),
+  ifaces: (opts: { lan: string; wan: string } | { action: 'redetect' }) =>
+    api<ApplyResult & IfacesSettings>('/api/settings',
+      formBody('action' in opts
+        ? { setting: 'ifaces', action: opts.action }
+        : { setting: 'ifaces', action: 'set', lan: opts.lan, wan: opts.wan })),
 }
 
 export const fetchDomainsList = (list: string, scope = 'default') =>

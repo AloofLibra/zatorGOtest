@@ -109,6 +109,8 @@ func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) 
 	case "flowoffload":
 		v := cfg.FlowOffload()
 		return map[string]any{"state": v, "value": v}, nil
+	case "ifaces", "iface", "iface_wan", "interfaces":
+		return s.ifacesPayload(cfg), nil
 	case "client_scope":
 		return s.scopesPayload(cfg), nil
 	case "update_check":

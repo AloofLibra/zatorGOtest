@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AloofLibra/zator"
+	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/deploy"
 	"github.com/AloofLibra/zator/internal/uiembed"
 )
@@ -194,6 +195,11 @@ func (a *App) seedZapretConfig(template []byte) error {
 	}
 	if err := os.WriteFile(cfg, template, 0o644); err != nil {
 		return fmt.Errorf("запись %s: %w", cfg, err)
+	}
+	if c, err := config.Load(cfg); err == nil {
+		if changed, e := a.ensureNetworkIfaces(c); e == nil && changed {
+			_ = c.Save()
+		}
 	}
 	return nil
 }

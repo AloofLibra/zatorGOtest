@@ -105,6 +105,9 @@ func (a *App) PrepareZapretRuntime() (fwHook string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("чтение config: %w", err)
 	}
+	if changed, e := a.ensureNetworkIfaces(cfg); e == nil && changed {
+		_ = cfg.Save()
+	}
 	argsFile := filepath.Join(a.Paths.ZapretRoot, "nfqws2.args")
 	if err := cfg.WriteNfqws2Args(argsFile); err != nil {
 		// leftover config без NFQWS2_OPT после wipe zator — пересоздаём из шаблона

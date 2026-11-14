@@ -197,6 +197,8 @@ esac
 const keeneticHookTemplate = `#!/bin/sh
 # ndm пересобирает firewall при сетевых событиях: возвращаем правила zapret2.
 [ "$table" != "mangle" ] && [ "$table" != "nat" ] && exit 0
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+export PATH
 {{shq .InitScript}} restart-fw
 exit 0
 `

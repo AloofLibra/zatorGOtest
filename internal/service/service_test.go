@@ -281,6 +281,8 @@ func TestRenderKeeneticHook(t *testing.T) {
 	want := "#!/bin/sh\n" +
 		"# ndm пересобирает firewall при сетевых событиях: возвращаем правила zapret2.\n" +
 		"[ \"$table\" != \"mangle\" ] && [ \"$table\" != \"nat\" ] && exit 0\n" +
+		"PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH\n" +
+		"export PATH\n" +
 		"/opt/zapret2/init.d/sysv/zapret2 restart-fw\n" +
 		"exit 0\n"
 	if got != want {

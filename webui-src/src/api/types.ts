@@ -272,6 +272,22 @@ export interface ValueSetting {
   value?: string
 }
 
+export interface IfaceInfo {
+  name: string
+  up?: boolean
+  addrs?: string[]
+  kind?: string
+}
+
+export interface IfacesSettings {
+  wan?: string
+  lan?: string
+  wan6?: string
+  suggested?: { wan?: string; lan?: string; source?: string }
+  available?: IfaceInfo[]
+  needs_autodetect?: boolean
+}
+
 export interface StatePayload {
   auth_required?: boolean
   status: StatusPayload
@@ -293,6 +309,7 @@ export interface StatePayload {
   provider: ProviderSettings
   fwtype?: ValueSetting
   flowoffload?: ValueSetting
+  ifaces?: IfacesSettings
   client_scope?: ScopesPayload
   nfqws2_errors?: { available?: boolean; content?: string; path?: string; lines?: number }
   backups: BackupsPayload

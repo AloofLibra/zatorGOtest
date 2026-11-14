@@ -6,9 +6,9 @@ import { applySetting, backups as backupsApi, fetchSetting } from '../api/endpoi
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { confirmDialog } from '../stores/confirm'
 import {
-  fallbackSettings, modeSettings, ports, provider, settingsLoaded,
+  fallbackSettings, ifacesSettings, modeSettings, ports, provider, settingsLoaded,
   tlsBlobSettings, udpGamesSettings, wgBlobSettings, wgStateSettings, wssizeRampSettings,
-  refreshFallbackSettings, refreshModeSetting, refreshPorts, refreshProvider,
+  refreshFallbackSettings, refreshIfacesSettings, refreshModeSetting, refreshPorts, refreshProvider,
   refreshTlsBlobSettings, refreshUdpGamesSettings, refreshWgBlobSettings, refreshWgStateSettings,
   refreshWssizeRampSettings,
 } from '../stores/settings'
@@ -29,6 +29,7 @@ const sections = [
   { id: 'sec-wg', label: 'WireGuard', group: 'Обход' },
   { id: 'sec-wssize', label: 'WSSIZE', group: 'Обход' },
   { id: 'sec-firewall', label: 'Firewall', group: 'Сеть' },
+  { id: 'sec-ifaces', label: 'Интерфейсы', group: 'Сеть' },
   { id: 'sec-ports', label: 'Порты', group: 'Сеть' },
   { id: 'sec-scopes', label: 'Scopes', group: 'Сеть' },
   { id: 'sec-config', label: 'Конфиг', group: 'Сервис' },
@@ -38,7 +39,7 @@ const sections = [
 const settingGroups = [
   { id: 'grp-system', title: 'Система', desc: 'Обновления, провайдер и резервные копии.' },
   { id: 'grp-bypass', title: 'Обход DPI', desc: 'Режимы стратегий, TLS/WG blob и wssize.' },
-  { id: 'grp-net', title: 'Сеть', desc: 'Firewall, порты NFQUEUE и client scopes.' },
+  { id: 'grp-net', title: 'Сеть', desc: 'Firewall, интерфейсы WAN/LAN, порты NFQUEUE и client scopes.' },
   { id: 'grp-svc', title: 'Сервис', desc: 'Сырой конфиг zapret2 и журнал ошибок.' },
 ]
 
@@ -59,6 +60,23 @@ watch(status, (s) => {
   if (s?.fwtype) fw.value = s.fwtype
   if (s?.flowoffload) offload.value = s.flowoffload
 }, { immediate: true })
+
+const ifaceWan = ref('')
+const ifaceLan = ref('')
+watch(ifacesSettings, (i) => {
+  if (!i) return
+  ifaceWan.value = i.wan || i.suggested?.wan || ''
+  ifaceLan.value = i.lan || i.suggested?.lan || ''
+}, { immediate: true })
+
+const ifaceOptions = computed(() => {
+  const list = ifacesSettings.value?.available || []
+  const names = list.map((x) => x.name)
+  for (const extra of [ifaceWan.value, ifaceLan.value, ifacesSettings.value?.suggested?.wan, ifacesSettings.value?.suggested?.lan]) {
+    if (extra && !names.includes(extra)) names.push(extra)
+  }
+  return names
+})
 
 const tlsMode = ref('fake_default_tls')
 const tlsBlob = ref('')
@@ -411,6 +429,38 @@ async function saveWssize() {
   }
 }
 
+async function saveIfaces() {
+  if (!ifaceWan.value.trim() || !ifaceLan.value.trim()) {
+    showToast('Укажите WAN и LAN', 'error')
+    return
+  }
+  try {
+    await withBusy('ifaces', async () => {
+      announceRestart()
+      const res = await applySetting.ifaces({ lan: ifaceLan.value.trim(), wan: ifaceWan.value.trim() })
+      showToast(`Интерфейсы: LAN=${ifaceLan.value}, WAN=${ifaceWan.value}.${restartSuffix(res)}`)
+      await refreshIfacesSettings()
+      await refreshAll()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function redetectIfaces() {
+  try {
+    await withBusy('ifaces-auto', async () => {
+      announceRestart()
+      const res = await applySetting.ifaces({ action: 'redetect' })
+      showToast(`Автоопределение: LAN=${res.lan || '—'}, WAN=${res.wan || '—'}.${restartSuffix(res)}`)
+      await refreshIfacesSettings()
+      await refreshAll()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
 async function redetectProvider() {
   try {
     await withBusy('provider-redetect', async () => {
@@ -498,6 +548,7 @@ const panelAliases: Record<string, string> = {
   wg: 'sec-wg', wireguard: 'sec-wg',
   wssize: 'sec-wssize', 'wssize-ramp': 'sec-wssize',
   firewall: 'sec-firewall', fwtype: 'sec-firewall', flowoffload: 'sec-firewall',
+  ifaces: 'sec-ifaces', iface: 'sec-ifaces', interfaces: 'sec-ifaces',
   ports: 'sec-ports', scopes: 'sec-scopes', 'client-scope': 'sec-scopes',
   config: 'sec-config', errors: 'sec-errors',
 }
@@ -730,6 +781,41 @@ onMounted(async () => {
         <div class="actions" style="margin-top:0.8rem">
           <button type="button" class="primary" :disabled="busyActive" @click="saveSelect('fwtype', fw, 'FWTYPE')">Сохранить FW</button>
           <button type="button" class="primary" :disabled="busyActive" @click="saveSelect('flowoffload', offload, 'Offload')">Сохранить Offload</button>
+        </div>
+      </section>
+
+      <section id="sec-ifaces" class="panel">
+        <div class="panel-h">
+          <h2>Интерфейсы WAN / LAN</h2>
+          <span v-if="ifacesSettings?.needs_autodetect" class="chip">нужно задать</span>
+        </div>
+        <p class="panel-d">
+          На Keenetic/Entware без <code>IFACE_WAN</code>/<code>IFACE_LAN</code> правила NFQUEUE не цепляют трафик.
+          WAN — uplink (default route), LAN — локальный bridge (обычно <code>br0</code>).
+        </p>
+        <p v-if="ifacesSettings?.suggested" class="panel-d">
+          Автоопределение:
+          WAN=<code>{{ ifacesSettings.suggested.wan || '—' }}</code>,
+          LAN=<code>{{ ifacesSettings.suggested.lan || '—' }}</code>
+          <template v-if="ifacesSettings.suggested.source"> · {{ ifacesSettings.suggested.source }}</template>
+        </p>
+        <div class="grid-2">
+          <label class="field">
+            <span>IFACE_WAN (внешний)</span>
+            <select v-model="ifaceWan" :disabled="busyActive">
+              <option v-for="n in ifaceOptions" :key="'w-'+n" :value="n">{{ n }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>IFACE_LAN (локальный)</span>
+            <select v-model="ifaceLan" :disabled="busyActive">
+              <option v-for="n in ifaceOptions" :key="'l-'+n" :value="n">{{ n }}</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions" style="margin-top:0.8rem">
+          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'ifaces' }" @click="saveIfaces">Сохранить</button>
+          <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'ifaces-auto' }" @click="redetectIfaces">Определить заново</button>
         </div>
       </section>
 

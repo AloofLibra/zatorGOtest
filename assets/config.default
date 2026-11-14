@@ -581,12 +581,14 @@ FLOWOFFLOAD=donttouch
 #OPENWRT_WAN6="wan6 vpn6"
 
 # for routers based on classic linux. has no effect in openwrt.
-# CHOOSE LAN and optinally WAN/WAN6 NETWORK INTERFACES
+# CHOOSE LAN and optionally WAN/WAN6 NETWORK INTERFACES
 # or leave them commented if its not router
 # it's possible to specify multiple interfaces like this : IFACE_WAN="eth0 eth1 eth2"
 # if IFACE_WAN6 is not defined it take the value of IFACE_WAN
-#IFACE_LAN=eth0
-#IFACE_WAN=eth1
+# Zator: при установке/старте подставляет IFACE_LAN/WAN автоматически
+# (default route → WAN, br0/br-lan → LAN). Можно сменить в Web UI → Настройки → Интерфейсы.
+#IFACE_LAN=br0
+#IFACE_WAN=eth3
 #IFACE_WAN6="ipsec0 wireguard0 he_net"
 
 # should start/stop command of init scripts apply firewall rules ?
