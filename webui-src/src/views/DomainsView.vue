@@ -4,7 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { domains } from '../api/endpoints'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import {
-  DOMAIN_LISTS, DOMAIN_META, domainChecks, domainLists, domainsLoaded, refreshDomainList, refreshDomains, type DomainListName,
+  DOMAIN_LISTS, DOMAIN_META, MAIN_DOMAIN_LISTS, domainChecks, domainLists, domainsLoaded,
+  refreshDomainList, refreshDomains, type DomainListName,
 } from '../stores/domains'
 import { modeSettings } from '../stores/settings'
 import { scope, scopes } from '../stores/status'
@@ -22,12 +23,14 @@ const labels: Record<DomainListName, string> = {
   custom_rkn: 'TCP Custom',
   substring: 'Подстроки RKN',
   netrogat_substring: 'Подстроки исключений',
+  googlevideo: 'автосбор Googlevideo',
 }
 
 const active = computed<DomainListName>(() => {
   const p = String(route.params.list || 'netrogat')
   return (DOMAIN_LISTS as readonly string[]).includes(p) ? p as DomainListName : 'netrogat'
 })
+const isGooglevideo = computed(() => active.value === 'googlevideo')
 const list = computed(() => domainLists[active.value])
 const meta = computed(() => DOMAIN_META[active.value])
 
@@ -43,6 +46,7 @@ watch(active, (name) => {
 })
 watch(scope, () => {
   void refreshDomainList('custom_rkn')
+  if (isGooglevideo.value) void refreshDomainList('googlevideo')
 })
 
 function changeScope(v: string) {
@@ -125,8 +129,14 @@ async function importList() {
 async function refreshLists() {
   try {
     await withBusy('domains-refresh', async () => {
-      await refreshDomains()
+      if (isGooglevideo.value) {
+        await domains.refresh('googlevideo', scope.value)
+        await refreshDomainList('googlevideo')
+      } else {
+        await refreshDomains()
+      }
     })
+    if (isGooglevideo.value) showToast('Список googlevideo обновлён')
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
@@ -159,7 +169,9 @@ async function clearAll() {
   if (autoLocked.value) return
   const ok = await confirmDialog({
     title: 'Очистить список?',
-    message: 'Все записи будут удалены.',
+    message: isGooglevideo.value
+      ? 'Все собранные googlevideo-хосты будут удалены.'
+      : 'Все записи будут удалены.',
     danger: true,
   })
   if (!ok) return
@@ -193,7 +205,7 @@ async function checkDomain(domain: string) {
     <div class="page-head">
       <div>
         <h1>Домены</h1>
-        <p>Hostlist: исключения, custom RKN и подстроки.</p>
+        <p>Hostlist и автосбор media CDN YouTube.</p>
       </div>
       <div class="actions">
         <label v-if="scopes.enabled" class="field" style="margin:0">
@@ -208,9 +220,14 @@ async function checkDomain(domain: string) {
     </div>
 
     <div class="subtabs">
-      <button v-for="name in DOMAIN_LISTS" :key="name" type="button"
+      <button v-for="name in MAIN_DOMAIN_LISTS" :key="name" type="button"
         :class="{ 'is-active': active === name }" :disabled="busyActive" @click="go(name)">
         {{ labels[name] }}
+      </button>
+      <button type="button" class="subtab-end"
+        :class="{ 'is-active': active === 'googlevideo' }" :disabled="busyActive"
+        @click="go('googlevideo')">
+        {{ labels.googlevideo }}
       </button>
     </div>
 
@@ -219,7 +236,13 @@ async function checkDomain(domain: string) {
         <h2>{{ list?.title || labels[active] }}</h2>
         <span class="chip">{{ list?.items?.length ?? 0 }}</span>
       </div>
-      <p class="panel-d">{{ list?.description || meta.addLabel }}</p>
+      <p v-if="isGooglevideo" class="panel-d">
+        Автосбор media CDN: <code>^rr\d+---sn-[a-z0-9-]+\.googlevideo\.com$</code>
+        (пример <code>rr18---sn-pmcg-bg0s.googlevideo.com</code>).
+        Сбор: {{ list?.collection || '—' }}.
+        Профиль 2 учит стратегию на каждый <code>sn-*</code> (seed из лока профиля).
+      </p>
+      <p v-else class="panel-d">{{ list?.description || meta.addLabel }}</p>
       <p v-if="autoLocked" class="panel-d" style="color:var(--warn)">
         Autohostlist включён: ручное изменение этого списка заблокировано. Выключите автосбор в Настройках → Режимы.
       </p>
@@ -228,7 +251,7 @@ async function checkDomain(domain: string) {
         <input v-model="input" :placeholder="meta.placeholder" :disabled="busyActive || autoLocked" style="flex:1;min-width:12rem">
         <button type="submit" class="primary" :disabled="busyActive || autoLocked" :class="{ 'is-busy': busyButton === 'domain-add' }">Добавить</button>
         <button type="button" class="ghost danger"
-          :disabled="busyActive || autoLocked"
+          :disabled="busyActive || autoLocked || !(list?.items?.length)"
           @click="clearAll">Очистить</button>
       </form>
 
@@ -246,10 +269,26 @@ async function checkDomain(domain: string) {
       </div>
     </div>
 
+    <div v-if="isGooglevideo && (list?.auto_locks || []).length" class="domain-list" style="margin-top:0.85rem">
+      <p class="panel-d" style="margin-bottom:0.5rem">Выученные POP (sn → strat)</p>
+      <div v-for="lock in (list?.auto_locks || [])" :key="lock.host + ':' + lock.strategy" class="domain-item">
+        <div>
+          <code>{{ lock.host }}</code>
+          <div class="panel-d" style="margin:0.35rem 0 0">
+            стратегия {{ lock.strategy }}<span v-if="lock.scope && lock.scope !== 'default'"> · {{ lock.scope }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="domain-list">
       <div v-for="item in (list?.items || [])" :key="item.value" class="domain-item">
         <div>
           <code>{{ item.value }}</code>
+          <div v-if="isGooglevideo && (item.ip || item.source)" class="panel-d" style="margin:0.35rem 0 0">
+            <span v-if="item.ip">{{ item.ip }}</span>
+            <span v-if="item.source"> · {{ item.source }}</span>
+          </div>
           <div v-if="active === 'custom_rkn'" class="row" style="margin-top:0.45rem">
             <input
               :value="strategyDraft[item.value] ?? (item.strategy != null ? String(item.strategy) : '')"
@@ -273,7 +312,9 @@ async function checkDomain(domain: string) {
           {{ (domainChecks[item.value].results || []).map(r => r.verdict || r.text).join(' · ') || domainChecks[item.value].message || 'Готово' }}
         </p>
       </div>
-      <p v-if="domainsLoaded && !(list?.items || []).length" class="panel-d">Список пуст.</p>
+      <p v-if="domainsLoaded && !(list?.items || []).length" class="panel-d">
+        {{ isGooglevideo ? 'Список пуст — узлы появятся после просмотра YouTube.' : 'Список пуст.' }}
+      </p>
     </div>
   </section>
 </template>

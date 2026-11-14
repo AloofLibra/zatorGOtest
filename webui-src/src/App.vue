@@ -17,7 +17,7 @@ const tabs = [
   { to: '/', name: 'status', label: 'Обзор', short: 'Обзор', hint: 'Пульт состояния' },
   { to: '/strategies', name: 'strategies', label: 'Стратегии', short: 'Локи', hint: 'Локи профилей' },
   { to: '/manual', name: 'manual', label: 'Вручную', short: 'Тест', hint: 'Desync / blob / supersweep' },
-  { to: '/domains', name: 'domains', label: 'Домены', short: 'Списки', hint: 'Hostlist' },
+  { to: '/domains', name: 'domains', label: 'Домены', short: 'Списки', hint: 'Hostlist / googlevideo' },
   { to: '/settings', name: 'settings', label: 'Настройки', short: 'Опции', hint: 'Режимы и сеть' },
 ]
 const themes: { id: ThemeMode; label: string }[] = [

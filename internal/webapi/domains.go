@@ -57,7 +57,7 @@ var domainLists = map[string]listDef{
 		file:        func(s *Server) string { return filepath.Join(s.paths.ListsDir, "netrogat_substrings.txt") },
 	},
 	"googlevideo": {
-		name: "googlevideo", title: "Googlevideo (CDN-узлы)", kind: listKindDomain,
+		name: "googlevideo", title: "автосбор Googlevideo", kind: listKindDomain,
 		description: "Media CDN YouTube: ^rr\\d+---sn-[a-z0-9-]+\\.googlevideo\\.com$ (SNI + DNS). Файл lists/googlevideo-hosts.txt.",
 		file:        func(s *Server) string { return s.paths.GooglevideoHostsFile() },
 	},

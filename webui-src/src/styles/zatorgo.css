@@ -675,7 +675,8 @@ a.metric:hover { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)
   background: var(--surface-2);
   font-size: 0.88rem;
 }
-.subtabs { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.75rem; }
+.subtabs { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.75rem; align-items: center; }
+.subtabs .subtab-end { margin-left: auto; }
 .subtabs button.is-active {
   background: var(--accent);
   color: var(--accent-ink);
