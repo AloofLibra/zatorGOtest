@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/AloofLibra/zator/internal/fsutil"
 )
@@ -54,10 +55,17 @@ func (c *Config) BuildNfqws2Args() []string {
 			continue
 		}
 		line = expand(line)
-		if strings.HasPrefix(line, "--qnum=") || line == "--qnum" {
-			hasQnum = true
+		// Как shell-разбор NFQWS2_OPT: «--skip --filter-udp=53» и несколько
+		// --lua-desync на одной строке — отдельные argv для nfqws2 @file.
+		for _, tok := range strings.FieldsFunc(line, unicode.IsSpace) {
+			if tok == "" {
+				continue
+			}
+			if strings.HasPrefix(tok, "--qnum=") || tok == "--qnum" {
+				hasQnum = true
+			}
+			out = append(out, tok)
 		}
-		out = append(out, line)
 	}
 	if !hasQnum {
 		q := c.GetDefault("QNUM", DefaultQNum)

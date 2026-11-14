@@ -16,7 +16,7 @@ const route = useRoute()
 const tabs = [
   { to: '/', name: 'status', label: 'Обзор', hint: 'Состояние и быстрые действия' },
   { to: '/strategies', name: 'strategies', label: 'Стратегии', hint: 'Локи профилей и supersweep' },
-  { to: '/manual', name: 'manual', label: 'Вручную', hint: 'Добавить стратегию / blob (тест)' },
+  { to: '/manual', name: 'manual', label: 'Вручную', hint: 'Стратегии, blob, googlevideo' },
   { to: '/domains', name: 'domains', label: 'Домены', hint: 'Списки hostlist / custom' },
   { to: '/settings', name: 'settings', label: 'Настройки', hint: 'Режимы, сеть, бэкапы' },
 ]

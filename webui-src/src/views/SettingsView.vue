@@ -48,7 +48,7 @@ const modes = [
   { key: 'hostlist', post: 'hostlist_state', title: 'Autohostlist', field: 'auto' as const },
   { key: 'fallback', post: 'fallback_state', title: 'Безразборный режим', field: 'enabled' as const, fromFallback: true },
   { key: 'udp-games', post: 'udp_games_state', title: 'UDP Games 1026-65531', field: 'enabled' as const, fromUdp: true },
-  { key: 'dns_desync', post: 'dns_desync_state', title: 'Антиспуф DNS', field: 'enabled' as const },
+  { key: 'dns_desync', post: 'dns_desync_state', title: 'Антиспуф DNS (весь UDP/53)', field: 'enabled' as const },
   { key: 'rst_guard', post: 'rst_guard_state', title: 'RST guard', field: 'enabled' as const },
   { key: 'reasm', post: 'reasm_state', title: 'reasm-disable', field: 'enabled' as const },
   { key: 'quic443', post: 'quic443_state', title: 'QUIC fakes :443', field: 'enabled' as const },

@@ -71,7 +71,7 @@ CLIENT_SCOPE_MARK_MAX=255
 NFQWS2_ENABLE=1
 # redirect outgoing traffic with connbytes limiter applied in both directions.
 NFQWS2_PORTS_TCP=80,443,2053,2083,2087,2096,8443
-NFQWS2_PORTS_UDP=443,2408,2053,2083,2087,2096,8443,51820,50000-50099,1400,3478-3481,5349,19294-19344,53
+NFQWS2_PORTS_UDP=443,2408,2053,2083,2087,2096,8443,51820,50000-50099,1400,3478-3481,5349,19294-19344
 # PKT_OUT means connbytes dir original
 # PKT_IN means connbytes dir reply
 NFQWS2_TCP_PKT_OUT=20
@@ -396,9 +396,9 @@ ${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WS
 
 #Z2R_DNS_BEGIN
 #Антиспуф DNS: защита от подмены DNS-ответов (клон запроса с малым TTL и меткой
-#transaction ID, дроп ответов по метке). По умолчанию выключен; порт 53 в
-#NFQWS2_PORTS_UDP добавляется тумблером (пункт 8 главного меню).
---filter-udp=53
+#transaction ID, дроп ответов по метке). По умолчанию выключен — иначе ломает
+#весь DNS (allow_nohost без hostlist). Включается тумблером в Настройках.
+--skip --filter-udp=53
 --in-range=-d100
 --out-range=-d100
 --lua-desync=circular_locked:key=10:proto=udp:allow_nohost=1:exclude_hostlist=/opt/zator/lists/netrogat.txt:exclude_substrings=/opt/zator/lists/netrogat_substrings.txt

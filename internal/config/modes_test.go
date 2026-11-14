@@ -254,7 +254,7 @@ func TestDefaultConfigModes(t *testing.T) {
 		ModeFallback:    "выключен",
 		ModeReasm:       "выключено",
 		ModeUDPGames:    "Включен",
-		ModeDNSDesync:   "Включен",
+		ModeDNSDesync:   "Выключен",
 		ModeClientScope: "выключен",
 		ModeRSTGuard:    "включен",
 		ModeQUIC443:     "выключены",

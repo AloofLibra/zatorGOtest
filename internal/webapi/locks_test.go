@@ -54,7 +54,7 @@ func TestStatusShape(t *testing.T) {
 	if p := profileOf(t, st, 8); p["is_fallback"] != true || p["fallback_enabled"] != false {
 		t.Errorf("profile 8 = %v", p)
 	}
-	if p := profileOf(t, st, 10); p["is_dns_desync"] != true || p["dns_desync_enabled"] != true {
+	if p := profileOf(t, st, 10); p["is_dns_desync"] != true || p["dns_desync_enabled"] != false {
 		t.Errorf("profile 10 = %v", p)
 	}
 }

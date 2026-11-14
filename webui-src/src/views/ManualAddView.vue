@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { applySetting, registerStrategy, uploadBlob } from '../api/endpoints'
+import { applySetting, domains, fetchDomainsList, registerStrategy, uploadBlob } from '../api/endpoints'
+import type { DomainsListPayload } from '../api/types'
 import { gatedReason, isProfileGated } from '../gating'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
+import { confirmDialog } from '../stores/confirm'
 import { refreshTlsBlobSettings, refreshWgBlobSettings, tlsBlobSettings, wgBlobSettings } from '../stores/settings'
 import { locks, refreshAll, scope } from '../stores/status'
 import { restartSuffix, showToast } from '../stores/toast'
+
+const googlevideo = ref<DomainsListPayload | null>(null)
 
 const presets = [
   {
@@ -72,17 +76,72 @@ function onFile(ev: Event) {
   }
 }
 
+async function loadGooglevideo(sync = false) {
+  if (sync) {
+    await domains.refresh('googlevideo', scope.value)
+  }
+  googlevideo.value = await fetchDomainsList('googlevideo', scope.value)
+}
+
 onMounted(async () => {
   try {
     await withBusy('manual-load', async () => {
       await refreshAll()
       await refreshTlsBlobSettings()
       await refreshWgBlobSettings()
+      await loadGooglevideo(true)
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
 })
+
+async function refreshGooglevideo() {
+  try {
+    await withBusy('gv-refresh', async () => {
+      await loadGooglevideo(true)
+    })
+    showToast('Список googlevideo обновлён')
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function removeGooglevideo(host: string) {
+  const ok = await confirmDialog({
+    title: 'Удалить узел?',
+    message: `Удалить «${host}» из списка?`,
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await withBusy('gv-rm', async () => {
+      await domains.remove('googlevideo', host, scope.value)
+      await loadGooglevideo()
+    })
+    showToast('Удалено')
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function clearGooglevideo() {
+  const ok = await confirmDialog({
+    title: 'Очистить список?',
+    message: 'Все собранные googlevideo-хосты будут удалены.',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await withBusy('gv-clear', async () => {
+      await domains.clear('googlevideo', scope.value)
+      await loadGooglevideo()
+    })
+    showToast('Список очищен')
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
 
 async function submitStrategy() {
   if (!desync.value.trim()) {
@@ -151,7 +210,41 @@ async function submitBlob() {
     <div class="page-head">
       <div>
         <h1>Добавить вручную</h1>
-        <p>Тестовая лаборатория: свои стратегии desync и загрузка TLS/WG blob без правки сырого конфига.</p>
+        <p>Свои стратегии desync, blob и собранный список googlevideo CDN.</p>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:1rem">
+      <div class="panel-h">
+        <h2>Googlevideo</h2>
+        <span class="chip">{{ googlevideo?.items?.length ?? 0 }}</span>
+      </div>
+      <p class="panel-d">
+        Автосбор rr*---sn-*.googlevideo.com (SNI + DNS). Сбор: {{ googlevideo?.collection || '—' }}.
+      </p>
+      <div class="actions" style="margin-top:0.65rem">
+        <button type="button" :disabled="busyActive"
+          :class="{ 'is-busy': busyButton === 'gv-refresh' }"
+          @click="refreshGooglevideo">Обновить</button>
+        <button type="button" class="ghost danger" :disabled="busyActive || !(googlevideo?.items?.length)"
+          :class="{ 'is-busy': busyButton === 'gv-clear' }"
+          @click="clearGooglevideo">Очистить</button>
+      </div>
+      <div class="domain-list" style="margin-top:0.85rem">
+        <div v-for="item in (googlevideo?.items || [])" :key="item.value" class="domain-item">
+          <div>
+            <code>{{ item.value }}</code>
+            <div v-if="item.ip || item.source" class="panel-d" style="margin:0.35rem 0 0">
+              <span v-if="item.ip">{{ item.ip }}</span>
+              <span v-if="item.source"> · {{ item.source }}</span>
+            </div>
+          </div>
+          <div class="row">
+            <button type="button" class="ghost danger" :disabled="busyActive"
+              @click="removeGooglevideo(item.value)">Удалить</button>
+          </div>
+        </div>
+        <p v-if="googlevideo && !(googlevideo.items || []).length" class="panel-d">Список пуст — узлы появятся после просмотра YouTube.</p>
       </div>
     </div>
 

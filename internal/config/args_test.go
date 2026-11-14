@@ -14,6 +14,8 @@ NFQWS2_OPT="
 --new
 --filter-tcp=443
 --lua-init=@/opt/zator/lua/${FOO}.lua
+--skip --filter-udp=53
+--lua-desync=fake:strategy=1 --lua-desync=multisplit:strategy=1
 "
 `)
 	args := c.BuildNfqws2Args()
@@ -23,6 +25,25 @@ NFQWS2_OPT="
 	joined := strings.Join(args, "\n")
 	if !strings.Contains(joined, "--lua-init=@/opt/zator/lua/bar.lua") {
 		t.Fatalf("expand failed: %v", args)
+	}
+	// --skip и filter должны быть разными argv (иначе @file не отключает профиль).
+	var sawSkip, sawDNS bool
+	for i, a := range args {
+		if a == "--skip" {
+			sawSkip = true
+			if i+1 >= len(args) || args[i+1] != "--filter-udp=53" {
+				t.Fatalf("skip not followed by dns filter: %v", args[i:])
+			}
+		}
+		if a == "--filter-udp=53" {
+			sawDNS = true
+		}
+		if strings.Contains(a, " ") {
+			t.Fatalf("token with space (must split): %q", a)
+		}
+	}
+	if !sawSkip || !sawDNS {
+		t.Fatalf("missing skip/dns tokens: %v", args)
 	}
 }
 

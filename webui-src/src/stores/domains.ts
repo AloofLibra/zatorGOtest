@@ -4,7 +4,7 @@ import type { CheckPayload, DomainsListPayload } from '../api/types'
 import { scope } from './status'
 import { showToast } from './toast'
 
-export const DOMAIN_LISTS = ['netrogat', 'custom_rkn', 'substring', 'netrogat_substring', 'googlevideo'] as const
+export const DOMAIN_LISTS = ['netrogat', 'custom_rkn', 'substring', 'netrogat_substring'] as const
 export type DomainListName = typeof DOMAIN_LISTS[number]
 
 export const DOMAIN_META: Record<DomainListName, { kind: string; addLabel: string; placeholder: string; itemName: string }> = {
@@ -12,12 +12,6 @@ export const DOMAIN_META: Record<DomainListName, { kind: string; addLabel: strin
   custom_rkn: { kind: 'domain', addLabel: 'Домен', placeholder: 'example.com', itemName: 'Домен' },
   substring: { kind: 'substring', addLabel: 'Подстрока', placeholder: 'cdn, media, static, …', itemName: 'Подстрока' },
   netrogat_substring: { kind: 'substring', addLabel: 'Подстрока', placeholder: 'bank, shop, gov, …', itemName: 'Подстрока' },
-  googlevideo: {
-    kind: 'domain',
-    addLabel: 'Узел CDN',
-    placeholder: 'https://rr1---sn-….googlevideo.com',
-    itemName: 'Узел',
-  },
 }
 
 export const domainLists = reactive<Record<DomainListName, DomainsListPayload | null>>({
@@ -25,7 +19,6 @@ export const domainLists = reactive<Record<DomainListName, DomainsListPayload | 
   custom_rkn: null,
   substring: null,
   netrogat_substring: null,
-  googlevideo: null,
 })
 export const domainChecks = reactive<Record<string, CheckPayload>>({})
 export const expandedDomain = ref<string | null>(null)

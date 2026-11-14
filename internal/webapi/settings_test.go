@@ -51,7 +51,7 @@ func TestSettingsGetDefaults(t *testing.T) {
 		{"fallback", "state", "выключен"},
 		{"fallback", "enabled", false},
 		{"udp-games", "enabled", false},
-		{"dns_desync", "enabled", true},
+		{"dns_desync", "enabled", false},
 		{"wg_state", "state", "0"},
 		{"wg_state", "enabled", false},
 		{"provider", "provider", "Не определён"},
@@ -143,16 +143,16 @@ func TestSettingsToggles(t *testing.T) {
 		}
 	}
 
-	// dns_desync: по умолчанию включён.
-	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "dns_desync_state", "value", "0")
-	wantOK(t, resp, out)
-	if out["state"] != "Выключен" || liveConfig(t, e).DNSDesyncText() != "Выключен" {
-		t.Errorf("dns off: %v", out)
-	}
+	// dns_desync: по умолчанию выключен (иначе allow_nohost ломает весь DNS).
 	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "dns_desync_state", "value", "1")
 	wantOK(t, resp, out)
 	if liveConfig(t, e).DNSDesyncText() != "Включен" {
 		t.Error("dns on не применился")
+	}
+	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "dns_desync_state", "value", "0")
+	wantOK(t, resp, out)
+	if out["state"] != "Выключен" || liveConfig(t, e).DNSDesyncText() != "Выключен" {
+		t.Errorf("dns off: %v", out)
 	}
 
 	// rst_guard

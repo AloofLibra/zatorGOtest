@@ -108,6 +108,11 @@ func (a *App) PrepareZapretRuntime() (fwHook string, err error) {
 	if changed, e := a.ensureNetworkIfaces(cfg); e == nil && changed {
 		_ = cfg.Save()
 	}
+	// Старый дефолт включал DNS-desync на весь UDP/53 (allow_nohost) — «пропадает интернет».
+	// Один раз выключаем при обновлении; дальше пользователь может включить вручную.
+	if a.migrateDNSDesyncOff(cfg) {
+		_ = cfg.Save()
+	}
 	gvLua := filepath.ToSlash(filepath.Join(a.Paths.LuaDir, "googlevideo-collect.lua"))
 	if ok, e := cfg.EnsureLuaInit(gvLua); e == nil && ok {
 		_ = cfg.Save()
@@ -199,6 +204,29 @@ func (a *App) ensureHostlistPlaceholders() error {
 		}
 	}
 	return nil
+}
+
+const dnsDesyncOffMarker = "dns_desync_default_off.v1"
+
+// migrateDNSDesyncOff один раз выключает антиспуф DNS на обновлениях со старым
+// небезопасным дефолтом. Маркер в state/ не даёт повторно гасить ручное включение.
+func (a *App) migrateDNSDesyncOff(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	marker := filepath.Join(a.Paths.StateDir, dnsDesyncOffMarker)
+	if _, err := os.Stat(marker); err == nil {
+		return false
+	}
+	_ = os.MkdirAll(a.Paths.StateDir, 0o755)
+	changed := false
+	if cfg.DNSDesyncText() == "Включен" {
+		if err := cfg.SetDNSDesync(false); err == nil {
+			changed = true
+		}
+	}
+	_ = fsutil.AtomicWriteFile(marker, []byte("1\n"), 0o644)
+	return changed
 }
 
 // StartServices ставит в автозагрузку и запускает zapret2 и Web UI.
