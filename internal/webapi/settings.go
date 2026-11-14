@@ -18,8 +18,9 @@ import (
 )
 
 var (
-	tlsBlobFileRe = regexp.MustCompile(`^(tls_[A-Za-z0-9_.-]+\.bin|custom_tls\.bin)$`)
-	wgBlobFileRe  = regexp.MustCompile(`^wg_initial_fake_[A-Za-z0-9_.-]+\.bin$`)
+	// (?i) — TLS_ClientHello_*.bin тоже в пикере (исторические имена с заглавными).
+	tlsBlobFileRe = regexp.MustCompile(`(?i)^(tls_[A-Za-z0-9_.-]+\.bin|custom_tls\.bin)$`)
+	wgBlobFileRe  = regexp.MustCompile(`(?i)^wg_initial_fake_[A-Za-z0-9_.-]+\.bin$`)
 )
 
 const (

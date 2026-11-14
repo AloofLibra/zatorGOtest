@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/AloofLibra/zator/internal/paths"
@@ -113,6 +114,51 @@ func TestWebUIURL(t *testing.T) {
 	}
 	if got := a.WebUIURL("1.2.3.4"); got != "http://1.2.3.4:17682/" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestInstallUnpacksStockFakes(t *testing.T) {
+	a := newTestApp(t)
+	if err := a.Install(); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(a.Paths.FakeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tls, wg int
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if strings.HasPrefix(strings.ToLower(n), "tls_") || n == "custom_tls.bin" {
+			tls++
+		}
+		if strings.HasPrefix(strings.ToLower(n), "wg_initial_fake_") {
+			wg++
+		}
+	}
+	if tls < 30 {
+		t.Fatalf("ожидалось ≥30 tls blob, got %d (всего %d)", tls, len(entries))
+	}
+	if wg < 4 {
+		t.Fatalf("ожидалось ≥4 wg blob, got %d", wg)
+	}
+	// Soft uninstall не должен сносить FakeDir.
+	if err := a.Uninstall(UninstallOptions{SkipService: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(a.Paths.FakeDir, "tls_clienthello_5.bin")); err != nil {
+		t.Fatalf("FakeDir должен сохраняться при uninstall без purge: %v", err)
+	}
+	// EnsureStockFakes восстанавливает после полной очистки каталога.
+	_ = os.RemoveAll(a.Paths.FakeDir)
+	if err := a.EnsureStockFakes(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(a.Paths.FakeDir, "custom_tls.bin")); err != nil {
+		t.Fatalf("EnsureStockFakes не восстановил blob: %v", err)
 	}
 }
 

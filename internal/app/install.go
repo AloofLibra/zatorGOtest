@@ -112,13 +112,13 @@ func (a *App) Uninstall(opts UninstallOptions) error {
 }
 
 // removeRuntime удаляет бинарник и встроенные ассеты, оставляя пользовательские данные.
+// FakeDir (files/fake) сохраняем: там и стоковые blob, и загруженные пользователем.
 func (a *App) removeRuntime() error {
 	for _, p := range []string{
 		a.Paths.BinDir,
 		a.Paths.WebUIDir,
 		a.Paths.LuaDir,
 		a.Paths.DataDir,
-		filepath.Join(a.Paths.ZatorRoot, "files"),
 		filepath.Join(a.Paths.ExtraStratsDir, "cache"),
 		a.Paths.OrchestraDir,
 	} {
@@ -154,8 +154,8 @@ func (a *App) syncAssets() error {
 	if err := copyFS(uiembed.Data(), a.Paths.DataDir); err != nil {
 		return fmt.Errorf("распаковка data: %w", err)
 	}
-	if err := copyFS(uiembed.Files(), filepath.Join(a.Paths.ZatorRoot, "files")); err != nil {
-		return fmt.Errorf("распаковка files: %w", err)
+	if err := a.EnsureStockFakes(); err != nil {
+		return err
 	}
 	if err := copyFSKeepExisting(uiembed.ExtraStrats(), a.Paths.ExtraStratsDir); err != nil {
 		return fmt.Errorf("распаковка extra_strats: %w", err)
@@ -331,6 +331,18 @@ func copyDirKeepExisting(src, dst string) error {
 		if err := os.WriteFile(d, data, 0o644); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// EnsureStockFakes распаковывает встроенные blob в FakeDir (перезаписывает сток,
+// не удаляет пользовательские файлы с другими именами).
+func (a *App) EnsureStockFakes() error {
+	if err := os.MkdirAll(a.Paths.FakeDir, 0o755); err != nil {
+		return fmt.Errorf("создание FakeDir: %w", err)
+	}
+	if err := copyFS(uiembed.Fake(), a.Paths.FakeDir); err != nil {
+		return fmt.Errorf("распаковка files/fake: %w", err)
 	}
 	return nil
 }

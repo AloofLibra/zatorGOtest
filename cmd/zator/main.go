@@ -317,7 +317,7 @@ func cmdUninstall(args []string, stdout, stderr io.Writer) int {
 		if *purge {
 			fmt.Fprintf(stderr, "будет полностью удалён %s (включая config/state/lists); повторите с -y --purge\n", a.Paths.ZatorRoot)
 		} else {
-			fmt.Fprintf(stderr, "будут удалены bin/webui/lua и службы; config/state/lists сохранятся в %s; повторите с -y (полный снос: -y --purge)\n", a.Paths.ZatorRoot)
+			fmt.Fprintf(stderr, "будут удалены bin/webui/lua и службы; config/state/lists/files сохранятся в %s; повторите с -y (полный снос: -y --purge)\n", a.Paths.ZatorRoot)
 		}
 		return 1
 	}
@@ -328,7 +328,7 @@ func cmdUninstall(args []string, stdout, stderr io.Writer) int {
 	if *purge {
 		fmt.Fprintln(stdout, "zator полностью удалён (--purge)")
 	} else {
-		fmt.Fprintln(stdout, "runtime zator удалён; config/state/lists сохранены")
+		fmt.Fprintln(stdout, "runtime zator удалён; config/state/lists/files сохранены")
 	}
 	return 0
 }
@@ -361,6 +361,10 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 	}
 	if *port != 0 {
 		a.Config.Port = *port
+	}
+	// Восстановить стоковые blob, если каталог пуст (ручная замена бинарника / старый uninstall).
+	if err := a.EnsureStockFakes(); err != nil {
+		fmt.Fprintf(stderr, "предупреждение files/fake: %v\n", err)
 	}
 
 	handler, err := newWebHandler(a, stderr)
