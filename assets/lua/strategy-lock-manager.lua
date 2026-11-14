@@ -20,7 +20,10 @@ SLM_BLOCKED = SLM_BLOCKED or {}
 SLM_TESTING = SLM_TESTING or {}
 
 -- Auto-locked strategies (persisted to disk, auto-learned only)
+-- SLM_AUTO_LOCKED[askey][scope][host] = strategy_number
+-- SLM_AUTO_LOCKED_SOURCE[askey][scope][host] = "seed"|"learned"
 SLM_AUTO_LOCKED = SLM_AUTO_LOCKED or {}
+SLM_AUTO_LOCKED_SOURCE = SLM_AUTO_LOCKED_SOURCE or {}
 -- Рабочий файл часто меняется, поэтому держим его в tmpfs. Копия в /opt
 -- нужна только для восстановления после перезапуска и обновляется с паузой,
 -- чтобы не изнашивать flash-накопитель роутера частыми мелкими записями.
@@ -28,6 +31,10 @@ local SLM_AUTO_LOCKED_PATH = "/tmp/auto_locked.tsv"
 local SLM_AUTO_LOCKED_BACKUP_PATH = "/opt/zator/state/orchestra/auto_locked.tsv"
 local SLM_AUTO_LOCKED_BACKUP_INTERVAL = 1800
 local SLM_AUTO_LOCKED_LAST_BACKUP = 0
+local SLM_AUTO_LOCKED_LAST_MERGE = 0
+local SLM_AUTO_LOCKED_MERGE_INTERVAL = 5
+local SLM_AUTO_LOCKED_RELOAD_STAMP = "/tmp/z2r-auto-locked.reload"
+local SLM_AUTO_LOCKED_LAST_STAMP = ""
 
 -- ==================== SEPARATE SUBDOMAINS ====================
 -- Domains that should NOT be grouped by NLD (need separate strategies)
@@ -502,21 +509,118 @@ local function slm_get_quality_bucket(askey, scope)
     return bucket
 end
 
+-- Parse one auto_locked TSV line → askey, scope, host, strat, source|nil
+local function slm_parse_auto_locked_line(line)
+    if not line or line == "" or string.match(line, "^%s*#") then return nil end
+    local askey, scope, host, strat, source
+    askey, scope, host, strat, source = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)\t([^\t]+)$")
+    if not askey then
+        askey, host, strat, source = line:match("^([^\t]+)\t([^\t]+)\t(%d+)\t([^\t]+)$")
+        scope = "default"
+    end
+    if not askey then
+        askey, scope, host, strat = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)$")
+    end
+    if not askey then
+        askey, host, strat = line:match("^([^\t]+)\t([^\t]+)\t(%d+)$")
+        scope = "default"
+    end
+    if not askey or not host or not strat then return nil end
+    local n = tonumber(strat)
+    if not n then return nil end
+    source = source and string.lower(source) or nil
+    if source ~= "seed" and source ~= "learned" then source = nil end
+    return askey, scope, host, n, source
+end
+
+-- Ingest disk row into memory. Disk learned wins over seed; never drop unknown keys.
+local function slm_ingest_auto_locked(askey, scope, host, strat, source, preload)
+    if not askey or not host or not strat then return end
+    scope = slm_scope_key(scope)
+    local key = slm_normalize_hostkey(host)
+    if not key then return end
+    SLM_AUTO_LOCKED[askey] = SLM_AUTO_LOCKED[askey] or {}
+    SLM_AUTO_LOCKED[askey][scope] = SLM_AUTO_LOCKED[askey][scope] or {}
+    SLM_AUTO_LOCKED_SOURCE[askey] = SLM_AUTO_LOCKED_SOURCE[askey] or {}
+    SLM_AUTO_LOCKED_SOURCE[askey][scope] = SLM_AUTO_LOCKED_SOURCE[askey][scope] or {}
+    local cur = SLM_AUTO_LOCKED[askey][scope][key]
+    local cur_src = SLM_AUTO_LOCKED_SOURCE[askey][scope][key]
+    if cur == nil then
+        SLM_AUTO_LOCKED[askey][scope][key] = strat
+        SLM_AUTO_LOCKED_SOURCE[askey][scope][key] = source or "learned"
+        if preload then slm_preload_locked(askey, key, strat, false, scope) end
+        return
+    end
+    -- Disk learned overrides in-memory seed; same strat refreshes source.
+    if source == "learned" and cur_src == "seed" then
+        SLM_AUTO_LOCKED[askey][scope][key] = strat
+        SLM_AUTO_LOCKED_SOURCE[askey][scope][key] = "learned"
+        if preload then slm_preload_locked(askey, key, strat, false, scope) end
+    elseif cur == strat and source and not cur_src then
+        SLM_AUTO_LOCKED_SOURCE[askey][scope][key] = source
+    elseif cur ~= strat and cur_src == "seed" and (source == "seed" or source == nil) then
+        -- Go seed refresh of unlocked/seed entry
+        SLM_AUTO_LOCKED[askey][scope][key] = strat
+        SLM_AUTO_LOCKED_SOURCE[askey][scope][key] = source or "seed"
+        if preload then slm_preload_locked(askey, key, strat, false, scope) end
+    end
+end
+
+local function slm_merge_auto_locked_file(path, preload)
+    local f = io.open(path, "r")
+    if not f then return false end
+    for line in f:lines() do
+        local askey, scope, host, strat, source = slm_parse_auto_locked_line(line)
+        if askey then
+            slm_ingest_auto_locked(askey, scope, host, strat, source, preload)
+        end
+    end
+    f:close()
+    return true
+end
+
+-- Подтянуть Go-seed / внешние записи с диска без полного wipe памяти.
+function slm_merge_auto_locked_from_disk(force)
+    local now = os.time()
+    if not force and SLM_AUTO_LOCKED_LAST_MERGE > 0
+        and now - SLM_AUTO_LOCKED_LAST_MERGE < SLM_AUTO_LOCKED_MERGE_INTERVAL then
+        return
+    end
+    local stamp_f = io.open(SLM_AUTO_LOCKED_RELOAD_STAMP, "r")
+    local stamp = stamp_f and stamp_f:read("*l") or ""
+    if stamp_f then stamp_f:close() end
+    if not force and stamp ~= "" and stamp == SLM_AUTO_LOCKED_LAST_STAMP
+        and SLM_AUTO_LOCKED_LAST_MERGE > 0 then
+        return
+    end
+    SLM_AUTO_LOCKED_LAST_STAMP = stamp or ""
+    SLM_AUTO_LOCKED_LAST_MERGE = now
+    slm_merge_auto_locked_file(SLM_AUTO_LOCKED_PATH, true)
+end
+
 -- Serializes the whole SLM_AUTO_LOCKED table to `path`. Returns true on
 -- success, false if the file couldn't be opened for writing.
 local function slm_write_auto_locked_to(path)
     local f = io.open(path, "w")
     if not f then return false end
     for askey, scopes in pairs(SLM_AUTO_LOCKED) do
-        if type(scopes) == "table" then
+        if type(scopes) == "table" and askey ~= "_loaded" then
             for scope, hosts in pairs(scopes) do
                 if type(hosts) == "table" then
                     for host, strat in pairs(hosts) do
                         if type(strat) == "number" then
+                            local src = SLM_AUTO_LOCKED_SOURCE[askey]
+                                and SLM_AUTO_LOCKED_SOURCE[askey][scope]
+                                and SLM_AUTO_LOCKED_SOURCE[askey][scope][host]
+                            if not src or src == "" then src = "learned" end
                             if scope == "default" then
-                                f:write(askey, "\t", host, "\t", tostring(strat), "\n")
+                                if src == "learned" then
+                                    f:write(askey, "\t", host, "\t", tostring(strat), "\n")
+                                else
+                                    f:write(askey, "\t", host, "\t", tostring(strat), "\t", src, "\n")
+                                end
                             else
-                                f:write(askey, "\t", scope, "\t", host, "\t", tostring(strat), "\n")
+                                f:write(askey, "\t", scope, "\t", host, "\t", tostring(strat), "\t", src, "\n")
                             end
                         end
                     end
@@ -543,6 +647,8 @@ end
 -- backed up immediately). If /tmp is unexpectedly unavailable, save directly
 -- to the persistent copy so the new state is not lost completely.
 local function slm_save_auto_locked()
+    -- Merge disk first so Go-seed rows are not wiped by a full rewrite.
+    slm_merge_auto_locked_from_disk(true)
     local active_saved = slm_write_auto_locked_atomic(SLM_AUTO_LOCKED_PATH)
     if not active_saved and DLOG then
         DLOG("slm_quality: failed to write active auto locks to " .. SLM_AUTO_LOCKED_PATH)
@@ -562,23 +668,34 @@ local function slm_save_auto_locked()
     end
 end
 
-local function slm_set_auto_locked(askey, hostkey, strategy_id, scope)
+local function slm_set_auto_locked(askey, hostkey, strategy_id, scope, source)
     if not askey or not hostkey or not strategy_id then return end
     scope = slm_scope_key(scope)
+    source = source or "learned"
     if not SLM_AUTO_LOCKED[askey] then
         SLM_AUTO_LOCKED[askey] = {}
     end
     SLM_AUTO_LOCKED[askey][scope] = SLM_AUTO_LOCKED[askey][scope] or {}
-    if SLM_AUTO_LOCKED[askey][scope][hostkey] == strategy_id then return end
+    SLM_AUTO_LOCKED_SOURCE[askey] = SLM_AUTO_LOCKED_SOURCE[askey] or {}
+    SLM_AUTO_LOCKED_SOURCE[askey][scope] = SLM_AUTO_LOCKED_SOURCE[askey][scope] or {}
+    if SLM_AUTO_LOCKED[askey][scope][hostkey] == strategy_id
+        and SLM_AUTO_LOCKED_SOURCE[askey][scope][hostkey] == source then
+        return
+    end
     SLM_AUTO_LOCKED[askey][scope][hostkey] = strategy_id
+    SLM_AUTO_LOCKED_SOURCE[askey][scope][hostkey] = source
     slm_save_auto_locked()
 end
 
 local function slm_clear_auto_locked(askey, hostkey, scope)
     if not askey or not hostkey then return end
-    local hosts = SLM_AUTO_LOCKED[askey] and SLM_AUTO_LOCKED[askey][slm_scope_key(scope)]
+    local sk = slm_scope_key(scope)
+    local hosts = SLM_AUTO_LOCKED[askey] and SLM_AUTO_LOCKED[askey][sk]
     if hosts and hosts[hostkey] then
         hosts[hostkey] = nil
+        if SLM_AUTO_LOCKED_SOURCE[askey] and SLM_AUTO_LOCKED_SOURCE[askey][sk] then
+            SLM_AUTO_LOCKED_SOURCE[askey][sk][hostkey] = nil
+        end
         slm_save_auto_locked()
     end
 end
@@ -598,7 +715,7 @@ function slm_commit_auto_lock(askey, hostkey, strategy_id, reason, scope)
     qrec.locked_strategy = strategy_id
     qrec.lock_reason = reason or "auto"
     qrec.is_user_lock = false
-    slm_set_auto_locked(askey, key, strategy_id, scope)
+    slm_set_auto_locked(askey, key, strategy_id, scope, "learned")
     if DLOG then
         DLOG("slm_commit_auto_lock: [" .. askey .. "] " .. key .. " -> strat=" .. strategy_id ..
              " reason=" .. qrec.lock_reason)
@@ -833,6 +950,11 @@ function slm_get_locked(askey, hostkey, scope)
     -- Нормализуем askey
     askey = askey or "default"
 
+    -- Подтянуть Go-seed с диска (не чаще MERGE_INTERVAL / по stamp).
+    if type(slm_merge_auto_locked_from_disk) == "function" then
+        slm_merge_auto_locked_from_disk(false)
+    end
+
     -- Нормализуем hostkey
     local key = slm_normalize_hostkey(hostkey)
     if not key then return nil end
@@ -843,6 +965,21 @@ function slm_get_locked(askey, hostkey, scope)
     local qrec = as_table[key]
     if qrec and qrec.locked_strategy then
         return qrec.locked_strategy
+    end
+    -- Fallback: auto_locked table (в т.ч. только что смёрженный seed)
+    local sk = slm_scope_key(scope)
+    local auto = SLM_AUTO_LOCKED[askey] and SLM_AUTO_LOCKED[askey][sk] and SLM_AUTO_LOCKED[askey][sk][key]
+    if auto then
+        if not qrec then
+            qrec = slm_get_quality_record(askey, key, scope)
+        end
+        if qrec and not qrec.is_user_lock then
+            qrec.locked_strategy = auto
+            qrec.lock_reason = (SLM_AUTO_LOCKED_SOURCE[askey]
+                and SLM_AUTO_LOCKED_SOURCE[askey][sk]
+                and SLM_AUTO_LOCKED_SOURCE[askey][sk][key]) or "auto"
+        end
+        return auto
     end
     return nil
 end
@@ -1035,42 +1172,9 @@ local function slm_load_auto_locked()
         restored_from_backup = f ~= nil
     end
     if not f then return end
-    for line in f:lines() do
-        if line and line ~= "" then
-            local askey, scope, host, strat
-            -- askey scope host strat source
-            askey, scope, host, strat = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)\t[^\t]+$")
-            -- askey host strat source
-            if not askey then
-                askey, host, strat = line:match("^([^\t]+)\t([^\t]+)\t(%d+)\t[^\t]+$")
-                scope = "default"
-            end
-            -- askey scope host strat
-            if not askey then
-                askey, scope, host, strat = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)$")
-            end
-            -- askey host strat
-            if not askey then
-                askey, host, strat = line:match("^([^\t]+)\t([^\t]+)\t(%d+)$")
-                scope = "default"
-            end
-            if askey and scope and host and strat then
-                local n = tonumber(strat)
-                if n then
-                    local key = slm_normalize_hostkey(host)
-                    if key then
-                        if not SLM_AUTO_LOCKED[askey] then
-                            SLM_AUTO_LOCKED[askey] = {}
-                        end
-                        SLM_AUTO_LOCKED[askey][scope] = SLM_AUTO_LOCKED[askey][scope] or {}
-                        SLM_AUTO_LOCKED[askey][scope][key] = n
-                        slm_preload_locked(askey, key, n, false, scope)
-                    end
-                end
-            end
-        end
-    end
     f:close()
+    slm_merge_auto_locked_file(source_path, true)
+    SLM_AUTO_LOCKED_LAST_MERGE = os.time()
 
     if restored_from_backup and not slm_write_auto_locked_atomic(SLM_AUTO_LOCKED_PATH) and DLOG then
         DLOG("slm_quality: failed to restore active auto locks to " .. SLM_AUTO_LOCKED_PATH)

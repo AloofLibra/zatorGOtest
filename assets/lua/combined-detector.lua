@@ -1548,12 +1548,25 @@ function circular_quality(ctx, desync)
             hostkey = standard_hostkey(desync)
         end
     end
-    -- Apply domain grouping if available (e.g., googlevideo.com)
-    if hostkey and get_grouped_hostname then
+    -- Apply domain grouping if available. sn-* (profile 2) уже POP-ключ — не трогаем.
+    local askey_now = tostring(desync.arg and desync.arg.key or "")
+    if hostkey and get_grouped_hostname and not (askey_now == "2" and string.match(tostring(hostkey), "^sn%-")) then
         hostkey = get_grouped_hostname(hostkey) or hostkey
     end
     -- Normalize hostkey for slm_* functions
     hostkey = slm_normalize_hostkey(hostkey) or hostkey
+    -- Profile 2: убедиться что hrec привязан к sn-*, а не к устаревшему googlevideo.com.
+    if askey_now == "2" and hostkey and string.match(hostkey, "^sn%-") then
+        if not autostate then autostate = {} end
+        if not autostate["2"] then autostate["2"] = {} end
+        if not autostate["2"][hostkey] then
+            autostate["2"][hostkey] = {}
+            if hrec and type(hrec) == "table" and hrec.nstrategy then
+                autostate["2"][hostkey].nstrategy = hrec.nstrategy
+            end
+        end
+        hrec = autostate["2"][hostkey]
+    end
     local scope = type(desync_client_scope) == "function" and desync_client_scope(desync) or "default"
 
     -- Count strategies from desync.plan (already populated by orchestrate() at function start)

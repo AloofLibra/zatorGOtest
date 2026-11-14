@@ -221,7 +221,8 @@ async function saveWg(restart = true) {
     }
     await withBusy('wg', async () => {
       if (restart) announceRestart()
-      await applySetting.wg_state(wgOn.value, restart)
+      // Один рестарт в конце — иначе двойной maybeRestart.
+      await applySetting.wg_state(wgOn.value, false)
       if (wgBlob.value) await applySetting.wg_blob(wgBlob.value, false)
       await applySetting.wg_repeats(repeats, restart)
       showToast('WireGuard сохранён')

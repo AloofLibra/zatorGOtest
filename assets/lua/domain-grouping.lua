@@ -2,10 +2,19 @@
 -- Groups subdomains under base domain to share strategy state
 
 -- Extract base domain (e.g., "rr5---sn-xxx.googlevideo.com" -> "googlevideo.com")
+-- Исключение: media POP rrN---sn-* / sn-* остаются per-POP ключами —
+-- иначе circular_quality профиля 2 делит nstrategy/fail-счётчики между разными sn.
 function get_grouped_hostname(hostname)
     if not hostname then return nil end
 
-    -- Each service gets its own key to find optimal strategy independently
+    if string.match(hostname, "^sn%-") then
+        return hostname
+    end
+    local sn = string.match(hostname, "^rr%d+%-%-%-(sn%-[a-z0-9%-]+)%.googlevideo%.com$")
+    if sn then
+        return sn
+    end
+    -- Не-media googlevideo (redirector и т.п.) — общий ключ.
     if string.match(hostname, "%.googlevideo%.com$") then
         return "googlevideo.com"
     end

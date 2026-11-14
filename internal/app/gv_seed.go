@@ -3,21 +3,19 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/fsutil"
 	"github.com/AloofLibra/zator/internal/googlevideo"
-	"github.com/AloofLibra/zator/internal/netcheck"
-	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/paths"
-	"github.com/AloofLibra/zator/internal/sweep"
 )
 
 var (
 	gvSeederMu sync.Mutex
 	gvSeeder   *googlevideo.Seeder
-	gvProbeMu  sync.Mutex // сериализация живых проб профиля 2
 )
 
 // GooglevideoSeedStatus — статус фонового автопробоя для Domains UI.
@@ -38,16 +36,8 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 	if gvSeeder != nil {
 		return
 	}
-	store := orchestra.NewStore(a.Paths.StateOrchestraDir())
-	checker := netcheck.NewChecker(netcheck.DefaultOptions())
-	env := &sweep.Env{
-		Locks:   store,
-		Checker: checker,
-		Settle:  2300 * time.Millisecond,
-	}
-	probe := func(pctx context.Context, fqdn string, strategy int) (bool, string, error) {
-		return a.probeGooglevideoStrategy(pctx, env, store, fqdn, strategy)
-	}
+	// Живой probe через profile-2 lock ломает чужой трафик на 2+ с — по умолчанию
+	// только transfer/default seed. Изолированный NfqwsProbe — отдельный контур (supersweep).
 	seeder := googlevideo.NewSeeder(googlevideo.SeederConfig{
 		LivePath:  paths.LiveAutoLockedTSV(),
 		StatePath: a.Paths.AutoLockedTSV,
@@ -55,7 +45,7 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 			_, _ = a.SyncGooglevideoHosts()
 			return a.GooglevideoHosts().List()
 		},
-		Probe:        probe,
+		Probe:        nil,
 		DefaultStrat: 41,
 		MaxStrat:     44,
 		TailMax:      8,
@@ -64,6 +54,7 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 		OnSeeded: func(hostKey string, strategy int) {
 			_ = hostKey
 			_ = strategy
+			a.touchAutoLockedReloadStamp()
 			a.EnsureGooglevideoMidstream(context.Background())
 		},
 	})
@@ -82,37 +73,11 @@ func (a *App) StopGooglevideoSeeder() {
 	}
 }
 
-// probeGooglevideoStrategy — живая проба: временный лок профиля 2 → TLS check → restore.
-// Изолированный NfqwsProbe тяжёл для фона; сериализуем через gvProbeMu.
-func (a *App) probeGooglevideoStrategy(ctx context.Context, env *sweep.Env, store *orchestra.Store, fqdn string, strategy int) (bool, string, error) {
-	if fqdn == "" || strategy < 1 {
-		return false, "", fmt.Errorf("некорректная проба")
-	}
-	gvProbeMu.Lock()
-	defer gvProbeMu.Unlock()
-
-	const scope = orchestra.ScopeDefault
-	prev, prevErr := store.GetLock(scope, "2", "tls")
-	hadPrev := prevErr == nil && prev > 0 && prev != orchestra.StrategyAuto
-
-	res, err := env.Try(ctx, sweep.TryRequest{
-		Profile:  2,
-		Strategy: strategy,
-		Label:    "gv-seed",
-		URL:      "https://" + fqdn + "/",
-		TLSPref:  netcheck.PrefAny,
-	})
-	// Восстановить прежний лок (или снять временный).
-	if hadPrev {
-		_ = store.SetLock(scope, "2", "tls", prev)
-	} else {
-		_ = store.ClearLock(scope, "2", "tls")
-	}
-	if err != nil {
-		return false, "", err
-	}
-	ok := res.Verdict == sweep.TokenOK || res.Verdict == sweep.TokenWarn
-	return ok, res.Short, nil
+// touchAutoLockedReloadStamp сигналит Lua (slm_merge_auto_locked_from_disk), что TSV обновился.
+func (a *App) touchAutoLockedReloadStamp() {
+	_ = os.MkdirAll("/tmp", 0o755)
+	_ = fsutil.AtomicWriteFile("/tmp/z2r-auto-locked.reload",
+		[]byte(fmt.Sprintf("%d\n", time.Now().UnixNano())), 0o644)
 }
 
 // EnsureGooglevideoMidstream — sync hosts + ipv4 для WSSIZE mark/ipset + custom.d hook.

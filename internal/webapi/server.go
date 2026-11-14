@@ -418,6 +418,8 @@ func (s *Server) zapretRunning(ctx context.Context) bool {
 
 // restartIfRunning перезапускает zapret2, если он запущен; restarted — рестарт выполнен.
 // Использует transactional restart (Apply-gate + snapshot/rollback).
+// Если рестарт нельзя (supersweep) — всё равно ApplyZapretRuntime, чтобы nfqws2.args
+// совпадал с уже записанным config (иначе UI «ok» при рассинхроне).
 func (s *Server) restartIfRunning(ctx context.Context) bool {
 	if s.svc == nil || !s.zapretRunning(ctx) {
 		return false
@@ -425,6 +427,13 @@ func (s *Server) restartIfRunning(ctx context.Context) bool {
 	s.runtimeMu.Lock()
 	defer s.runtimeMu.Unlock()
 	if s.sweepRunningLocked() {
+		if s.app != nil {
+			if _, err := s.app.ApplyZapretRuntime(); err != nil {
+				s.app.WriteServiceWarnings([]string{"apply (supersweep): " + err.Error()})
+			} else {
+				s.app.WriteServiceWarnings([]string{"рестарт отложен: идёт supersweep (config/args уже применены)"})
+			}
+		}
 		return false
 	}
 	if s.app != nil {

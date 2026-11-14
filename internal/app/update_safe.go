@@ -117,8 +117,9 @@ func (a *App) VerifyAfterUpdate() error {
 	_, _ = deploy.ReadVersion(a.Paths) // version.env опционален
 
 	if len(soft) > 0 {
-		detail := "ok; soft: " + strings.Join(soft, "; ")
-		a.WritePostUpdateVerify(true, detail)
+		detail := "warn: " + strings.Join(soft, "; ")
+		// Не ok — UI не должен показывать зелёный успех; rollback не делаем.
+		a.WritePostUpdateVerifyStatus("warn", detail)
 		a.WriteServiceWarnings(soft)
 		return nil
 	}

@@ -101,7 +101,7 @@ func TestVerifyAfterUpdateRequiresArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, detail := a.PostUpdateVerifyStatus()
-	if st != "ok" || !strings.Contains(detail, "nfqws2.args") {
+	if st != "warn" || !strings.Contains(detail, "nfqws2.args") {
 		t.Fatalf("status=%q detail=%q", st, detail)
 	}
 	_ = os.WriteFile(filepath.Join(p.ZapretRoot, "nfqws2.args"), []byte("--qnum=200\n--new\n"), 0o644)

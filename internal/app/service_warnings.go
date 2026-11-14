@@ -74,18 +74,27 @@ func (a *App) ClearBlockFullRestore() {
 	_ = os.Remove(filepath.Join(a.Paths.StateDir, blockFullRestoreFile))
 }
 
-// WritePostUpdateVerify сохраняет итог post-update проверки.
+// WritePostUpdateVerify сохраняет итог post-update проверки (ok|fail).
 func (a *App) WritePostUpdateVerify(ok bool, detail string) {
-	_ = os.MkdirAll(a.Paths.StateDir, 0o755)
 	status := "ok"
 	if !ok {
+		status = "fail"
+	}
+	a.WritePostUpdateVerifyStatus(status, detail)
+}
+
+// WritePostUpdateVerifyStatus пишет произвольный статус (ok|fail|warn).
+func (a *App) WritePostUpdateVerifyStatus(status, detail string) {
+	_ = os.MkdirAll(a.Paths.StateDir, 0o755)
+	status = strings.TrimSpace(status)
+	if status == "" {
 		status = "fail"
 	}
 	_ = fsutil.AtomicWriteFile(filepath.Join(a.Paths.StateDir, postUpdateVerifyFile),
 		[]byte(status+"\n"+strings.TrimSpace(detail)+"\n"), 0o644)
 }
 
-// PostUpdateVerifyStatus — "ok"|"fail"|"" .
+// PostUpdateVerifyStatus — "ok"|"fail"|"warn"|"" .
 func (a *App) PostUpdateVerifyStatus() (status, detail string) {
 	b, err := os.ReadFile(filepath.Join(a.Paths.StateDir, postUpdateVerifyFile))
 	if err != nil {
