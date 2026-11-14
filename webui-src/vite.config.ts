@@ -10,7 +10,8 @@ export default defineConfig({
     proxy: {
       '/api': 'http://127.0.0.1:8099',
       '/cgi-bin': 'http://127.0.0.1:8099',
-      '/favicon.svg': 'http://127.0.0.1:8099',
+      '/favicon.png': 'http://127.0.0.1:8099',
+      '/icon.png': 'http://127.0.0.1:8099',
     },
   },
   build: {

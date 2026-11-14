@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/banner.png" alt="ZatorGO" width="100%">
+</p>
+
 # ZatorGO
 
 Управляющий слой для **zapret2** на Go: установка, стратегии обхода DPI, списки доменов, firewall-хуки и Web UI.

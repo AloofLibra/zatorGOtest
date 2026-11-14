@@ -91,6 +91,7 @@ onMounted(() => { void bootstrap() })
 <template>
   <div v-if="needLogin" class="login-screen">
     <form class="login-card" @submit.prevent="submitLogin">
+      <img class="login-logo" :src="'./icon.png'" width="72" height="72" alt="ZatorGO">
       <h1>Zator<span>GO</span></h1>
       <p>Введите пароль панели управления</p>
       <p v-if="loginError" class="login-err">{{ loginError }}</p>
@@ -104,7 +105,10 @@ onMounted(() => { void bootstrap() })
   <div v-else class="shell">
     <aside class="rail">
       <div class="brand">
-        <div class="brand-mark">Zator<span>GO</span></div>
+        <div class="brand-row">
+          <img class="brand-logo" :src="'./icon.png'" width="40" height="40" alt="">
+          <div class="brand-mark">Zator<span>GO</span></div>
+        </div>
         <div class="brand-sub">Панель управления zapret2</div>
       </div>
       <nav class="nav" aria-label="Разделы">

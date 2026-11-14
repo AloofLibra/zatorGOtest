@@ -17,9 +17,13 @@ html = html.replace(/<link[^>]*rel="stylesheet"[^>]*href="\.?\/?styles\.css[^"]*
 html = html.replace(/<link[^>]*href="\.?\/?styles\.css[^"]*"[^>]*rel="stylesheet"[^>]*>\s*/gi, '')
 html = html.replace('</head>', `  <link rel="stylesheet" href="styles.css?v=${digest('styles.css')}">\n</head>`)
 html = html.replace('</body>', `  <script src="app.js?v=${digest('app.js')}"></script>\n</body>`)
-html = html.replace(/(<link[^>]*href=")favicon\.svg([^"]*")/,
-  `$1favicon.svg?v=${digest('favicon.svg')}$2`)
+html = html.replace(/(<link[^>]*href=")favicon\.png([^"]*")/,
+  `$1favicon.png?v=${digest('favicon.png')}$2`)
+html = html.replace(/(<link[^>]*href=")icon\.png([^"]*")/,
+  `$1icon.png?v=${digest('icon.png')}$2`)
 
 writeFileSync(path.join(webuiDir, 'index.html'), html)
 console.log(`app.js?v=${digest('app.js')}`)
 console.log(`styles.css?v=${digest('styles.css')}`)
+console.log(`favicon.png?v=${digest('favicon.png')}`)
+console.log(`icon.png?v=${digest('icon.png')}`)
