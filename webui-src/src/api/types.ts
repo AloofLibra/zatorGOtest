@@ -250,6 +250,20 @@ export interface GooglevideoAutoLock {
   strategy: number
   scope?: string
   askey?: string
+  /** seed = фоновый TLS-пробой; learned = живой circular_quality */
+  source?: 'seed' | 'learned' | string
+}
+
+export interface GooglevideoSeedStatus {
+  state?: string
+  host_key?: string
+  strategy?: number
+  last_host?: string
+  last_strategy?: number
+  last_result?: string
+  last_error?: string
+  updated_at?: number
+  pending?: number
 }
 
 export interface DomainsListPayload {
@@ -261,6 +275,7 @@ export interface DomainsListPayload {
   collection?: string
   /** Per-SNI (sn-*) auto-locks for profile 2 */
   auto_locks?: GooglevideoAutoLock[]
+  seed?: GooglevideoSeedStatus
 }
 
 export interface ApplyResult {

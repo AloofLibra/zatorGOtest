@@ -72,6 +72,21 @@ NFQWS2_UDP_PKT_OUT=5
 	}
 }
 
+func TestEnsureProfile2SoftSuccessBumpsLegacyBytes(t *testing.T) {
+	c := Parse(`NFQWS2_OPT="
+--lua-desync=circular_quality:key=2:soft_success_in=0:soft_success_bytes=32768:exclude_substrings=x
+"
+`)
+	ok, err := c.EnsureProfile2SoftSuccess()
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	opt, _ := c.NFQWS2Opt()
+	if !strings.Contains(opt, "soft_success_bytes=65536") || strings.Contains(opt, "soft_success_bytes=32768") {
+		t.Fatalf("opt=%s", opt)
+	}
+}
+
 func TestEnsureProfile2SoftSuccess(t *testing.T) {
 	c := Parse(`NFQWS2_OPT="
 --in-range=-s32768 --lua-desync=circular_quality:key=2:fails=2:hostkey=slm_desync_googlevideo_hostkey:default_strategy=41:exclude_substrings=/opt/zator/lists/netrogat_substrings.txt:payload=tls_client_hello
@@ -82,7 +97,7 @@ func TestEnsureProfile2SoftSuccess(t *testing.T) {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	opt, _ := c.NFQWS2Opt()
-	if !strings.Contains(opt, "soft_success_in=0") || !strings.Contains(opt, "soft_success_bytes=32768") {
+	if !strings.Contains(opt, "soft_success_in=0") || !strings.Contains(opt, "soft_success_bytes=65536") {
 		t.Fatalf("opt=%s", opt)
 	}
 	ok, err = c.EnsureProfile2SoftSuccess()
@@ -107,7 +122,7 @@ func TestEnsureProfile2SoftSuccessOverridesPacketThreshold(t *testing.T) {
 	if strings.Contains(opt, "soft_success_in=3") {
 		t.Fatalf("still soft_success_in=3: %s", opt)
 	}
-	if !strings.Contains(opt, "soft_success_in=0:soft_success_bytes=32768") {
+	if !strings.Contains(opt, "soft_success_in=0:soft_success_bytes=65536") {
 		t.Fatalf("opt=%s", opt)
 	}
 }
@@ -122,7 +137,7 @@ func TestEnsureProfile2SoftSuccessLockedLine(t *testing.T) {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	opt, _ := c.NFQWS2Opt()
-	if !strings.Contains(opt, "circular_locked:key=2:soft_success_in=0:soft_success_bytes=32768:exclude_substrings=") {
+	if !strings.Contains(opt, "circular_locked:key=2:soft_success_in=0:soft_success_bytes=65536:exclude_substrings=") {
 		t.Fatalf("opt=%s", opt)
 	}
 	ok, err = c.EnsureProfile2SoftSuccess()

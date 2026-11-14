@@ -920,6 +920,70 @@ local function z2r_fake_blob_arg(func)
   return nil
 end
 
+-- Whitelist stock TLS blob имён для автосмены профиля 2 после полного круга стратегий.
+local GV_BLOB_FALLBACK = { "maxru", "google_www", "tls4", "tls5", "custom" }
+local GV_BLOB_LAST_CYCLE = 0
+local GV_BLOB_CYCLE_COOLDOWN = 120
+
+-- Сменить TLS blob профиля (blob_override.tsv) на следующий из whitelist.
+-- Throttle: не чаще раза в GV_BLOB_CYCLE_COOLDOWN секунд на весь процесс.
+-- @return string|nil новое имя блоба
+function gv_cycle_profile_blob(profile_key)
+  profile_key = tostring(profile_key or "2")
+  local now = os.time()
+  if GV_BLOB_LAST_CYCLE > 0 and now - GV_BLOB_LAST_CYCLE < GV_BLOB_CYCLE_COOLDOWN then
+    return nil
+  end
+  local current = BLOB_OVERRIDES[profile_key] or "maxru"
+  local idx = 1
+  for i, name in ipairs(GV_BLOB_FALLBACK) do
+    if name == current then
+      idx = i
+      break
+    end
+  end
+  local next_name = GV_BLOB_FALLBACK[(idx % #GV_BLOB_FALLBACK) + 1]
+  if not next_name or next_name == current then
+    return nil
+  end
+  -- Переписать файл целиком, сохранив остальные профили.
+  local lines = {}
+  local found = false
+  local f = io.open(BLOB_OVERRIDE_PATH, "r")
+  if f then
+    for line in f:lines() do
+      local p, n = blob_override_parse_line(line)
+      if p == profile_key then
+        lines[#lines + 1] = profile_key .. "\t" .. next_name
+        found = true
+      elseif p then
+        lines[#lines + 1] = p .. "\t" .. n
+      end
+    end
+    f:close()
+  end
+  if not found then
+    lines[#lines + 1] = profile_key .. "\t" .. next_name
+  end
+  local tmp = BLOB_OVERRIDE_PATH .. ".tmp"
+  local out = io.open(tmp, "w")
+  if not out then return nil end
+  for _, line in ipairs(lines) do
+    out:write(line, "\n")
+  end
+  out:close()
+  if not os.rename(tmp, BLOB_OVERRIDE_PATH) then
+    os.remove(tmp)
+    return nil
+  end
+  BLOB_OVERRIDES[profile_key] = next_name
+  GV_BLOB_LAST_CYCLE = now
+  if type(DLOG) == "function" then
+    DLOG("gv_cycle_profile_blob: profile=" .. profile_key .. " -> " .. next_name)
+  end
+  return next_name
+end
+
 -- Подмена per-profile TLS блоба на исполнении стратегии (blob_override.tsv),
 -- режим фейков профиля (mode_override.tsv) и per-profile SNI клон-стратегий
 -- (sni_override.tsv). Порядок: режим (clone строит клон CH юзера) -> блоб-

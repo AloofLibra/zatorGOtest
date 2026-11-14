@@ -263,11 +263,18 @@ func (s *Server) googlevideoList(d listDef) (map[string]any, error) {
 		items = append(items, item)
 	}
 	autoLocks := s.googlevideoAutoLocks()
+	seed := s.app.GooglevideoSeedStatus()
 	return map[string]any{
 		"list": d.name, "title": d.title, "description": d.description, "kind": d.kind,
 		"is_custom_rkn": false, "max_strategy": 0, "items": items,
 		"collection": s.app.GooglevideoCollectionStatus(),
 		"auto_locks": autoLocks,
+		"seed": map[string]any{
+			"state": seed.State, "host_key": seed.HostKey, "strategy": seed.Strategy,
+			"last_host": seed.LastHost, "last_strategy": seed.LastStrat,
+			"last_result": seed.LastResult, "last_error": seed.LastError,
+			"updated_at": seed.UpdatedAt, "pending": seed.Pending,
+		},
 	}, nil
 }
 
@@ -278,8 +285,13 @@ func (s *Server) googlevideoAutoLocks() []map[string]any {
 	merged := googlevideo.FilterAskey(googlevideo.MergeAutoLocked(live, backup), "2")
 	out := make([]map[string]any, 0, len(merged))
 	for _, l := range merged {
+		src := l.Source
+		if src == "" {
+			src = googlevideo.SourceLearned
+		}
 		out = append(out, map[string]any{
 			"host": l.Host, "strategy": l.Strategy, "scope": l.Scope, "askey": l.Askey,
+			"source": src,
 		})
 	}
 	return out

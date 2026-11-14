@@ -794,7 +794,7 @@ local function check_tcp_success(desync, crec)
 
     -- Soft success: prefer bytes threshold, fallback to packet count.
     -- Profile 2 (googlevideo): never treat a few tiny packets as success —
-    -- default soft_success_in=0 and soft_success_bytes=32768 unless args override.
+    -- default soft_success_in=0 and soft_success_bytes=65536 unless args override.
     if payload and #payload > 0 then
         local askey = tostring(desync.arg.key or "")
         local in_threshold = tonumber(desync.arg.soft_success_in)
@@ -808,7 +808,7 @@ local function check_tcp_success(desync, crec)
         local bytes_threshold = tonumber(desync.arg.soft_success_bytes)
         if bytes_threshold == nil then
             if askey == "2" then
-                bytes_threshold = 32768
+                bytes_threshold = 65536
             else
                 bytes_threshold = 65536
             end
@@ -1565,8 +1565,20 @@ function circular_quality(ctx, desync)
     local skip_pass = false
 
     if not hrec.nstrategy then
-        -- Seed: arg.default_strategy, else profile lock from locked.tsv (soft start, not hard pin).
-        local seed = tonumber(desync.arg and desync.arg.default_strategy)
+        -- Seed priority for profile 2: transfer (most common sn lock) → default_strategy
+        -- → profile lock from locked.tsv → 1.
+        local seed = nil
+        local askey_seed = tostring(desync.arg and desync.arg.key or "")
+        if askey_seed == "2" and type(slm_transfer_seed) == "function" then
+            local transfer, transfer_n = slm_transfer_seed(askey_seed, scope)
+            if transfer and transfer_n and transfer_n >= 1 then
+                seed = transfer
+                DLOG("circular_quality: transfer seed strategy " .. seed .. " (n=" .. transfer_n .. ")")
+            end
+        end
+        if not seed or seed < 1 then
+            seed = tonumber(desync.arg and desync.arg.default_strategy)
+        end
         if (not seed or seed < 1) and type(locked_strategy_for_profile) == "function" then
             local proto = type(desync_proto) == "function" and desync_proto(desync) or "tls"
             seed = locked_strategy_for_profile(tostring(desync.arg and desync.arg.key or ""), proto, scope)
@@ -1578,6 +1590,7 @@ function circular_quality(ctx, desync)
             DLOG("circular_quality: start from strategy 1")
             hrec.nstrategy = 1
         end
+        hrec.gv_seed_strategy = hrec.nstrategy
     end
 
     local validator_enabled = validator_path(desync.arg.validator) ~= nil
@@ -1636,13 +1649,17 @@ function circular_quality(ctx, desync)
             local askey_locked = tostring(desync.arg.key or "")
             -- Real media progress only: tiny ~300B TLS replies are NOT mid-stream —
             -- those need strategy rotate, not WSSIZE keep-lock.
-            local gv_min_bytes = tonumber(desync.arg.soft_success_bytes) or 32768
+            local gv_min_bytes = tonumber(desync.arg.soft_success_bytes) or 65536
             local gv_real_progress = crec.validated_success
                 or crec.provisional_success
                 or ((crec.tcp_soft_in_bytes or 0) >= gv_min_bytes)
             local gv_stall_locked = askey_locked == "2" and crec.stall_failure
                 and not crec.tls_handshake_failure
                 and gv_real_progress
+            -- Handshake / tiny fail на профиле 2: снимаем лок быстрее (1 fail).
+            if askey_locked == "2" and (crec.tls_handshake_failure or (is_failure and not gv_real_progress)) then
+                unlock_fails = 1
+            end
 
             if is_failure and gv_stall_locked and not crec.locked_failure_recorded then
                 crec.locked_failure_recorded = true
@@ -1692,7 +1709,7 @@ function circular_quality(ctx, desync)
             -- Profile 2 (googlevideo): stall AFTER real media bytes is mid-stream DPI —
             -- keep TLS strat and prefer WSSIZE. Tiny ~300B replies are bad ClientHello:
             -- rotate/learn as usual.
-            local gv_min_bytes = tonumber(desync.arg.soft_success_bytes) or 32768
+            local gv_min_bytes = tonumber(desync.arg.soft_success_bytes) or 65536
             local gv_real_progress = crec.validated_success
                 or crec.provisional_success
                 or ((crec.tcp_soft_in_bytes or 0) >= gv_min_bytes)
@@ -1754,6 +1771,17 @@ function circular_quality(ctx, desync)
                         end
                     until hrec.nstrategy == start_strat  -- Prevent infinite loop
                     DLOG("circular_quality: rotate to strategy " .. hrec.nstrategy .. " [" .. slm_get_stats(desync.arg.key, hostkey, scope) .. "]")
+                    -- Полный круг без лока на профиле 2 → смена TLS blob профиля (throttle).
+                    if askey_str == "2" and hrec.nstrategy == (hrec.gv_seed_strategy or start_strat) then
+                        hrec.gv_full_cycles = (hrec.gv_full_cycles or 0) + 1
+                        if hrec.gv_full_cycles == 1 and type(gv_cycle_profile_blob) == "function" then
+                            local next_blob = gv_cycle_profile_blob("2")
+                            if next_blob then
+                                DLOG("circular_quality: GV blob fallback -> " .. next_blob ..
+                                     " host=" .. (hostkey or "?"))
+                            end
+                        end
+                    end
                 end
             end
             end -- not gv_stall
@@ -1766,7 +1794,7 @@ function circular_quality(ctx, desync)
             local askey_ok = tostring(desync.arg.key or "")
             local gv_real_success = true
             if askey_ok == "2" then
-                local min_bytes = tonumber(desync.arg.soft_success_bytes) or 32768
+                local min_bytes = tonumber(desync.arg.soft_success_bytes) or 65536
                 local got = crec.tcp_soft_in_bytes or 0
                 gv_real_success = crec.validated_success
                     or (got >= min_bytes)
@@ -1783,7 +1811,7 @@ function circular_quality(ctx, desync)
 
             -- Soft TCP progress contributes one learning result, but only a
             -- validated (or non-provisional) success can reset and auto-lock.
-            if gv_real_success and (not crec.provisional_success or crec.validated_success or (crec.tcp_soft_in_bytes or 0) >= (tonumber(desync.arg.soft_success_bytes) or 32768)) and not crec.quality_success_finalized then
+            if gv_real_success and (not crec.provisional_success or crec.validated_success or (crec.tcp_soft_in_bytes or 0) >= (tonumber(desync.arg.soft_success_bytes) or 65536)) and not crec.quality_success_finalized then
                 crec.quality_success_finalized = true
                 automate_failure_counter_reset(hrec)
                 if not validator_enabled then

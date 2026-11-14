@@ -48,6 +48,7 @@ func (a *App) GooglevideoCollector() *googlevideo.Collector {
 }
 
 // SyncGooglevideoHosts сливает SNI-лог и local.tsv в googlevideo-hosts.txt.
+// При появлении новых хостов подтягивает ipv4 для WSSIZE.
 func (a *App) SyncGooglevideoHosts() (added int, err error) {
 	h := a.GooglevideoHosts()
 	n1, err1 := h.MergeSNILog(a.Paths.GooglevideoSNILog())
@@ -58,7 +59,11 @@ func (a *App) SyncGooglevideoHosts() (added int, err error) {
 	if err2 != nil {
 		return n1, err2
 	}
-	return n1 + n2, nil
+	added = n1 + n2
+	if added > 0 {
+		_, _ = a.RefreshGooglevideoIPv4(context.Background(), false)
+	}
+	return added, nil
 }
 
 // GooglevideoCollectionStatus — enabled|disabled для settings.
@@ -79,9 +84,12 @@ func (a *App) GooglevideoCollectionStatus() string {
 }
 
 // StartGooglevideoCollection поднимает DNS-listener (если доступен) и
-// один раз сливает уже накопленные host в файл.
+// один раз сливает уже накопленные host в файл. Также стартует seed-воркер
+// и mid-stream sync (ipv4/WSSIZE).
 func (a *App) StartGooglevideoCollection(ctx context.Context) error {
 	_, _ = a.SyncGooglevideoHosts()
+	a.EnsureGooglevideoMidstream(ctx)
+	a.StartGooglevideoSeeder(ctx)
 
 	gvMu.Lock()
 	defer gvMu.Unlock()
@@ -114,6 +122,7 @@ func (a *App) StartGooglevideoCollection(ctx context.Context) error {
 
 // StopGooglevideoCollection останавливает listener (для тестов/shutdown).
 func (a *App) StopGooglevideoCollection() {
+	a.StopGooglevideoSeeder()
 	gvMu.Lock()
 	defer gvMu.Unlock()
 	if gvListener != nil {

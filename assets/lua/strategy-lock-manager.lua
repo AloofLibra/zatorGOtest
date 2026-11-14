@@ -795,6 +795,34 @@ function slm_should_lock(askey, hostkey, desync_arg, scope)
     return false, nil
 end
 
+--- Наиболее частая auto-locked стратегия для askey (transfer learning между sn-*).
+--- @param askey string Например "2" для googlevideo
+--- @param scope string|nil Скоуп (default)
+--- @return number|nil strategy_id
+--- @return number count Сколько hostkey держат эту стратегию
+function slm_transfer_seed(askey, scope)
+    askey = askey or "default"
+    scope = slm_scope_key(scope)
+    local hosts = SLM_AUTO_LOCKED[askey] and SLM_AUTO_LOCKED[askey][scope]
+    if type(hosts) ~= "table" then
+        return nil, 0
+    end
+    local counts = {}
+    local best_id, best_n = nil, 0
+    for _, strat in pairs(hosts) do
+        if type(strat) == "number" and strat >= 1 then
+            counts[strat] = (counts[strat] or 0) + 1
+            local n = counts[strat]
+            if n > best_n or (n == best_n and best_id and strat < best_id) then
+                best_id, best_n = strat, n
+            elseif best_id == nil then
+                best_id, best_n = strat, n
+            end
+        end
+    end
+    return best_id, best_n
+end
+
 --- Получить залоченную стратегию для хоста
 --- @param askey string Ключ autostate (tls, http, quic, etc.) - optional, defaults to "default"
 --- @param hostkey string Имя хоста (будет нормализовано)
@@ -1009,9 +1037,21 @@ local function slm_load_auto_locked()
     if not f then return end
     for line in f:lines() do
         if line and line ~= "" then
-            local askey, scope, host, strat = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
+            local askey, scope, host, strat
+            -- askey scope host strat source
+            askey, scope, host, strat = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)\t[^\t]+$")
+            -- askey host strat source
             if not askey then
-                askey, host, strat = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)$")
+                askey, host, strat = line:match("^([^\t]+)\t([^\t]+)\t(%d+)\t[^\t]+$")
+                scope = "default"
+            end
+            -- askey scope host strat
+            if not askey then
+                askey, scope, host, strat = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t(%d+)$")
+            end
+            -- askey host strat
+            if not askey then
+                askey, host, strat = line:match("^([^\t]+)\t([^\t]+)\t(%d+)$")
                 scope = "default"
             end
             if askey and scope and host and strat then

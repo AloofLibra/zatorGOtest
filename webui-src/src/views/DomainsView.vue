@@ -237,10 +237,20 @@ async function checkDomain(domain: string) {
         <span class="chip">{{ list?.items?.length ?? 0 }}</span>
       </div>
       <p v-if="isGooglevideo" class="panel-d">
-        Автосбор media CDN: <code>^rr\d+---sn-[a-z0-9-]+\.googlevideo\.com$</code>
+        Автопробой TLS/CDN + обучение на трафике:
+        <code>^rr\d+---sn-[a-z0-9-]+\.googlevideo\.com$</code>
         (пример <code>rr18---sn-pmcg-bg0s.googlevideo.com</code>).
         Сбор: {{ list?.collection || '—' }}.
-        Профиль 2 учит стратегию на каждый <code>sn-*</code> (seed из лока профиля).
+        Seed:
+        <template v-if="list?.seed?.state === 'probing'">
+          probing {{ list.seed.host_key }} → #{{ list.seed.strategy }}
+        </template>
+        <template v-else-if="list?.seed?.last_result">
+          {{ list.seed.state || 'idle' }}
+          · last {{ list.seed.last_host }} #{{ list.seed.last_strategy }} = {{ list.seed.last_result }}
+          <span v-if="list.seed.pending"> · pending {{ list.seed.pending }}</span>
+        </template>
+        <template v-else>{{ list?.seed?.state || '—' }}</template>.
       </p>
       <p v-else class="panel-d">{{ list?.description || meta.addLabel }}</p>
       <p v-if="autoLocked" class="panel-d" style="color:var(--warn)">
@@ -270,12 +280,14 @@ async function checkDomain(domain: string) {
     </div>
 
     <div v-if="isGooglevideo && (list?.auto_locks || []).length" class="domain-list" style="margin-top:0.85rem">
-      <p class="panel-d" style="margin-bottom:0.5rem">Выученные POP (sn → strat)</p>
+      <p class="panel-d" style="margin-bottom:0.5rem">POP (sn → strat)</p>
       <div v-for="lock in (list?.auto_locks || [])" :key="lock.host + ':' + lock.strategy" class="domain-item">
         <div>
           <code>{{ lock.host }}</code>
           <div class="panel-d" style="margin:0.35rem 0 0">
-            стратегия {{ lock.strategy }}<span v-if="lock.scope && lock.scope !== 'default'"> · {{ lock.scope }}</span>
+            стратегия {{ lock.strategy }}
+            · {{ lock.source === 'seed' ? 'seed' : 'learned' }}
+            <span v-if="lock.scope && lock.scope !== 'default'"> · {{ lock.scope }}</span>
           </div>
         </div>
       </div>
