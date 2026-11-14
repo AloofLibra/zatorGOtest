@@ -172,12 +172,18 @@ func (d Detector) detectHardware(kind Kind, osRelease map[string]string, cpuinfo
 	if kind == KindVPS {
 		return HardwareNone
 	}
+	osrelease := strings.ToLower(d.read("proc/sys/kernel/osrelease"))
+	procVer := strings.ToLower(d.read("proc/version"))
 	joined := strings.ToLower(osRelease["ID"] + " " + osRelease["NAME"] + " " +
-		osRelease["PRETTY_NAME"] + " " + osRelease["HOME_URL"] + " " + cpuinfo)
+		osRelease["PRETTY_NAME"] + " " + osRelease["HOME_URL"] + " " + cpuinfo + " " +
+		osrelease + " " + procVer)
 	switch {
 	case strings.Contains(joined, "netcraze"):
 		return HardwareNetcraze
-	case strings.Contains(joined, "keenetic") || d.exists("etc/ndm") || d.exists("tmp/ndm"):
+	// Keenetic Entware: NDM живёт в /opt/etc/ndm (не /etc/ndm), ядро вида 4.9-ndm-*.
+	case strings.Contains(joined, "keenetic") ||
+		d.exists("etc/ndm") || d.exists("tmp/ndm") || d.exists("opt/etc/ndm") ||
+		strings.Contains(osrelease, "-ndm"):
 		return HardwareKeenetic
 	case strings.Contains(joined, "merlin") || strings.Contains(joined, "asuswrt") || d.exists("jffs"):
 		return HardwareMerlin

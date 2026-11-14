@@ -192,6 +192,8 @@ export const domains = {
   import: (list: string, domain: string, scope = 'default') =>
     domainsPost({ list, action: 'import', domain, scope }),
   clear: (list: string, scope = 'default') => domainsPost({ list, action: 'clear', scope }),
+  refresh: (list: string, scope = 'default') =>
+    domainsPost({ list, action: 'refresh', scope }),
   check: (domain: string) =>
     api<ApplyResult>('/api/domains',
       formBody({ list: 'custom_rkn', action: 'check', domain })),

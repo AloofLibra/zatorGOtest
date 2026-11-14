@@ -63,6 +63,19 @@ func TestDetectEntwareKeenetic(t *testing.T) {
 	}
 }
 
+func TestDetectEntwareKeeneticOptNDM(t *testing.T) {
+	// Реальный Keenetic Entware: /opt/etc/ndm есть, /etc/ndm нет, os-release — Entware.
+	root := t.TempDir()
+	writeFile(t, root, "opt/etc/entware_release", "ID=entware\nNAME=Entware\n")
+	writeFile(t, root, "opt/etc/ndm/netfilter.d/.keep", "")
+	writeFile(t, root, "proc/sys/kernel/osrelease", "4.9-ndm-5\n")
+	writeFile(t, root, "proc/version", "Linux version 4.9-ndm-5 (developers@keenetic.com)\n")
+	p := Detector{Root: root, GOARCH: "arm64"}.Detect()
+	if p.Kind != KindEntware || p.Hardware != HardwareKeenetic {
+		t.Fatalf("ожидался Entware/keenetic: %+v", p)
+	}
+}
+
 func TestDetectEntwareMerlin(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "opt/etc/entware_release", "")

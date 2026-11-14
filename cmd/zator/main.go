@@ -185,6 +185,7 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		res, err := a.InstallZapret(context.Background(), app.InstallZapretOptions{
 			SkipService: *skipService,
 			Version:     zver,
+			Log:         stdout,
 		})
 		if err != nil {
 			if soft, ok := err.(*app.SoftServiceError); ok {
@@ -334,6 +335,11 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if err := a.StartGooglevideoCollection(ctx); err != nil {
+		fmt.Fprintf(stderr, "предупреждение googlevideo-сбор: %v\n", err)
+	}
+	defer a.StopGooglevideoCollection()
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()

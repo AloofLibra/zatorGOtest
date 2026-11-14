@@ -215,6 +215,9 @@ export interface BackupsPayload {
 export interface DomainItem {
   value: string
   strategy?: number
+  ip?: string
+  observed_at?: number
+  source?: string
 }
 
 export interface DomainsListPayload {
@@ -223,6 +226,7 @@ export interface DomainsListPayload {
   items?: DomainItem[]
   is_custom_rkn?: boolean
   max_strategy?: number
+  collection?: string
 }
 
 export interface ApplyResult {

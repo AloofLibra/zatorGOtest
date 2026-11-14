@@ -22,6 +22,58 @@ func domainItems(t *testing.T, e *env, list string) []map[string]any {
 	return items
 }
 
+func TestDomainsGooglevideo(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	resp, out := e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "clear")
+	wantOK(t, resp, out)
+
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "add",
+		"domain", "https://rr1---sn-2oi5h5-54.googlevideo.com/video")
+	wantOK(t, resp, out)
+	if out["duplicate"] == true {
+		t.Fatal("first add should not be duplicate")
+	}
+
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "add",
+		"domain", "rr1---sn-2oi5h5-54.googlevideo.com")
+	wantOK(t, resp, out)
+	if out["duplicate"] != true {
+		t.Fatal("second add should be duplicate")
+	}
+
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "add",
+		"domain", "example.com")
+	wantError(t, resp, out, 400, "Нужен поддомен *.googlevideo.com: example.com")
+
+	items := domainItems(t, e, "googlevideo")
+	if len(items) != 1 || items[0]["value"] != "rr1---sn-2oi5h5-54.googlevideo.com" {
+		t.Fatalf("items=%v", items)
+	}
+
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "import",
+		"domain", "rr2---sn-abc.googlevideo.com\nbad.com\nrr1---sn-2oi5h5-54.googlevideo.com")
+	wantOK(t, resp, out)
+	if out["added"] != float64(1) {
+		t.Fatalf("added=%v", out["added"])
+	}
+
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "refresh")
+	wantOK(t, resp, out)
+
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "remove",
+		"domain", "rr1---sn-2oi5h5-54.googlevideo.com")
+	wantOK(t, resp, out)
+	if len(domainItems(t, e, "googlevideo")) != 1 {
+		t.Fatal("expected one host left")
+	}
+
+	resp, out = e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "clear")
+	wantOK(t, resp, out)
+	if len(domainItems(t, e, "googlevideo")) != 0 {
+		t.Fatal("expected empty")
+	}
+}
+
 func TestDomainsNetrogat(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	resp, out := e.post("/cgi-bin/domains.cgi", "list", "netrogat", "action", "clear")

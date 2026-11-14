@@ -2,15 +2,21 @@ package app
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/netiface"
+	"github.com/AloofLibra/zator/internal/platform"
 )
 
 // ensureNetworkIfaces проставляет IFACE_LAN/WAN по default-route и bridge,
 // если в конфиге они пусты или остались шаблонными eth0/eth1.
+// На OpenWrt переменные IFACE_* не используются firewall-ом — пропуск.
 func (a *App) ensureNetworkIfaces(cfg *config.Config) (changed bool, err error) {
 	if cfg == nil || !cfg.NeedsIfaceAutodetect() {
+		return false, nil
+	}
+	if a.Platform.Kind == platform.KindOpenWRT {
 		return false, nil
 	}
 	wan, lan, _, err := (netiface.Detector{}).DetectWANLAN()
@@ -24,4 +30,8 @@ func (a *App) ensureNetworkIfaces(cfg *config.Config) (changed bool, err error) 
 		return false, err
 	}
 	return true, nil
+}
+
+func isRouterHost() bool {
+	return runtime.GOOS != "windows" && runtime.GOOS != "darwin"
 }

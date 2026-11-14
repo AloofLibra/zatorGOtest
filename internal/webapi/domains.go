@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/AloofLibra/zator/internal/fsutil"
+	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
 )
@@ -53,6 +54,15 @@ var domainLists = map[string]listDef{
 		description: "Подстроки имени, исключаемые из обработки (Lua exclude_substrings).",
 		file:        func(s *Server) string { return filepath.Join(s.paths.ListsDir, "netrogat_substrings.txt") },
 	},
+	"googlevideo": {
+		name: "googlevideo", title: "Googlevideo (CDN-узлы)", kind: listKindDomain,
+		description: "Собранные rr*---sn-*.googlevideo.com (SNI + DNS). Файл lists/googlevideo-hosts.txt.",
+		file:        func(s *Server) string { return s.paths.GooglevideoHostsFile() },
+	},
+}
+
+func googlevideoNormalize(v string) (string, bool) {
+	return googlevideo.ParseHostInput(v)
 }
 
 // normalizeDomain приводит ввод к имени хоста: убирает схему, путь, порт,
@@ -92,6 +102,13 @@ func (d listDef) normalize(v string) (string, error) {
 	}
 	if v == "" {
 		return "", errf(http.StatusBadRequest, "Не указан домен")
+	}
+	if d.name == "googlevideo" {
+		n, ok := googlevideoNormalize(v)
+		if !ok {
+			return "", errf(http.StatusBadRequest, "Нужен поддомен *.googlevideo.com: "+v)
+		}
+		return n, nil
 	}
 	n, ok := normalizeDomain(v)
 	if !ok {
@@ -185,6 +202,9 @@ func (s *Server) customMax() int {
 // --- GET ---
 
 func (s *Server) domainsList(d listDef, scope string) (map[string]any, error) {
+	if d.name == "googlevideo" {
+		return s.googlevideoList(d)
+	}
 	path := d.file(s)
 	lines, err := readListLines(path)
 	if err != nil {
@@ -212,6 +232,38 @@ func (s *Server) domainsList(d listDef, scope string) (map[string]any, error) {
 	return map[string]any{
 		"list": d.name, "title": d.title, "description": d.description, "kind": d.kind,
 		"is_custom_rkn": d.custom, "max_strategy": max, "items": items,
+	}, nil
+}
+
+func (s *Server) googlevideoList(d listDef) (map[string]any, error) {
+	_, _ = s.app.SyncGooglevideoHosts()
+	hosts, err := s.app.GooglevideoHosts().List()
+	if err != nil {
+		return nil, err
+	}
+	byHost := map[string]googlevideo.LocalRow{}
+	for _, r := range s.app.GooglevideoCollector().Local() {
+		prev, ok := byHost[r.Host]
+		if !ok || r.Observed >= prev.Observed {
+			byHost[r.Host] = r
+		}
+	}
+	items := make([]map[string]any, 0, len(hosts))
+	for _, h := range hosts {
+		item := map[string]any{"value": h, "source": "file"}
+		if r, ok := byHost[h]; ok {
+			item["ip"] = r.IP
+			if r.Observed > 0 {
+				item["observed_at"] = r.Observed
+			}
+			item["source"] = "dns"
+		}
+		items = append(items, item)
+	}
+	return map[string]any{
+		"list": d.name, "title": d.title, "description": d.description, "kind": d.kind,
+		"is_custom_rkn": false, "max_strategy": 0, "items": items,
+		"collection": s.app.GooglevideoCollectionStatus(),
 	}, nil
 }
 
@@ -269,6 +321,9 @@ func (s *Server) checkDomain(r *http.Request, domain string) netcheck.CheckRespo
 }
 
 func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope string) (map[string]any, error) {
+	if d.name == "googlevideo" {
+		return s.googlevideoAction(p)
+	}
 	path := d.file(s)
 	action := p.Get("action")
 	lines, err := readListLines(path)
@@ -478,6 +533,56 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		return map[string]any{"ok": true, "check": s.checkDomain(r, domain)}, nil
 	}
 	return nil, errf(http.StatusBadRequest, "Неизвестное действие: "+action)
+}
+
+func (s *Server) googlevideoAction(p params) (map[string]any, error) {
+	h := s.app.GooglevideoHosts()
+	switch p.Get("action") {
+	case "refresh":
+		n, err := s.app.SyncGooglevideoHosts()
+		if err != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось обновить список: "+err.Error())
+		}
+		return map[string]any{"ok": true, "added": n}, nil
+	case "add":
+		host, ok := googlevideoNormalize(p.Get("domain"))
+		if !ok {
+			return nil, errf(http.StatusBadRequest, "Нужен поддомен *.googlevideo.com: "+p.Get("domain"))
+		}
+		added, aerr := h.Add(host)
+		if aerr != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось записать: "+aerr.Error())
+		}
+		return map[string]any{"ok": true, "duplicate": !added}, nil
+	case "remove":
+		host, ok := googlevideoNormalize(p.Get("domain"))
+		if !ok {
+			return nil, errf(http.StatusBadRequest, "Нужен поддомен *.googlevideo.com: "+p.Get("domain"))
+		}
+		if _, err := h.Remove(host); err != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось удалить: "+err.Error())
+		}
+		return map[string]any{"ok": true}, nil
+	case "clear":
+		if err := h.Clear(); err != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось очистить: "+err.Error())
+		}
+		return map[string]any{"ok": true}, nil
+	case "import":
+		raw := p.Get("domain")
+		var lines []string
+		for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+			return r == '\n' || r == '\r' || r == ',' || r == ';'
+		}) {
+			lines = append(lines, strings.TrimSpace(part))
+		}
+		n, err := h.MergeFrom(lines)
+		if err != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось импортировать: "+err.Error())
+		}
+		return map[string]any{"ok": true, "added": n}, nil
+	}
+	return nil, errf(http.StatusBadRequest, "Неизвестное действие: "+p.Get("action"))
 }
 
 // renameLocks переносит фиксации домена (default и per-mark) на новое имя.

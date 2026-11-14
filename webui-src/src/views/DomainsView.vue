@@ -22,6 +22,7 @@ const labels: Record<DomainListName, string> = {
   custom_rkn: 'TCP Custom',
   substring: 'Подстроки RKN',
   netrogat_substring: 'Подстроки исключений',
+  googlevideo: 'Googlevideo',
 }
 
 const active = computed<DomainListName>(() => {
@@ -124,7 +125,12 @@ async function importList() {
 
 async function refreshLists() {
   try {
-    await withBusy('domains-refresh', refreshDomains)
+    await withBusy('domains-refresh', async () => {
+      if (active.value === 'googlevideo') {
+        await domains.refresh('googlevideo', scope.value)
+      }
+      await refreshDomains()
+    })
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
@@ -245,9 +251,17 @@ async function checkDomain(domain: string) {
     </div>
 
     <div class="domain-list">
+      <p v-if="active === 'googlevideo'" class="panel-d">
+        Сбор: {{ list?.collection || '—' }}. Файл: lists/googlevideo-hosts.txt (SNI + DNS).
+      </p>
+
       <div v-for="item in (list?.items || [])" :key="item.value" class="domain-item">
         <div>
           <code>{{ item.value }}</code>
+          <div v-if="active === 'googlevideo' && (item.ip || item.source)" class="panel-d" style="margin:0.35rem 0 0">
+            <span v-if="item.ip">{{ item.ip }}</span>
+            <span v-if="item.source"> · {{ item.source }}</span>
+          </div>
           <div v-if="active === 'custom_rkn'" class="row" style="margin-top:0.45rem">
             <input
               :value="strategyDraft[item.value] ?? (item.strategy != null ? String(item.strategy) : '')"

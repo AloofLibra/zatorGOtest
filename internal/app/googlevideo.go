@@ -1,0 +1,122 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/AloofLibra/zator/internal/googlevideo"
+)
+
+var (
+	gvMu       sync.Mutex
+	gvListener *googlevideo.Manager
+	gvCollect  *googlevideo.Collector
+)
+
+// GooglevideoHosts возвращает обёртку над lists/googlevideo-hosts.txt.
+func (a *App) GooglevideoHosts() *googlevideo.HostsFile {
+	return googlevideo.NewHostsFile(a.Paths.GooglevideoHostsFile())
+}
+
+func (a *App) newGooglevideoCollector() *googlevideo.Collector {
+	centralPath := filepath.Join(a.Paths.ListsDir, "googlevideo-ipv4.txt")
+	var central googlevideo.CentralChecker
+	cl := &googlevideo.CentralList{File: centralPath}
+	if _, err := cl.Load(); err == nil {
+		central = cl
+	}
+	_ = os.MkdirAll(a.Paths.GooglevideoStateDir(), 0o755)
+	return googlevideo.NewCollector(googlevideo.CollectorConfig{
+		Dir:       a.Paths.GooglevideoStateDir(),
+		HostsFile: a.Paths.GooglevideoHostsFile(),
+		Central:   central,
+	})
+}
+
+// GooglevideoCollector возвращает (и при необходимости создаёт) локальный коллектор.
+func (a *App) GooglevideoCollector() *googlevideo.Collector {
+	gvMu.Lock()
+	defer gvMu.Unlock()
+	if gvCollect == nil {
+		gvCollect = a.newGooglevideoCollector()
+	}
+	return gvCollect
+}
+
+// SyncGooglevideoHosts сливает SNI-лог и local.tsv в googlevideo-hosts.txt.
+func (a *App) SyncGooglevideoHosts() (added int, err error) {
+	h := a.GooglevideoHosts()
+	n1, err1 := h.MergeSNILog(a.Paths.GooglevideoSNILog())
+	if err1 != nil {
+		return 0, err1
+	}
+	n2, err2 := h.MergeLocalRows(a.GooglevideoCollector().Local())
+	if err2 != nil {
+		return n1, err2
+	}
+	return n1 + n2, nil
+}
+
+// GooglevideoCollectionStatus — enabled|disabled для settings.
+func (a *App) GooglevideoCollectionStatus() string {
+	gvMu.Lock()
+	running := gvListener != nil && gvListener.Running()
+	gvMu.Unlock()
+	if running {
+		return "enabled"
+	}
+	mode := googlevideo.DetectMode(context.Background(), googlevideo.DetectOptions{
+		SnifferPath: filepath.Join(a.Paths.ZatorRoot, googlevideo.DefaultSnifferRelPath),
+	})
+	if mode == googlevideo.ModeOff {
+		return "disabled"
+	}
+	return "enabled"
+}
+
+// StartGooglevideoCollection поднимает DNS-listener (если доступен) и
+// один раз сливает уже накопленные host в файл.
+func (a *App) StartGooglevideoCollection(ctx context.Context) error {
+	_, _ = a.SyncGooglevideoHosts()
+
+	gvMu.Lock()
+	defer gvMu.Unlock()
+	if gvListener != nil && gvListener.Running() {
+		return nil
+	}
+	if gvCollect == nil {
+		gvCollect = a.newGooglevideoCollector()
+	}
+	mode := googlevideo.DetectMode(ctx, googlevideo.DetectOptions{
+		SnifferPath: filepath.Join(a.Paths.ZatorRoot, googlevideo.DefaultSnifferRelPath),
+	})
+	if mode == googlevideo.ModeOff {
+		return nil
+	}
+	mgr, err := googlevideo.NewManager(googlevideo.ManagerConfig{
+		Mode:        mode,
+		SnifferPath: filepath.Join(a.Paths.ZatorRoot, googlevideo.DefaultSnifferRelPath),
+		Observer:    gvCollect,
+	})
+	if err != nil {
+		return err
+	}
+	if err := mgr.Start(ctx); err != nil {
+		return fmt.Errorf("googlevideo listener: %w", err)
+	}
+	gvListener = mgr
+	return nil
+}
+
+// StopGooglevideoCollection останавливает listener (для тестов/shutdown).
+func (a *App) StopGooglevideoCollection() {
+	gvMu.Lock()
+	defer gvMu.Unlock()
+	if gvListener != nil {
+		_ = gvListener.Stop()
+		gvListener = nil
+	}
+}

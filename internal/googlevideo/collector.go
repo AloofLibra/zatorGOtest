@@ -65,6 +65,8 @@ type CollectorConfig struct {
 	LocalFile    string
 	PendingFile  string
 	ReportedFile string
+	// HostsFile — необязательный путь к googlevideo-hosts.txt (уникальные FQDN).
+	HostsFile string
 	// Central — необязательная проверка «IP уже в центральном списке».
 	Central CentralChecker
 	// Now — источник времени (по умолчанию time.Now).
@@ -367,6 +369,9 @@ func (c *Collector) Observe(o Observation) (ObserveResult, error) {
 
 	if err := c.storeLocal(LocalRow{Host: host, IP: o.IP, Expires: res.Expires, Observed: now}, now); err != nil {
 		return res, err
+	}
+	if c.cfg.HostsFile != "" {
+		_, _ = NewHostsFile(c.cfg.HostsFile).Add(host)
 	}
 	if c.isReported(host, o.IP, now) {
 		res.AlreadyReported = true

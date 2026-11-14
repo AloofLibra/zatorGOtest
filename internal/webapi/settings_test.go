@@ -58,7 +58,7 @@ func TestSettingsGetDefaults(t *testing.T) {
 		{"fwtype", "value", "iptables"},
 		{"wssize_ramp", "enabled", false},
 		{"wssize_ramp", "mode", "full"},
-		{"wssize_ramp", "googlevideo_local_collection", "unsupported"},
+		{"wssize_ramp", "googlevideo_local_collection", "disabled"},
 		{"supersweep", "state", "idle"},
 		{"update_check", "update_available", false},
 		{"recommendations", "status", "unknown_provider"},

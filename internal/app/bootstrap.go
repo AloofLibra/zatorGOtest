@@ -108,6 +108,10 @@ func (a *App) PrepareZapretRuntime() (fwHook string, err error) {
 	if changed, e := a.ensureNetworkIfaces(cfg); e == nil && changed {
 		_ = cfg.Save()
 	}
+	gvLua := filepath.ToSlash(filepath.Join(a.Paths.LuaDir, "googlevideo-collect.lua"))
+	if ok, e := cfg.EnsureLuaInit(gvLua); e == nil && ok {
+		_ = cfg.Save()
+	}
 	argsFile := filepath.Join(a.Paths.ZapretRoot, "nfqws2.args")
 	if err := cfg.WriteNfqws2Args(argsFile); err != nil {
 		// leftover config без NFQWS2_OPT после wipe zator — пересоздаём из шаблона
@@ -212,6 +216,12 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 	if runtime.GOOS == "windows" {
 		_, _ = a.PrepareZapretRuntime()
 		return nil
+	}
+	// Повторная страховка: зависимости + IFACE (если ставили без InstallZapret).
+	if rep, err := a.EnsureDependencies(ctx); err != nil {
+		_ = rep // отчёт уже мог быть напечатан в InstallZapret; здесь не блокируем Web UI
+	} else {
+		_, _, _ = a.ApplyDetectedIfaces()
 	}
 	fwHook, prepErr := a.PrepareZapretRuntime()
 	mgr, err := service.New(service.Config{

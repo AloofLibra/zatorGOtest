@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,6 +20,8 @@ type InstallZapretOptions struct {
 	IncludeLua  bool
 	SkipService bool
 	Timeout     time.Duration
+	// Log — куда писать ход проверки зависимостей и IFACE (обычно stdout).
+	Log io.Writer
 }
 
 // InstallZapret скачивает последнюю (или указанную) сборку zapret2, раскладывает
@@ -53,6 +56,21 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 		IncludeLua: true,
 		MirrorBase: a.Config.Mirror,
 	}
+	log := opts.Log
+	if log == nil {
+		log = io.Discard
+	}
+	// Сначала системные зависимости (iptables/ipset/модули) — иначе firewall
+	// после старта служб молча не поднимется.
+	fmt.Fprintln(log, "проверка зависимостей под", a.Platform.String(), "...")
+	depCtx, depCancel := context.WithTimeout(context.WithoutCancel(ctx), 4*time.Minute)
+	rep, depErr := a.EnsureDependencies(depCtx)
+	depCancel()
+	WriteDepsReport(log, rep)
+	if depErr != nil {
+		return nil, fmt.Errorf("зависимости: %w", depErr)
+	}
+
 	res, err := zapret.Install(cctx, a.Paths, a.Platform, zopts)
 	if err != nil {
 		return res, err
@@ -69,6 +87,17 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 	if err := a.deployEntwareInit(); err != nil {
 		return res, err
 	}
+
+	lan, wan, ifaceErr := a.ApplyDetectedIfaces()
+	if ifaceErr != nil {
+		if isRouterHost() {
+			return res, fmt.Errorf("IFACE_WAN/LAN: %w", ifaceErr)
+		}
+		fmt.Fprintf(log, "предупреждение IFACE: %v\n", ifaceErr)
+	} else if lan != "" || wan != "" {
+		fmt.Fprintf(log, "интерфейсы: IFACE_LAN=%s IFACE_WAN=%s\n", lan, wan)
+	}
+
 	if opts.SkipService {
 		if _, err := a.PrepareZapretRuntime(); err != nil {
 			return res, err

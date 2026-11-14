@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -85,6 +86,11 @@ func DetectHook(p platform.Platform) Hook {
 	case platform.HardwareMerlin:
 		return HookMerlin
 	case platform.HardwareKeenetic, platform.HardwareNetcraze:
+		return HookKeenetic
+	}
+	// Запасной путь: каталог ndm netfilter.d есть, а Hardware не распознали
+	// (старые бинарники / нестандартная раскладка) — всё равно ставим хук.
+	if _, err := os.Stat(filepath.Join(keeneticHookDir)); err == nil {
 		return HookKeenetic
 	}
 	return HookNone

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -17,6 +18,7 @@ import (
 // Install создаёт раскладку каталогов, распаковывает встроенные ресурсы
 // и записывает текущую a.Config (пароль/auth задаёт вызывающий код).
 // Вызывающий код должен при необходимости предварительно вызвать Load.
+// На роутере сразу ставит системные зависимости (iptables/ipset/модули).
 func (a *App) Install() error {
 	if err := a.Paths.EnsureDirs(); err != nil {
 		return fmt.Errorf("создание каталогов: %w", err)
@@ -36,11 +38,21 @@ func (a *App) Install() error {
 		WebUIDate:    now,
 		Tracking:     "latest",
 	})
-	return a.Save()
+	if err := a.Save(); err != nil {
+		return err
+	}
+	// Best-effort: ставим iptables/ipset сразу. Жёсткая проверка — в InstallZapret.
+	if isRouterHost() {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		defer cancel()
+		_, _ = a.EnsureDependencies(ctx)
+	}
+	return nil
 }
 
 // Update обновляет встроенные ресурсы, сохраняя существующую конфигурацию
 // (пароль, auth_enabled, legacy token не трогаются).
+// На роутере повторно ставит iptables/ipset и подтягивает IFACE.
 func (a *App) Update() error {
 	if !a.Installed() {
 		return fmt.Errorf("zator не установлен в %s", a.Paths.ZatorRoot)
@@ -63,7 +75,16 @@ func (a *App) Update() error {
 		WebUIDate:    now,
 		Tracking:     "latest",
 	})
-	return a.Save()
+	if err := a.Save(); err != nil {
+		return err
+	}
+	if isRouterHost() {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		defer cancel()
+		_, _ = a.EnsureDependencies(ctx)
+		_, _, _ = a.ApplyDetectedIfaces()
+	}
+	return nil
 }
 
 // UninstallOptions — поведение удаления.
@@ -197,8 +218,18 @@ func (a *App) seedZapretConfig(template []byte) error {
 		return fmt.Errorf("запись %s: %w", cfg, err)
 	}
 	if c, err := config.Load(cfg); err == nil {
-		if changed, e := a.ensureNetworkIfaces(c); e == nil && changed {
-			_ = c.Save()
+		changed, e := a.ensureNetworkIfaces(c)
+		if e != nil {
+			// На сборочном хосте (Windows) маршрутов роутера нет — не валим install.
+			if !isRouterHost() {
+				return nil
+			}
+			return fmt.Errorf("автоопределение IFACE_WAN/LAN: %w", e)
+		}
+		if changed {
+			if err := c.Save(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

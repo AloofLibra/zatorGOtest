@@ -314,6 +314,40 @@ func (c *Config) SetRSTGuard(on bool) error {
 	return fmt.Errorf("%w: rst_guard lines", ErrNotFound)
 }
 
+// EnsureLuaInit вставляет --lua-init=@path в NFQWS2_OPT, если строки ещё нет.
+// Возвращает true, если конфиг изменился.
+func (c *Config) EnsureLuaInit(absPath string) (bool, error) {
+	absPath = strings.TrimSpace(absPath)
+	if absPath == "" {
+		return false, fmt.Errorf("%w: empty lua-init path", ErrInvalid)
+	}
+	needle := "--lua-init=@" + absPath
+	opt, ok := c.NFQWS2Opt()
+	if !ok {
+		return false, fmt.Errorf("%w: %s", ErrNotFound, OptVar)
+	}
+	for _, ln := range strings.Split(opt, "\n") {
+		if strings.TrimSpace(ln) == needle {
+			return false, nil
+		}
+	}
+	lines := strings.Split(opt, "\n")
+	at := 0
+	for i, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if strings.HasPrefix(t, "--lua-init=") {
+			at = i + 1
+		}
+	}
+	out := append([]string{}, lines[:at]...)
+	out = append(out, needle)
+	out = append(out, lines[at:]...)
+	if err := c.SetNFQWS2Opt(strings.Join(out, "\n")); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // SetReasm включает/выключает `--reasm-disable` в NFQWS2_OPT.
 func (c *Config) SetReasm(on bool) error {
 	opt, ok := c.NFQWS2Opt()

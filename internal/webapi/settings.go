@@ -215,7 +215,7 @@ func (s *Server) wssizeGet(cfg *config.Config) any {
 		"mode":                         mode,
 		"scale":                        scale,
 		"googlevideo_ips":              ips,
-		"googlevideo_local_collection": "unsupported",
+		"googlevideo_local_collection": s.app.GooglevideoCollectionStatus(),
 	}
 }
 

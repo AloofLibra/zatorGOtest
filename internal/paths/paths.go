@@ -111,6 +111,21 @@ func (p Paths) StateOrchestraDir() string {
 	return filepath.Join(p.StateDir, "orchestra")
 }
 
+// GooglevideoHostsFile — список собранных FQDN googlevideo.
+func (p Paths) GooglevideoHostsFile() string {
+	return filepath.Join(p.ListsDir, "googlevideo-hosts.txt")
+}
+
+// GooglevideoStateDir — tmpfs-состояние коллектора/SNI-лога.
+func (p Paths) GooglevideoStateDir() string {
+	return "/tmp/z2r-googlevideo"
+}
+
+// GooglevideoSNILog — лог SNI из Lua (nobody).
+func (p Paths) GooglevideoSNILog() string {
+	return filepath.Join(p.GooglevideoStateDir(), "sni-hosts.log")
+}
+
 // Dirs возвращает список каталогов, которые необходимо создать при установке.
 func (p Paths) Dirs() []string {
 	return []string{
