@@ -221,6 +221,7 @@ async function submitBlob() {
       </div>
       <p class="panel-d">
         Автосбор rr*---sn-*.googlevideo.com (SNI + DNS). Сбор: {{ googlevideo?.collection || '—' }}.
+        Профиль 2 учит стратегию на каждый <code>sn-*</code> (seed из лока профиля).
       </p>
       <div class="actions" style="margin-top:0.65rem">
         <button type="button" :disabled="busyActive"
@@ -229,6 +230,15 @@ async function submitBlob() {
         <button type="button" class="ghost danger" :disabled="busyActive || !(googlevideo?.items?.length)"
           :class="{ 'is-busy': busyButton === 'gv-clear' }"
           @click="clearGooglevideo">Очистить</button>
+      </div>
+      <div v-if="(googlevideo?.auto_locks || []).length" class="domain-list" style="margin-top:0.85rem">
+        <p class="panel-d" style="margin-bottom:0.5rem">Выученные POP (sn → strat)</p>
+        <div v-for="lock in (googlevideo?.auto_locks || [])" :key="lock.host + ':' + lock.strategy" class="domain-item">
+          <div>
+            <code>{{ lock.host }}</code>
+            <div class="panel-d" style="margin:0.35rem 0 0">стратегия {{ lock.strategy }}<span v-if="lock.scope && lock.scope !== 'default'"> · {{ lock.scope }}</span></div>
+          </div>
+        </div>
       </div>
       <div class="domain-list" style="margin-top:0.85rem">
         <div v-for="item in (googlevideo?.items || [])" :key="item.value" class="domain-item">

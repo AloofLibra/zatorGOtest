@@ -129,5 +129,6 @@ func (a *App) deployEntwareInit() error {
 	if err := os.WriteFile(dst, data, 0o755); err != nil {
 		return fmt.Errorf("Entware init: %w", err)
 	}
+	_ = a.deployNfqwsWatchdog()
 	return nil
 }

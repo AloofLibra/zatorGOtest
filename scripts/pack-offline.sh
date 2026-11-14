@@ -47,5 +47,22 @@ EOF
 tar -C "$STAGE" -czf "$OUT/zator-full.tar.gz" .
 cp "$ROOT/scripts/zator-launcher.sh" "$OUT/zator-launcher.sh"
 cp "$ROOT/dist"/zator-linux-* "$OUT/vendor/" 2>/dev/null || true
+
+# zapret2 в vendor/ — установка без GitHub (ZATOR_VENDOR / LocalArchive).
+ZAPRET_VER="${ZAPRET2_VERSION:-1.0.7-reasm-fix}"
+ZAPRET_ASSET="zapret2-v${ZAPRET_VER}.tar.gz"
+ZAPRET_URL="${ZAPRET2_ARCHIVE_URL:-https://github.com/MarkinAlexander/zapret2/releases/download/v${ZAPRET_VER}/${ZAPRET_ASSET}}"
+if [[ ! -f "$OUT/vendor/$ZAPRET_ASSET" ]]; then
+  echo "скачивание $ZAPRET_URL → vendor/"
+  curl -fsSL -o "$OUT/vendor/$ZAPRET_ASSET" "$ZAPRET_URL" || {
+    echo "warn: не удалось скачать zapret2; положите $ZAPRET_ASSET в vendor/ вручную" >&2
+  }
+fi
+# Копия рядом с репозиторием для офлайн-разработки.
+mkdir -p "$ROOT/vendor"
+if [[ -f "$OUT/vendor/$ZAPRET_ASSET" && ! -f "$ROOT/vendor/$ZAPRET_ASSET" ]]; then
+  cp "$OUT/vendor/$ZAPRET_ASSET" "$ROOT/vendor/$ZAPRET_ASSET"
+fi
+
 echo "offline bundle → $OUT"
-ls -lh "$OUT"
+ls -lh "$OUT" "$OUT/vendor"

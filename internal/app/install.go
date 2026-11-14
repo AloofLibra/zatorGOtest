@@ -242,7 +242,7 @@ func (a *App) ensureOrchestraState() error {
 	if err := os.MkdirAll(filepath.Join(dir, "scopes"), 0o755); err != nil {
 		return fmt.Errorf("каталог orchestra: %w", err)
 	}
-	for _, p := range []string{a.Paths.LockedTSV, a.Paths.LockedManualTSV} {
+	for _, p := range []string{a.Paths.LockedTSV, a.Paths.LockedManualTSV, a.Paths.AutoLockedTSV} {
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return fmt.Errorf("файл состояния %s: %w", p, err)

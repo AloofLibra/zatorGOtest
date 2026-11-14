@@ -73,6 +73,9 @@ type SuperSweepConfig struct {
 	QNum int
 	// PortFirst/PortLast — зарезервированные порты (по умолчанию 62000–62999).
 	PortFirst, PortLast int
+	// ProbeUID — UID изолированного nfqws2 для -m owner / meta skuid
+	// (по умолчанию SuperSweepProbeUID; на Keenetic обычно nobody=65534).
+	ProbeUID uint32
 	// IptWait — аргументы ожидания xtables-блокировки (например "-w","5").
 	// nil: определяется автоматически при Start.
 	IptWait []string
@@ -132,6 +135,9 @@ func (c SuperSweepConfig) withDefaults() SuperSweepConfig {
 	}
 	if c.Marks.SuperSweep == 0 {
 		c.Marks.SuperSweep = SuperSweepMark
+	}
+	if c.ProbeUID == 0 {
+		c.ProbeUID = SuperSweepProbeUID
 	}
 	return c
 }
@@ -219,7 +225,7 @@ func (c SuperSweepConfig) IptablesHookArgs(action, hook string) ([]string, error
 			[]string{"-m", "owner", "--uid-owner", "0", "-m", "mark", "!", "--mark", d, "-j", SSChainOut}), nil
 	case "RAWOUTPUT":
 		return join([]string{action, "OUTPUT"}, tcpOut,
-			[]string{"-m", "owner", "--uid-owner", strconv.Itoa(SuperSweepProbeUID), "-j", SSChainRaw}), nil
+			[]string{"-m", "owner", "--uid-owner", strconv.Itoa(int(c.ProbeUID)), "-j", SSChainRaw}), nil
 	case "SOCKETOUTPUT":
 		return join([]string{action, "OUTPUT"}, tcpOut,
 			[]string{"-m", "owner", "!", "--socket-exists", "-m", "mark", "!", "--mark", d, "-j", SSChainOut}), nil
@@ -338,7 +344,7 @@ func (c SuperSweepConfig) NftTransaction() string {
 	w("add rule inet %s %s meta nfproto ipv4 meta skuid 0 meta mark & %s == 0 tcp sport %s tcp dport 443 meta mark set meta mark | %s%s",
 		t, SuperSweepNftOutputChain, d, ports, ss, cm)
 	w("add rule inet %s %s meta nfproto ipv4 meta skuid %d tcp sport %s tcp dport 443 meta mark set meta mark | %s | %s%s",
-		t, SuperSweepNftOutputChain, SuperSweepProbeUID, ports, d, ss, cm)
+		t, SuperSweepNftOutputChain, c.ProbeUID, ports, d, ss, cm)
 	// После close() TLS close_notify/FIN/RST идут без socket UID: исключаем все
 	// прочие сокеты (включая основной nfqws2), затем маркируем socketless-пакеты.
 	w("add rule inet %s %s meta nfproto ipv4 meta skuid >= 0 tcp sport %s tcp dport 443 return%s",
@@ -431,7 +437,12 @@ func (s *SuperSweep) Start(ctx context.Context) error {
 		s.detectWait(ctx)
 	}
 	if err := s.iptInstall(ctx); err != nil {
-		_ = s.Stop(ctx)
+		// Откат через Background + retry: canceled sweep-ctx иначе оставляет
+		// частично установленные хуки. ForceCleanup не используем — он сидит
+		// полный список и трогает чужие/несозданные цепочки.
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		_ = stopWithRetry(cleanCtx, s)
+		cancel()
 		return fmt.Errorf("iptables installation failed; partial transport removed: %w", err)
 	}
 	s.active = true
@@ -731,13 +742,54 @@ func (s *SuperSweep) Reinstall(ctx context.Context) error {
 	if s.cfg.Backend != BackendIptables {
 		return fmt.Errorf("%w: reinstall is iptables-only", ErrSuperSweepInvalid)
 	}
-	// Хуки в порядке «последний установленный — первый».
-	s.hooks = reverse(superSweepInstallHooks)
-	s.chains = reverse(superSweepChains)
-	if err := s.Stop(ctx); err != nil {
+	if err := s.ForceCleanup(ctx); err != nil {
 		return err
 	}
 	return s.Start(ctx)
+}
+
+// ForceCleanup снимает Z2R_SS_* даже без живого in-memory state (после
+// потери *SuperSweep / неполного Stop). Для iptables сидирует полный
+// список хуков/цепочек и повторяет Stop с паузой RetryDelay.
+func (s *SuperSweep) ForceCleanup(ctx context.Context) error {
+	if s.cfg.Backend == BackendNftables {
+		return stopWithRetry(ctx, s)
+	}
+	s.cfg = s.cfg.withDefaults()
+	if !s.waitDone {
+		s.detectWait(ctx)
+	}
+	// Сиды: последний установленный хук снимаем первым.
+	s.hooks = reverse(superSweepInstallHooks)
+	s.chains = reverse(superSweepChains)
+	s.active = false
+	return stopWithRetry(ctx, s)
+}
+
+func stopWithRetry(ctx context.Context, s *SuperSweep) error {
+	delay := s.cfg.RetryDelay
+	if delay <= 0 {
+		delay = 3 * time.Second
+	}
+	var last error
+	for attempt := 0; attempt < 5; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		last = s.Stop(ctx)
+		if last == nil {
+			return nil
+		}
+		if !errors.Is(last, ErrCleanupIncomplete) {
+			return last
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	return last
 }
 
 // Reconcile для iptables проверяет наличие и порядок хуков и при отклонении

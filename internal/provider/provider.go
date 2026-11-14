@@ -39,8 +39,11 @@ const (
 	DefaultIPWhoURL  = "https://ipwho.is/"
 	DefaultIPInfoURL = "https://ipinfo.io/json"
 	DefaultIPAPIURL  = "http://ip-api.com/json/?fields=isp,city,as"
-	// DefaultASNRemoteURL — удалённая таблица ASN.
-	DefaultASNRemoteURL = "https://raw.githubusercontent.com/AloofLibra/zator/zator/data/providers/asn.txt"
+	// DefaultASNRemoteURL — удалённая таблица ASN (opt-in; по умолчанию
+	// используется встроенный assets/data/providers/asn.txt без сети).
+	DefaultASNRemoteURL = ""
+	// LegacyASNRemoteURL — прежний raw.githubusercontent.com feed.
+	LegacyASNRemoteURL = "https://raw.githubusercontent.com/AloofLibra/zator/zator/data/providers/asn.txt"
 
 	// DefaultASNTTL — срок жизни кэша таблицы ASN.
 	DefaultASNTTL = 7 * 24 * time.Hour

@@ -26,10 +26,13 @@ func TestStatusShape(t *testing.T) {
 	resp, st := e.get("/cgi-bin/status.cgi")
 	wantStatus(t, resp, http.StatusOK)
 	for _, k := range []string{"zapret2_running", "strategy_locks_status", "hostlist_mode", "fwtype", "flowoffload",
-		"tls_blob_mode", "wireguard", "auto_mode", "rst_guard", "reasm", "quic443", "provider", "client_scope", "profiles"} {
+		"tls_blob_mode", "wireguard", "auto_mode", "rst_guard", "reasm", "quic443", "provider", "client_scope", "profiles", "health"} {
 		if _, ok := st[k]; !ok {
 			t.Errorf("нет поля %s", k)
 		}
+	}
+	if h, ok := st["health"].(map[string]any); !ok || h["overall"] == nil {
+		t.Errorf("health = %v", st["health"])
 	}
 	if cs, ok := st["client_scope"].(map[string]any); !ok || cs["mode"] == nil {
 		t.Errorf("client_scope = %v", st["client_scope"])
@@ -226,6 +229,24 @@ func TestServiceEndpoint(t *testing.T) {
 	// GET не допускается.
 	resp, out = e.get("/cgi-bin/service.cgi?action=start")
 	wantError(t, resp, out, 405, "Метод не поддерживается")
+}
+
+func TestServiceStartBlockedOnApplyFail(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	// Битый OPT: shell-metachar → Apply/Validate fail → start блокируется.
+	bad := "QNUM=200\nNFQWS2_OPT=\"\n--new\n--filter-tcp=443;evil\n\"\n"
+	if err := os.WriteFile(e.app.Paths.ZapretConfig, []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := e.svc.called()
+	resp, out := e.post("/cgi-bin/service.cgi", "action", "start")
+	wantError(t, resp, out, 500, "Не удалось применить конфиг zapret2")
+	if out["runtime_apply_error"] == nil {
+		t.Error("expected runtime_apply_error")
+	}
+	if got := e.svc.called(); len(got) != len(before) {
+		t.Fatalf("Start must not run after apply fail: %v", got)
+	}
 }
 
 func TestStatusReflectsServiceState(t *testing.T) {

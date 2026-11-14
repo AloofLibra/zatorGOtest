@@ -65,6 +65,14 @@ type Options struct {
 	// Force — переустановить, даже если такая же сборка уже стоит.
 	Force bool
 
+	// LocalArchive — путь к локальному tar.gz; если задан, сеть не нужна.
+	LocalArchive string
+	// VendorDir — каталог с архивами релизов (имя файла = AssetName).
+	// Также проверяются $ZATOR_VENDOR и <parent(Root)>/vendor.
+	VendorDir string
+	// Offline — запретить загрузку по сети (ошибка, если локального архива нет).
+	Offline bool
+
 	// Client — HTTP-клиент; nil — fetch.NewClient().
 	Client *fetch.Client
 	// TmpDir — каталог для временных файлов; пусто — рядом с Root.
@@ -183,10 +191,30 @@ func DownloadAndInstall(ctx context.Context, opts Options) (*Result, error) {
 		client = &c
 	}
 
-	archive := filepath.Join(work, AssetName(ver, embedded))
-	opts.logf("загрузка %s", url)
-	if err := client.Download(ctx, url, archive, opts.SHA256); err != nil {
-		return nil, fmt.Errorf("zapret: загрузка архива: %w", err)
+	asset := AssetName(ver, embedded)
+	archive := filepath.Join(work, asset)
+	if local, ok := resolveLocalArchive(opts, asset); ok {
+		opts.logf("локальный архив %s", local)
+		if err := copyFile(local, archive, 0o644); err != nil {
+			return nil, fmt.Errorf("zapret: копирование локального архива: %w", err)
+		}
+		if opts.SHA256 != "" {
+			if sum, err := fetch.SHA256File(archive); err != nil {
+				return nil, err
+			} else if !strings.EqualFold(sum, opts.SHA256) {
+				return nil, fmt.Errorf("zapret: SHA256 локального архива не совпадает")
+			}
+		}
+		res.URL = "file://" + filepath.ToSlash(local)
+	} else {
+		offline := opts.Offline || envTruthy("Z2R_OFFLINE") || envTruthy("ZATOR_OFFLINE")
+		if offline {
+			return nil, fmt.Errorf("zapret: офлайн-режим, нет локального архива %s (положите в vendor/ или задайте LocalArchive)", asset)
+		}
+		opts.logf("загрузка %s", url)
+		if err := client.Download(ctx, url, archive, opts.SHA256); err != nil {
+			return nil, fmt.Errorf("zapret: загрузка архива: %w", err)
+		}
 	}
 
 	names, err := fetch.ListTarGz(archive)
@@ -444,6 +472,40 @@ func ReadInstalled(root string) (Installed, error) {
 		return Installed{}, errors.New("zapret: повреждён файл версии")
 	}
 	return in, nil
+}
+
+// EnvVendorDir — каталог с локальными архивами zapret2.
+const EnvVendorDir = "ZATOR_VENDOR"
+
+func resolveLocalArchive(opts Options, asset string) (string, bool) {
+	candidates := make([]string, 0, 8)
+	if p := strings.TrimSpace(opts.LocalArchive); p != "" {
+		candidates = append(candidates, p)
+	}
+	addDir := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		candidates = append(candidates, filepath.Join(dir, asset))
+	}
+	addDir(opts.VendorDir)
+	addDir(os.Getenv(EnvVendorDir))
+	if opts.Root != "" {
+		addDir(filepath.Join(filepath.Dir(opts.Root), "vendor"))
+		addDir(filepath.Join(opts.Root, "vendor"))
+	}
+	for _, p := range candidates {
+		if fileExists(p) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+func envTruthy(name string) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 func fileExists(p string) bool {

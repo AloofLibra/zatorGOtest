@@ -19,8 +19,10 @@ local function z2r_gv_is_collectable(host)
 end
 
 local function z2r_gv_ensure_dir()
-  -- best-effort; mkdir may already exist
-  os.execute("mkdir -p " .. Z2R_GV_DIR .. " 2>/dev/null")
+  -- nfqws Lua sandbox often has no os.execute; Go bootstrap creates the dir.
+  if type(os.execute) == "function" then
+    pcall(os.execute, "mkdir -p " .. Z2R_GV_DIR .. " 2>/dev/null")
+  end
 end
 
 local function z2r_gv_maybe_collect(host)
@@ -34,11 +36,14 @@ local function z2r_gv_maybe_collect(host)
   end
   Z2R_GV_SEEN[host] = true
   Z2R_GV_SEEN_N = Z2R_GV_SEEN_N + 1
-  z2r_gv_ensure_dir()
-  local f = io.open(Z2R_GV_SNI_LOG, "a")
-  if not f then return end
-  f:write(host, "\t", tostring(os.time()), "\n")
-  f:close()
+  -- Never throw into circular_*/desync path — collect is best-effort only.
+  pcall(function()
+    z2r_gv_ensure_dir()
+    local f = io.open(Z2R_GV_SNI_LOG, "a")
+    if not f then return end
+    f:write(host, "\t", tostring(os.time()), "\n")
+    f:close()
+  end)
 end
 
 -- Hook hostname extraction used by locked/circular paths.
@@ -46,7 +51,7 @@ if type(desync_hostname) == "function" then
   local _orig_desync_hostname = desync_hostname
   function desync_hostname(desync)
     local h = _orig_desync_hostname(desync)
-    if h then z2r_gv_maybe_collect(h) end
+    if h then pcall(z2r_gv_maybe_collect, h) end
     return h
   end
 end
@@ -55,7 +60,7 @@ if type(host_or_ip) == "function" then
   local _orig_host_or_ip = host_or_ip
   function host_or_ip(desync)
     local h = _orig_host_or_ip(desync)
-    if h then z2r_gv_maybe_collect(h) end
+    if h then pcall(z2r_gv_maybe_collect, h) end
     return h
   end
 end

@@ -31,3 +31,7 @@ func probeAlive(p *os.Process) error {
 	// Windows: Signal(0) не поддерживается; считаем живым, пока Wait не завершён.
 	return nil
 }
+
+func probeProcessRunning(p *os.Process) bool {
+	return p != nil && probeAlive(p) == nil
+}

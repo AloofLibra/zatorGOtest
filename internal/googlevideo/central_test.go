@@ -346,8 +346,42 @@ func TestCentralList_Defaults(t *testing.T) {
 	if c.url() != DefaultListURL || c.ttl() != DefaultCacheTTL || c.client().Timeout != DefaultFetchTimeout || c.now().IsZero() {
 		t.Error("defaults")
 	}
+	if DefaultListURL != "" {
+		t.Error("DefaultListURL must be empty (self-contained)")
+	}
 	if DefaultCacheTTL != 6*time.Hour || MaxListIPs != 8192 || MaxListBytes != 256*1024 {
 		t.Error("limits must match the reference implementation")
+	}
+}
+
+func TestCentralList_LocalOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ListFileName)
+	c := &CentralList{File: path} // URL пуст — без сети
+	if _, err := c.Update(context.Background(), true); !errors.Is(err, ErrFetch) {
+		t.Fatalf("empty local: %v", err)
+	}
+	body := listBody("8.8.8.8", "1.1.1.1")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Update(context.Background(), true)
+	if err != nil || res.Status != UpdateFresh || res.Count != 2 {
+		t.Fatalf("local: %v %+v", err, res)
+	}
+	if !c.Contains("8.8.8.8") {
+		t.Error("Contains")
+	}
+}
+
+func TestBundledGooglevideoIPv4(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "assets", "lists", ListFileName))
+	if err != nil {
+		t.Fatalf("asset missing: %v", err)
+	}
+	l, err := ParseList(data)
+	if err != nil || len(l.IPs) == 0 {
+		t.Fatalf("bundled list invalid: %v count=%d", err, len(l.IPs))
 	}
 }
 

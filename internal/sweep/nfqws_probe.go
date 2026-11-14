@@ -38,8 +38,10 @@ type NfqwsProbeConfig struct {
 	// Runner — iptables/nft (по умолчанию firewall.ExecRunner).
 	Runner firewall.Runner
 
-	// UID/GID процесса nfqws2 (по умолчанию SuperSweepProbeUID).
+	// UID/GID процесса nfqws2 (по умолчанию ResolveProbeUser / SuperSweepProbeUID).
 	UID, GID uint32
+	// User — имя для nfqws2 --user= (обязано существовать в passwd).
+	User string
 
 	// StartDelay — пауза после старта nfqws2 до установки firewall
 	// (по умолчанию 300 мс).
@@ -49,6 +51,9 @@ type NfqwsProbeConfig struct {
 
 	// NewCmd подменяет создание процесса (тесты).
 	NewCmd func(ctx context.Context, name string, args []string) *exec.Cmd
+
+	// resolveUser подменяет ResolveProbeUser в тестах.
+	resolveUser func() (name string, uid, gid uint32)
 }
 
 // NfqwsProbe — изолированный nfqws2 + транспорт SuperSweep.
@@ -80,11 +85,30 @@ func NewNfqwsProbe(cfg NfqwsProbeConfig) (*NfqwsProbe, error) {
 	if cfg.Runner == nil {
 		cfg.Runner = firewall.ExecRunner{}
 	}
-	if cfg.UID == 0 {
-		cfg.UID = firewall.SuperSweepProbeUID
+	resolve := cfg.resolveUser
+	if resolve == nil {
+		resolve = firewall.ResolveProbeUser
+	}
+	if cfg.User == "" || cfg.UID == 0 {
+		name, uid, gid := resolve()
+		if name == "" || uid == 0 {
+			return nil, fmt.Errorf("%w: нет пользователя для probe (нужны nobody или zator-ss в passwd)", ErrProbe)
+		}
+		if cfg.User == "" {
+			cfg.User = name
+		}
+		if cfg.UID == 0 {
+			cfg.UID = uid
+		}
+		if cfg.GID == 0 {
+			cfg.GID = gid
+		}
 	}
 	if cfg.GID == 0 {
 		cfg.GID = cfg.UID
+	}
+	if cfg.User == "" {
+		return nil, fmt.Errorf("%w: пустое --user для nfqws2", ErrProbe)
 	}
 	if cfg.StartDelay <= 0 {
 		cfg.StartDelay = 300 * time.Millisecond
@@ -98,11 +122,15 @@ func (p *NfqwsProbe) OrchestraDir() string { return p.cfg.OrchestraDir }
 // WorkDir возвращает рабочий каталог пробника.
 func (p *NfqwsProbe) WorkDir() string { return p.cfg.WorkDir }
 
-// Start реализует Probe: поднимает nfqws2 (qnum 65535, uid 65533) и правила изоляции.
+// Start реализует Probe: поднимает nfqws2 (отдельная очередь) и правила изоляции.
 func (p *NfqwsProbe) Start(ctx context.Context, profile int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if err := p.stopLocked(ctx); err != nil {
+	// Cleanup никогда не через sweep-ctx: cancel иначе оставляет Z2R_SS_*.
+	if err := p.stopLocked(context.Background()); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	p.profile = profile
@@ -143,13 +171,17 @@ func (p *NfqwsProbe) Start(ctx context.Context, profile int) error {
 	if _, err := os.Stat(bin); err != nil {
 		return fmt.Errorf("%w: nfqws2: %v", ErrProbe, err)
 	}
-	cmdArgs := []string{"@" + argsPath}
+	// nfqws2 понимает @path только как содержимое для --lua-init=@file / --blob=,
+	// а не как список argv. Аргументы передаём напрямую (файл — для отладки).
+	// Не привязываем к sweep-ctx: иначе cancel убивает nfqws до Stop/firewall cleanup.
+	cmdArgs := args
 	var cmd *exec.Cmd
 	if p.cfg.NewCmd != nil {
 		cmd = p.cfg.NewCmd(ctx, bin, cmdArgs)
 	} else {
-		cmd = exec.CommandContext(ctx, bin, cmdArgs...)
+		cmd = exec.Command(bin, cmdArgs...)
 	}
+	_ = argsPath
 	if cmd == nil {
 		return fmt.Errorf("%w: пустая команда nfqws2", ErrProbe)
 	}
@@ -170,6 +202,10 @@ func (p *NfqwsProbe) Start(ctx context.Context, profile int) error {
 		return ctx.Err()
 	case <-time.After(p.cfg.StartDelay):
 	}
+	if !probeProcessRunning(cmd.Process) {
+		_ = p.stopLocked(context.Background())
+		return fmt.Errorf("%w: nfqws2 завершился сразу после старта (проверьте --user=%s и NFQUEUE)", ErrProbe, p.cfg.User)
+	}
 
 	ssCfg, err := firewall.SuperSweepConfigFromGetter(p.cfg.Config.Get)
 	if err != nil {
@@ -180,6 +216,7 @@ func (p *NfqwsProbe) Start(ctx context.Context, profile int) error {
 		_ = p.stopLocked(context.Background())
 		return fmt.Errorf("%w: не задан FWTYPE", ErrProbe)
 	}
+	ssCfg.ProbeUID = p.cfg.UID
 	if p.cfg.PortRangeFile != "" {
 		ssCfg.PortRangeFile = p.cfg.PortRangeFile
 	}
@@ -207,8 +244,8 @@ func (p *NfqwsProbe) Healthy(ctx context.Context) bool {
 	if p.cmd.ProcessState != nil && p.cmd.ProcessState.Exited() {
 		return false
 	}
-	// Неблокирующая проверка: Process.Signal(0) на unix; на других — наличие PID.
-	if err := probeAlive(p.cmd.Process); err != nil {
+	// Signal(0) на unix считает zombie «живым» — проверяем состояние явно.
+	if !probeProcessRunning(p.cmd.Process) {
 		return false
 	}
 	if p.ss == nil {
@@ -224,17 +261,30 @@ func (p *NfqwsProbe) Stop() error {
 	return p.stopLocked(context.Background())
 }
 
-func (p *NfqwsProbe) stopLocked(ctx context.Context) error {
+func (p *NfqwsProbe) stopLocked(_ context.Context) error {
+	// Всегда Background: canceled sweep-ctx обрывает iptables mid-cleanup.
+	cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	var errs []string
 	if p.ss != nil {
-		if err := p.ss.Stop(ctx); err != nil {
-			if errors.Is(err, firewall.ErrCleanupIncomplete) {
-				_ = p.ss.Stop(context.Background())
-			} else {
-				errs = append(errs, "firewall: "+err.Error())
-			}
+		if err := p.ss.ForceCleanup(cleanCtx); err != nil {
+			errs = append(errs, "firewall: "+err.Error())
 		}
 		p.ss = nil
+	} else if p.cfg.Config != nil {
+		// Сироты после потери in-memory SuperSweep (incomplete Stop / crash).
+		if ssCfg, err := firewall.SuperSweepConfigFromGetter(p.cfg.Config.Get); err == nil && ssCfg.Backend != "" {
+			ssCfg.ProbeUID = p.cfg.UID
+			if p.cfg.PortRangeFile != "" {
+				ssCfg.PortRangeFile = p.cfg.PortRangeFile
+			}
+			if ss, err := firewall.NewSuperSweep(ssCfg, p.cfg.Runner); err == nil {
+				if err := ss.ForceCleanup(cleanCtx); err != nil && !errors.Is(err, firewall.ErrCleanupIncomplete) {
+					errs = append(errs, "orphan-firewall: "+err.Error())
+				}
+			}
+		}
 	}
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = killProcessGroup(p.pid)
@@ -296,17 +346,41 @@ func (p *NfqwsProbe) buildArgs(luaDir string) ([]string, error) {
 		return nil, fmt.Errorf("%w: пустой NFQWS2_OPT", ErrProbe)
 	}
 	qnum := fmt.Sprintf("--qnum=%d", firewall.SuperSweepQueue)
-	out := make([]string, 0, len(base))
-	hasQnum := false
+	userName := p.cfg.User
+	if userName == "" {
+		userName = fmt.Sprintf("%d", p.cfg.UID)
+	}
+	userArg := "--user=" + userName
+
+	// Как NFQWS2_OPT_BASE в zapret2 init.d: user + fwmark + zapret-lib/*.
+	// Без zapret-lib.lua падает fake-adapt.lua (tls_dissect = nil).
+	desyncMark := p.cfg.Config.GetDefault("DESYNC_MARK", "0x40000000")
+	zapretLua := filepath.ToSlash(filepath.Join(p.cfg.Paths.ZapretRoot, "lua"))
+	prefix := []string{
+		userArg,
+		"--fwmark=" + desyncMark,
+		"--lua-init=@" + zapretLua + "/zapret-lib.lua",
+		"--lua-init=@" + zapretLua + "/zapret-antidpi.lua",
+		"--lua-init=@" + zapretLua + "/zapret-auto.lua",
+		qnum,
+	}
+
+	out := make([]string, 0, len(base)+len(prefix))
+	out = append(out, prefix...)
 	for _, a := range base {
 		switch {
 		case strings.HasPrefix(a, "--qnum=") || a == "--qnum":
-			out = append(out, qnum)
-			hasQnum = true
+			continue // уже в prefix
+		case strings.HasPrefix(a, "--user=") || a == "--user":
+			continue
+		case strings.HasPrefix(a, "--fwmark=") || a == "--fwmark":
+			continue
 		case strings.HasPrefix(a, "--lua-init=@"):
 			path := strings.TrimPrefix(a, "--lua-init=@")
 			baseName := filepath.Base(path)
 			switch baseName {
+			case "zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua":
+				continue // уже в prefix
 			case "locked.lua", "strategy-lock-manager.lua":
 				out = append(out, "--lua-init=@"+filepath.ToSlash(filepath.Join(luaDir, baseName)))
 			default:
@@ -315,9 +389,6 @@ func (p *NfqwsProbe) buildArgs(luaDir string) ([]string, error) {
 		default:
 			out = append(out, a)
 		}
-	}
-	if !hasQnum {
-		out = append([]string{qnum}, out...)
 	}
 	return out, nil
 }

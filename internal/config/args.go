@@ -17,6 +17,35 @@ var (
 // DefaultQNum — номер NFQUEUE, если в конфиге нет QNUM.
 const DefaultQNum = "200"
 
+// argsShellMeta — символы, недопустимые в argv nfqws2 @file (ломают shell-quoting config).
+const argsShellMeta = "\n\r\"'`$;\\|&<>()"
+
+// ValidateNfqws2Args проверяет argv перед записью nfqws2.args.
+func ValidateNfqws2Args(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("config: NFQWS2_OPT пуст")
+	}
+	meaningful := 0
+	for i, a := range args {
+		if a == "" {
+			return fmt.Errorf("config: пустой аргумент #%d", i+1)
+		}
+		if strings.ContainsAny(a, argsShellMeta) {
+			return fmt.Errorf("config: недопустимые символы в аргументе %q", a)
+		}
+		if !strings.HasPrefix(a, "-") {
+			return fmt.Errorf("config: аргумент должен быть флагом: %q", a)
+		}
+		if !strings.HasPrefix(a, "--qnum=") && a != "--qnum" {
+			meaningful++
+		}
+	}
+	if meaningful == 0 {
+		return fmt.Errorf("config: NFQWS2_OPT пуст (нет флагов кроме --qnum)")
+	}
+	return nil
+}
+
 // BuildNfqws2Args строит список аргументов nfqws2 из NFQWS2_OPT:
 // по одному аргументу на непустую строку (как @file у nfqws2), с подстановкой
 // ${VAR}/$VAR из переменных конфига. Добавляет --qnum, если его нет.
@@ -80,8 +109,8 @@ func (c *Config) BuildNfqws2Args() []string {
 // WriteNfqws2Args записывает файл аргументов для `nfqws2 @file`.
 func (c *Config) WriteNfqws2Args(path string) error {
 	args := c.BuildNfqws2Args()
-	if len(args) == 0 {
-		return fmt.Errorf("config: NFQWS2_OPT пуст, нечего писать в %s", path)
+	if err := ValidateNfqws2Args(args); err != nil {
+		return fmt.Errorf("%w (нечего писать в %s)", err, path)
 	}
 	var b strings.Builder
 	for _, a := range args {

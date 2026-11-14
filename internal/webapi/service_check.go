@@ -38,10 +38,47 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request, p params)
 	var err error
 	switch action {
 	case "start":
+		if s.app != nil {
+			if _, e := s.app.ApplyZapretRuntime(); e != nil {
+				s.app.WriteServiceWarnings([]string{"runtime apply: " + e.Error()})
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": "Не удалось применить конфиг zapret2", "detail": e.Error(),
+					"runtime_apply_error": e.Error(),
+				})
+				return
+			}
+			s.app.SetNfqwsWantRunning(true)
+		}
 		err = s.svc.Start(r.Context(), service.UnitZapret2)
+		if err == nil && s.app != nil {
+			_ = s.app.EnsureFirewallApplied(r.Context())
+			s.app.StartNfqwsWatchdog()
+			s.app.ClearServiceWarnings()
+		}
 	case "stop":
+		if s.app != nil {
+			s.app.PersistAutoLocked()
+			s.app.SetNfqwsWantRunning(false)
+			s.app.StopNfqwsWatchdog()
+		}
 		err = s.svc.Stop(r.Context(), service.UnitZapret2)
 	default:
+		if s.app != nil {
+			err = s.app.RestartZapretTransactional(r.Context(), func(ctx context.Context) error {
+				return s.svc.Restart(ctx, service.UnitZapret2)
+			})
+			if err != nil {
+				s.app.WriteServiceWarnings([]string{err.Error()})
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": "Не удалось выполнить команду zapret2", "detail": err.Error(),
+				})
+				return
+			}
+			s.app.StartNfqwsWatchdog()
+			s.app.ClearServiceWarnings()
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		}
 		err = s.svc.Restart(r.Context(), service.UnitZapret2)
 	}
 	if err != nil {
@@ -93,10 +130,15 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request, p params) {
 			}
 			resp.WaitedApply = true
 		}
-		checkResp := s.checker.CheckProfile(ctx, id)
+		opts := netcheck.ProfileCheckOptions{}
+		if id == 2 {
+			opts.MediaURL = strings.TrimSpace(p.Get("media_url"))
+		}
+		checkResp := s.checker.CheckProfileOpts(ctx, id, opts)
 		checkResp.WaitedApply = resp.WaitedApply
 		resp = checkResp
 		s.annotateProfileCheck(&resp, scope, id, p.Get("expect_lock"))
+		s.annotateMediaHints(&resp)
 	}
 	if resp.Results == nil {
 		resp.Results = []netcheck.TargetResult{}
@@ -155,4 +197,33 @@ func (s *Server) profileLockLabel(scope string, profile int) string {
 		return st.String()
 	}
 	return "auto"
+}
+
+// annotateMediaHints добавляет подсказки WSSIZE/ipv4 при mid-stream media-классе.
+func (s *Server) annotateMediaHints(resp *netcheck.CheckResponse) {
+	if resp == nil || s.app == nil {
+		return
+	}
+	for _, r := range resp.Results {
+		if r.Media == nil {
+			continue
+		}
+		switch r.Media.Class {
+		case netcheck.MediaMidstream:
+			ips := 0
+			if cl := s.app.GooglevideoCentralList(); cl != nil {
+				ips = cl.Count()
+			}
+			hint := fmt.Sprintf("WSSIZE: googlevideo-ipv4=%d адресов", ips)
+			if ips == 0 {
+				hint += " (список пуст — Domains→googlevideo refresh_ips или Apply)"
+			}
+			if resp.Message != "" {
+				resp.Message += ". " + hint
+			} else {
+				resp.Message = hint
+			}
+			return
+		}
+	}
 }

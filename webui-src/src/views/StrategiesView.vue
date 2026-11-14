@@ -155,14 +155,13 @@ async function save(profile: string, p: ProfileInfo) {
       showToast(`Стратегия вне диапазона (1–${max}, или 0)`, 'error')
       return
     }
-    let checkPayload: Awaited<ReturnType<typeof profileCheck>> | null = null
-    let lockRes: Awaited<ReturnType<typeof setLock>> | null = null
-    await withBusy(`lock-${profile}`, async () => {
-      lockRes = await setLock(profile, n, scope.value)
+    const { lockRes, checkPayload } = await withBusy(`lock-${profile}`, async () => {
+      const lockRes = await setLock(profile, n, scope.value)
       draft.value[profile] = String(n)
       delete strategyChecks[profile]
       await refreshAll()
       syncDraftFromLocks(locks.value, true)
+      let checkPayload: Awaited<ReturnType<typeof profileCheck>> | null = null
       if (n !== 0) {
         try {
           checkPayload = await profileCheck(profile, scope.value, {
@@ -174,8 +173,9 @@ async function save(profile: string, p: ProfileInfo) {
           showToast(`Лок записан, проверка не выполнена: ${(e as Error).message}`, 'warning')
         }
       }
+      return { lockRes, checkPayload }
     })
-    const changed = lockRes?.changed ? `${lockRes.previous || '?'}→${lockRes.lock}` : `лок ${n}`
+    const changed = lockRes.changed ? `${lockRes.previous || '?'}→${lockRes.lock}` : `лок ${n}`
     if (n === 0) {
       showToast(`Профиль ${profile} выключен (${changed})`)
       return

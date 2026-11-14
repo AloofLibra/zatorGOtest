@@ -23,7 +23,10 @@ NFQWS2_OPT="
 --filter-tcp=443
 "
 `)
-	probe, err := NewNfqwsProbe(NfqwsProbeConfig{Paths: p, Config: cfg, Runner: firewall.NewRecordingRunner()})
+	probe, err := NewNfqwsProbe(NfqwsProbeConfig{
+		Paths: p, Config: cfg, Runner: firewall.NewRecordingRunner(),
+		User: "nobody", UID: 65534, GID: 65534,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +38,22 @@ NFQWS2_OPT="
 	if !containsArg(args, "--qnum=65535") {
 		t.Fatalf("qnum: %v", args)
 	}
+	if !containsArg(args, "--user=nobody") {
+		t.Fatalf("user: %v", args)
+	}
+	if !containsArg(args, "--fwmark=0x40000000") {
+		t.Fatalf("fwmark: %v", args)
+	}
+	lib := "--lua-init=@" + filepath.ToSlash(filepath.Join(p.ZapretRoot, "lua", "zapret-lib.lua"))
+	if !containsArg(args, lib) {
+		t.Fatalf("zapret-lib: %v", args)
+	}
 	for _, a := range args {
 		if strings.HasPrefix(a, "--qnum=") && a != "--qnum=65535" {
 			t.Fatalf("лишний qnum: %s", a)
+		}
+		if strings.HasPrefix(a, "--user=") && a != "--user=nobody" {
+			t.Fatalf("лишний user: %s", a)
 		}
 	}
 	locked := "--lua-init=@" + filepath.ToSlash(filepath.Join(luaDir, "locked.lua"))
@@ -66,7 +82,10 @@ NFQWS2_OPT="
 --new
 "
 `)
-	probe, err := NewNfqwsProbe(NfqwsProbeConfig{Paths: p, Config: cfg, Runner: firewall.NewRecordingRunner()})
+	probe, err := NewNfqwsProbe(NfqwsProbeConfig{
+		Paths: p, Config: cfg, Runner: firewall.NewRecordingRunner(),
+		User: "nobody", UID: 65534, GID: 65534,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +120,11 @@ NFQWS2_OPT="
 --new
 "
 `)
-	probe, err := NewNfqwsProbe(NfqwsProbeConfig{Paths: p, Config: cfg})
+	probe, err := NewNfqwsProbe(NfqwsProbeConfig{
+		Paths: p, Config: cfg,
+		User: "nobody", UID: 65534, GID: 65534,
+		resolveUser: func() (string, uint32, uint32) { return "nobody", 65534, 65534 },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +134,35 @@ NFQWS2_OPT="
 	if probe.OrchestraDir() != filepath.Join(probe.WorkDir(), "orchestra") {
 		t.Errorf("OrchestraDir = %s", probe.OrchestraDir())
 	}
-	if probe.cfg.UID != firewall.SuperSweepProbeUID {
-		t.Errorf("UID = %d", probe.cfg.UID)
+	if probe.cfg.UID == 0 || probe.cfg.User == "" {
+		t.Errorf("UID/User empty: uid=%d user=%q", probe.cfg.UID, probe.cfg.User)
+	}
+}
+
+func TestNewNfqwsProbeRequiresPasswdUser(t *testing.T) {
+	p := paths.New(t.TempDir(), t.TempDir())
+	cfg := config.Parse(`FWTYPE=iptables
+NFQWS2_OPT="
+--new
+"
+`)
+	_, err := NewNfqwsProbe(NfqwsProbeConfig{
+		Paths: p, Config: cfg,
+		resolveUser: func() (string, uint32, uint32) { return "", 0, 0 },
+	})
+	if err == nil {
+		t.Fatal("ожидалась ошибка без passwd-user")
+	}
+}
+
+func TestResolveProbeUserFallback(t *testing.T) {
+	name, uid, _ := firewall.ResolveProbeUser()
+	// На Windows passwd-user часто нет — пустой результат ожидаем.
+	if name != "" && uid == 0 {
+		t.Fatalf("ResolveProbeUser inconsistent: %q %d", name, uid)
+	}
+	if name == "" && uid != 0 {
+		t.Fatalf("ResolveProbeUser inconsistent: %q %d", name, uid)
 	}
 }
 

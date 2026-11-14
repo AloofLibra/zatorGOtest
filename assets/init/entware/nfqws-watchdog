@@ -1,0 +1,152 @@
+#!/bin/sh
+# ZatorGO: respawn nfqws2 on Keenetic/Entware (нет systemd Restart=on-failure).
+# Рестартует только если выставлен флаг want-running (ставит S90-zapret2 start).
+# После успешного respawn вызывает restart-fw (процесс ≠ firewall после ndm).
+# Backoff + rate-limit защищают от crash-loop/OOM.
+
+NAME=zator-nfqws-watchdog
+INTERVAL="${Z2R_NFQWS_WATCHDOG_INTERVAL:-20}"
+MAX_INTERVAL="${Z2R_NFQWS_WATCHDOG_MAX_INTERVAL:-300}"
+MAX_PER_HOUR="${Z2R_NFQWS_WATCHDOG_MAX_PER_HOUR:-12}"
+LOG_MAX_BYTES="${Z2R_NFQWS_WATCHDOG_LOG_MAX:-65536}"
+WANT_FILE="${Z2R_NFQWS_WANT_RUNNING:-/opt/zator/state/nfqws2.want_running}"
+INIT="${Z2R_ZAPRET_INIT:-/opt/etc/init.d/S90-zapret2}"
+PIDFILE=/var/run/${NAME}.pid
+LOG=/tmp/${NAME}.log
+
+cur_interval="$INTERVAL"
+restarts_hour=0
+hour_start=$(date +%s 2>/dev/null || echo 0)
+
+is_running() {
+	[ -f "$PIDFILE" ] || return 1
+	pid="$(cat "$PIDFILE" 2>/dev/null)"
+	[ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+nfqws_alive() {
+	pidof nfqws2 >/dev/null 2>&1
+}
+
+want_running() {
+	[ -f "$WANT_FILE" ]
+}
+
+rotate_log() {
+	[ -f "$LOG" ] || return 0
+	sz=$(wc -c <"$LOG" 2>/dev/null || echo 0)
+	sz=$(echo "$sz" | tr -d ' \t')
+	if [ -n "$sz" ] && [ "$sz" -gt "$LOG_MAX_BYTES" ] 2>/dev/null; then
+		mv -f "$LOG" "$LOG.old" 2>/dev/null || true
+		: >"$LOG"
+	fi
+}
+
+bump_backoff() {
+	cur_interval=$((cur_interval * 2))
+	if [ "$cur_interval" -gt "$MAX_INTERVAL" ] 2>/dev/null; then
+		cur_interval="$MAX_INTERVAL"
+	fi
+}
+
+reset_hour_if_needed() {
+	now=$(date +%s 2>/dev/null || echo 0)
+	if [ -n "$now" ] && [ -n "$hour_start" ] && [ $((now - hour_start)) -ge 3600 ] 2>/dev/null; then
+		hour_start=$now
+		restarts_hour=0
+		cur_interval="$INTERVAL"
+	fi
+}
+
+loop() {
+	while true; do
+		rotate_log
+		reset_hour_if_needed
+		if want_running && ! nfqws_alive; then
+			ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '?')"
+			if [ "$restarts_hour" -ge "$MAX_PER_HOUR" ] 2>/dev/null; then
+				echo "$ts nfqws2 down — rate-limit ($restarts_hour/$MAX_PER_HOUR), sleep ${cur_interval}s" >>"$LOG"
+				sleep "$cur_interval"
+				continue
+			fi
+			echo "$ts nfqws2 down — restart via $INIT (try=$((restarts_hour + 1)))" >>"$LOG"
+			ok=0
+			if [ -x "$INIT" ]; then
+				if "$INIT" start-daemons >>"$LOG" 2>&1 || "$INIT" start >>"$LOG" 2>&1; then
+					ok=1
+				fi
+			fi
+			restarts_hour=$((restarts_hour + 1))
+			if [ "$ok" -eq 1 ]; then
+				# Процесс подняли — вернуть firewall rules (ndm мог снести NFQUEUE).
+				"$INIT" restart-fw >>"$LOG" 2>&1 || true
+				sleep 1
+				if nfqws_alive; then
+					echo "$ts nfqws2 up + restart-fw ok" >>"$LOG"
+					cur_interval="$INTERVAL"
+				else
+					echo "$ts nfqws2 still down after start — backoff" >>"$LOG"
+					bump_backoff
+				fi
+			else
+				echo "$ts start failed — backoff" >>"$LOG"
+				bump_backoff
+			fi
+		elif want_running && nfqws_alive; then
+			cur_interval="$INTERVAL"
+		fi
+		sleep "$cur_interval"
+	done
+}
+
+start() {
+	if is_running; then
+		echo "$NAME уже запущен"
+		return 0
+	fi
+	mkdir -p "$(dirname "$PIDFILE")" "$(dirname "$WANT_FILE")" 2>/dev/null || true
+	: >>"$LOG"
+	if command -v setsid >/dev/null 2>&1; then
+		setsid "$0" run </dev/null >>"$LOG" 2>&1 &
+	else
+		"$0" run </dev/null >>"$LOG" 2>&1 &
+	fi
+	echo $! >"$PIDFILE"
+	sleep 1
+	if ! is_running; then
+		echo "$NAME не запустился" >&2
+		rm -f "$PIDFILE"
+		return 1
+	fi
+	echo "$NAME запущен (interval=${INTERVAL}s max=${MAX_INTERVAL}s)"
+}
+
+stop() {
+	if is_running; then
+		kill "$(cat "$PIDFILE")" 2>/dev/null
+		sleep 1
+		if is_running; then
+			kill -9 "$(cat "$PIDFILE")" 2>/dev/null
+		fi
+	fi
+	rm -f "$PIDFILE"
+	echo "$NAME остановлен"
+}
+
+status() {
+	if is_running; then
+		echo "$NAME работает"
+		return 0
+	fi
+	echo "$NAME остановлен"
+	return 3
+}
+
+case "$1" in
+	run) loop ;;
+	start) start ;;
+	stop) stop ;;
+	restart) stop; sleep 1; start ;;
+	status) status ;;
+	*) echo "usage: $0 {start|stop|restart|status}"; exit 1 ;;
+esac

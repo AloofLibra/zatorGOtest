@@ -54,6 +54,45 @@ function slm_should_keep_full_hostname(hostname)
     return SEPARATE_SUBDOMAINS[key] == true
 end
 
+--- Extract per-POP hostkey for googlevideo media SNI.
+--- rrN---sn-<id>.googlevideo.com / sn-<id>.googlevideo.com → sn-<id>
+--- so rr1/rr2/rr5 of the same POP share one quality/auto-lock record.
+--- @param hostname string
+--- @return string|nil
+function slm_googlevideo_hostkey(hostname)
+    local key = slm_normalize_hostkey(hostname)
+    if not key then return nil end
+    local sn = key:match("^rr%d+%-%-%-sn%-([^.]+)%.googlevideo%.com$")
+    if sn and sn ~= "" then
+        return "sn-" .. sn
+    end
+    sn = key:match("^sn%-([^.]+)%.googlevideo%.com$")
+    if sn and sn ~= "" then
+        return "sn-" .. sn
+    end
+    return nil
+end
+
+--- circular_quality hostkey callback (desync → sn-<id> or normalized host).
+--- @param desync table
+--- @return string|nil
+function slm_desync_googlevideo_hostkey(desync)
+    local host = nil
+    if desync and desync.track and desync.track.hostname and desync.track.hostname ~= "" then
+        host = desync.track.hostname
+    elseif type(desync_hostname) == "function" then
+        host = desync_hostname(desync)
+    end
+    if not host or host == "" then
+        return nil
+    end
+    local gk = slm_googlevideo_hostkey(host)
+    if gk then
+        return gk
+    end
+    return slm_normalize_hostkey(host)
+end
+
 --- Normalize hostname to consistent key format
 --- This is THE ONLY place where hostname:lower() should be called
 --- @param hostname string The hostname to normalize

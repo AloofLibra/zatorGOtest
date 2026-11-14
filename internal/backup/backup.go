@@ -667,6 +667,7 @@ func (m *Manager) Restore(name string, opts RestoreOptions) (*Result, error) {
 
 // RestoreFile восстанавливает состояние из архива по пути (tar либо tar.gz).
 // Остановка и запуск сервиса — на стороне вызывающего.
+// Package C: перед записью снимается snapshot затронутых путей; при ошибке — откат.
 func (m *Manager) RestoreFile(archive string, opts RestoreOptions) (*Result, error) {
 	switch opts.Mode {
 	case ModeFull, ModeLists, ModeSmart:
@@ -686,8 +687,58 @@ func (m *Manager) RestoreFile(archive string, opts RestoreOptions) (*Result, err
 		return nil, fmt.Errorf("backup: распаковка %s: %w", filepath.Base(archive), err)
 	}
 
+	snapRoot, err := os.MkdirTemp("", "z2r_restore_snap_")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(snapRoot)
+
 	res := &Result{Mode: opts.Mode}
 	oldCfg := filepath.Join(tmp, entryConfig)
+	var undo []snapEntry
+
+	rollback := func() {
+		for i := len(undo) - 1; i >= 0; i-- {
+			e := undo[i]
+			if e.missing {
+				_ = os.Remove(e.dst)
+				continue
+			}
+			data, err := os.ReadFile(e.snap)
+			if err != nil {
+				continue
+			}
+			_ = fsutil.AtomicWriteFile(e.dst, data, 0o644)
+		}
+	}
+
+	snapshot := func(dst string) error {
+		se := snapEntry{dst: dst}
+		data, err := os.ReadFile(dst)
+		if errors.Is(err, os.ErrNotExist) {
+			se.missing = true
+			undo = append(undo, se)
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		se.snap = filepath.Join(snapRoot, fmt.Sprintf("%d.bin", len(undo)))
+		if err := os.WriteFile(se.snap, data, 0o644); err != nil {
+			return err
+		}
+		undo = append(undo, se)
+		return nil
+	}
+
+	writeLocked := func(dst string, data []byte) error {
+		if err := snapshot(dst); err != nil {
+			return err
+		}
+		return fsutil.WithDirLock(dst, 0, 0, func() error {
+			return fsutil.AtomicWriteFile(dst, data, 0o644)
+		})
+	}
 
 	// Config (до записи файлов: ошибка не должна оставить частичное состояние).
 	switch opts.Mode {
@@ -699,24 +750,71 @@ func (m *Manager) RestoreFile(archive string, opts RestoreOptions) (*Result, err
 			}
 			return nil, err
 		}
-		if err := fsutil.AtomicWriteFile(m.Paths.ZapretConfig, data, 0); err != nil {
+		if err := writeLocked(m.Paths.ZapretConfig, data); err != nil {
+			rollback()
 			return nil, err
 		}
 		res.ConfigReplaced = true
 	case ModeSmart:
+		if err := snapshot(m.Paths.ZapretConfig); err != nil {
+			return nil, err
+		}
 		applied, err := m.smartApply(oldCfg, m.Paths.ZapretConfig)
 		if err != nil {
+			rollback()
 			return nil, err
 		}
 		res.SmartApplied = applied
 	}
 
-	files, err := m.restoreState(tmp)
+	files, err := m.restoreStateSnap(tmp, snapshot)
 	res.Files = files
 	if err != nil {
+		rollback()
 		return res, err
 	}
 	return res, nil
+}
+
+type snapEntry struct {
+	dst     string
+	snap    string
+	missing bool
+}
+
+// restoreStateSnap как restoreState, но перед каждой записью вызывает snapshot.
+func (m *Manager) restoreStateSnap(root string, snapshot func(string) error) ([]string, error) {
+	var restored []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		dst := m.destFor(filepath.ToSlash(rel))
+		if dst == "" {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := snapshot(dst); err != nil {
+			return err
+		}
+		if err := fsutil.AtomicWriteFile(dst, data, 0o644); err != nil {
+			return fmt.Errorf("backup: восстановление %s: %w", rel, err)
+		}
+		restored = append(restored, dst)
+		return nil
+	})
+	sort.Strings(restored)
+	return restored, err
 }
 
 // destFor отображает имя записи архива на путь на диске ("" — игнорировать).

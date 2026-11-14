@@ -13,7 +13,6 @@ import (
 	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/fsutil"
 	"github.com/AloofLibra/zator/internal/service"
-	"github.com/AloofLibra/zator/internal/uiembed"
 )
 
 // BootstrapOptions — автозапуск служб после установки.
@@ -89,60 +88,9 @@ func sameFile(a, b string) bool {
 }
 
 // PrepareZapretRuntime готовит config → nfqws2.args и firewall-хук.
+// Делегирует пакету A (единый Apply: migrate WSSIZE/profile2 + args + custom.d).
 func (a *App) PrepareZapretRuntime() (fwHook string, err error) {
-	cfgPath := a.Paths.ZapretConfig
-	if err := os.MkdirAll(a.Paths.ZapretRoot, 0o755); err != nil {
-		return "", err
-	}
-	if _, err := os.Stat(cfgPath); err != nil {
-		if data, e := uiembed.ConfigDefault(); e == nil {
-			if e := a.seedZapretConfig(data); e != nil {
-				return "", e
-			}
-		}
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		return "", fmt.Errorf("чтение config: %w", err)
-	}
-	if changed, e := a.ensureNetworkIfaces(cfg); e == nil && changed {
-		_ = cfg.Save()
-	}
-	// Старый дефолт включал DNS-desync на весь UDP/53 (allow_nohost) — «пропадает интернет».
-	// Один раз выключаем при обновлении; дальше пользователь может включить вручную.
-	if a.migrateDNSDesyncOff(cfg) {
-		_ = cfg.Save()
-	}
-	gvLua := filepath.ToSlash(filepath.Join(a.Paths.LuaDir, "googlevideo-collect.lua"))
-	if ok, e := cfg.EnsureLuaInit(gvLua); e == nil && ok {
-		_ = cfg.Save()
-	}
-	argsFile := filepath.Join(a.Paths.ZapretRoot, "nfqws2.args")
-	if err := cfg.WriteNfqws2Args(argsFile); err != nil {
-		// leftover config без NFQWS2_OPT после wipe zator — пересоздаём из шаблона
-		if data, e := uiembed.ConfigDefault(); e == nil {
-			if e := os.WriteFile(cfgPath, data, 0o644); e == nil {
-				if cfg2, e2 := config.Load(cfgPath); e2 == nil {
-					if e2 = cfg2.WriteNfqws2Args(argsFile); e2 == nil {
-						cfg = cfg2
-						err = nil
-					}
-				}
-			}
-		}
-		if err != nil {
-			return "", err
-		}
-	}
-	qcfg := firewall.QueueHookFromGetter(func(k string) string { return cfg.GetDefault(k, "") })
-	hook, err := firewall.WriteQueueHook(a.Paths.ZapretRoot, qcfg)
-	if err != nil {
-		return "", err
-	}
-	_ = a.SyncCustomDHooks(cfg)
-	// Пустые hostlist-файлы, чтобы nfqws2 не падал на open().
-	_ = a.ensureHostlistPlaceholders()
-	return hook, nil
+	return a.ApplyZapretRuntime()
 }
 
 // SyncCustomDHooks пишет wssize + client-scope хуки в init.d/*/custom.d (sysv и openwrt).
@@ -282,6 +230,12 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 		time.Sleep(800 * time.Millisecond)
 		if st, err := mgr.Status(ctx, service.UnitZapret2); err == nil && !st.Running {
 			soft = append(soft, "nfqws2 не запущен после start (проверьте /opt/zapret2/nfqws2.args и логи)")
+		} else {
+			if err := a.EnsureFirewallApplied(ctx); err != nil {
+				soft = append(soft, "fw ensure: "+err.Error())
+			}
+			a.SyncAutoLockedPersist()
+			a.StartNfqwsWatchdog()
 		}
 	}
 
@@ -303,12 +257,15 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 
 	if len(hard) > 0 {
 		all := append(append([]string{}, hard...), soft...)
+		a.WriteServiceWarnings(all)
 		return fmt.Errorf("%s", joinErrors(all))
 	}
 	if len(soft) > 0 {
 		// Web UI реально жив — zapret-проблемы не валят install (иначе launcher die).
+		a.WriteServiceWarnings(soft)
 		return &SoftServiceError{Msgs: soft}
 	}
+	a.ClearServiceWarnings()
 	return nil
 }
 
@@ -347,6 +304,7 @@ func (a *App) StopAndUninstallServices() error {
 	if err != nil {
 		return err
 	}
+	a.StopNfqwsWatchdog()
 	var errs []string
 	for _, u := range service.Units() {
 		_ = mgr.Stop(ctx, u)

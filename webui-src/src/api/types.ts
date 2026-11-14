@@ -220,6 +220,13 @@ export interface DomainItem {
   source?: string
 }
 
+export interface GooglevideoAutoLock {
+  host: string
+  strategy: number
+  scope?: string
+  askey?: string
+}
+
 export interface DomainsListPayload {
   title?: string
   description?: string
@@ -227,6 +234,8 @@ export interface DomainsListPayload {
   is_custom_rkn?: boolean
   max_strategy?: number
   collection?: string
+  /** Per-SNI (sn-*) auto-locks for profile 2 */
+  auto_locks?: GooglevideoAutoLock[]
 }
 
 export interface ApplyResult {

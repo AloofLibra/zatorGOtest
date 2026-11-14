@@ -188,8 +188,10 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 			Log:         stdout,
 		})
 		if err != nil {
-			if soft, ok := err.(*app.SoftServiceError); ok {
+			var soft *app.SoftServiceError
+			if errors.As(err, &soft) {
 				fmt.Fprintf(stderr, "предупреждение zapret2/службы: %v\n", soft)
+				fmt.Fprintln(stderr, "Службы zapret2 могут быть не запущены — смотрите Web UI → Обзор.")
 			} else {
 				fmt.Fprintf(stderr, "zapret2: %v\n", err)
 				return 1
@@ -204,8 +206,10 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		}
 	} else if !*skipService {
 		if err := a.StartServices(context.Background(), app.BootstrapOptions{}); err != nil {
-			if soft, ok := err.(*app.SoftServiceError); ok {
+			var soft *app.SoftServiceError
+			if errors.As(err, &soft) {
 				fmt.Fprintf(stderr, "предупреждение служб: %v\n", soft)
+				fmt.Fprintln(stderr, "Web UI поднят; zapret2 может требовать ручного start.")
 			} else {
 				fmt.Fprintf(stderr, "автозапуск служб: %v\n", err)
 				return 1
@@ -217,7 +221,11 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Вход: пароль, заданный при установке.")
 	}
 	if !*skipService {
-		fmt.Fprintln(stdout, "Службы zapret2 и Web UI установлены и запущены.")
+		if warns := a.ServiceWarnings(); len(warns) > 0 {
+			fmt.Fprintln(stdout, "Службы: Web UI запущен; zapret2 — с предупреждениями (см. Обзор).")
+		} else {
+			fmt.Fprintln(stdout, "Службы zapret2 и Web UI установлены и запущены.")
+		}
 	} else {
 		fmt.Fprintln(stdout, "Запуск панели: zator webui")
 	}
@@ -230,6 +238,11 @@ func cmdUpdate(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ошибка конфигурации: %v\n", err)
 		return 1
 	}
+	if info, err := a.CreatePreUpdateBackup(); err != nil {
+		fmt.Fprintf(stderr, "предупреждение: pre-update backup: %v\n", err)
+	} else {
+		fmt.Fprintf(stdout, "pre-update backup: %s\n", info.Name)
+	}
 	// Сначала локальные встроенные ресурсы, затем (если онлайн) релизный tar.
 	if err := a.Update(); err != nil {
 		fmt.Fprintf(stderr, "обновление ресурсов не удалось: %v\n", err)
@@ -238,8 +251,29 @@ func cmdUpdate(stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "zator %s: встроенные ресурсы обновлены\n", zator.Version())
 
 	u := deploy.New(a.Paths)
-	if deploy.DetectOffline(os.Getenv, "").Offline {
-		fmt.Fprintln(stdout, "офлайн-режим: проверка релизов пропущена")
+	off := deploy.ResolveOfflineBundle(os.Getenv)
+	if off.Offline {
+		if off.Bundle == nil {
+			fmt.Fprintln(stdout, "офлайн-режим: бандл не найден (ZATOR_BUNDLE_DIR / vendor+zator-*.tar.gz)")
+			return 0
+		}
+		fmt.Fprintf(stdout, "офлайн-бандл: %s\n", off.Bundle.Tarball)
+		ar, err := u.ApplyBundle(*off.Bundle, "")
+		if err != nil {
+			fmt.Fprintf(stderr, "офлайн ApplyBundle: %v\n", err)
+			return 1
+		}
+		if ar != nil {
+			fmt.Fprintf(stdout, "офлайн: установлено файлов %d\n", ar.Installed)
+		}
+		if err := a.VerifyAfterUpdate(); err != nil {
+			fmt.Fprintf(stderr, "post-update verify: %v\n", err)
+			if rerr := a.RollbackPreUpdateBackup(); rerr != nil {
+				fmt.Fprintf(stderr, "rollback: %v\n", rerr)
+				return 1
+			}
+			fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
+		}
 		return 0
 	}
 	rep, err := u.Run(context.Background(), deploy.RunOptions{Variant: deploy.VariantFull})
@@ -253,6 +287,15 @@ func cmdUpdate(stdout, stderr io.Writer) int {
 	}
 	if rep != nil && rep.Apply != nil {
 		fmt.Fprintf(stdout, "релиз применён: установлено файлов %d\n", rep.Apply.Installed)
+		if err := a.VerifyAfterUpdate(); err != nil {
+			fmt.Fprintf(stderr, "post-update verify: %v\n", err)
+			if rerr := a.RollbackPreUpdateBackup(); rerr != nil {
+				fmt.Fprintf(stderr, "rollback: %v\n", rerr)
+				return 1
+			}
+			fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
+			return 0
+		}
 	}
 	return 0
 }

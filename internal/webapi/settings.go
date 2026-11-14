@@ -202,19 +202,24 @@ func (s *Server) wssizeGet(cfg *config.Config) any {
 	if err != nil {
 		scale = 1
 	}
-	mode := strings.ToLower(cfg.GetDefault("Z2R_WSSIZE_RAMP_MODE", "full"))
+	mode := strings.ToLower(cfg.GetDefault("Z2R_WSSIZE_RAMP_MODE", "lite"))
 	if mode != "lite" {
 		mode = "full"
 	}
 	ips := 0
-	if lines, err := readListLines(filepath.Join(s.paths.ListsDir, "googlevideo-ipv4.txt")); err == nil {
+	ipv4Fresh := false
+	if cl := s.app.GooglevideoCentralList(); cl != nil {
+		ips = cl.Count()
+		ipv4Fresh = cl.Fresh()
+	} else if lines, err := readListLines(filepath.Join(s.paths.ListsDir, "googlevideo-ipv4.txt")); err == nil {
 		ips = len(listEntries(lines))
 	}
 	return map[string]any{
-		"enabled":                      cfg.GetDefault("Z2R_WSSIZE_RAMP_ENABLE", "0") == "1",
+		"enabled":                      cfg.GetDefault("Z2R_WSSIZE_RAMP_ENABLE", "1") == "1",
 		"mode":                         mode,
 		"scale":                        scale,
 		"googlevideo_ips":              ips,
+		"googlevideo_ipv4_fresh":       ipv4Fresh,
 		"googlevideo_local_collection": s.app.GooglevideoCollectionStatus(),
 	}
 }
@@ -230,7 +235,7 @@ func (s *Server) updateCheck() any {
 		"error":             "",
 	}
 	u := deploy.New(s.paths)
-	if deploy.DetectOffline(os.Getenv, "").Offline {
+	if off := deploy.ResolveOfflineBundle(os.Getenv); off.Offline {
 		u.Offline = true
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

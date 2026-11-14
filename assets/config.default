@@ -76,20 +76,18 @@ NFQWS2_PORTS_UDP=443,2408,2053,2083,2087,2096,8443,51820,50000-50099,1400,3478-3
 # PKT_IN means connbytes dir reply
 NFQWS2_TCP_PKT_OUT=20
 NFQWS2_TCP_PKT_IN=10
-# Experimental Googlevideo-list wssize_ramp settings; disabled by default.
-Z2R_WSSIZE_RAMP_ENABLE=0
+# Googlevideo mid-stream: WSSIZE lite on by default (tiny TLS OK + cut media).
+# ARGS/SKIP — явные (без shell-if): Go BuildNfqws2Args и shell source видят одно и то же.
+# Пересчёт: SyncWssizeRampVars() при Apply / смене ENABLE/MODE в WebUI.
+Z2R_WSSIZE_RAMP_ENABLE=1
 Z2R_WSSIZE_MARK=0x04000000
 Z2R_WSSIZE_RAMP_IPSET=/opt/zator/lists/googlevideo-ipv4.txt
-Z2R_WSSIZE_RAMP_MODE=full
+Z2R_WSSIZE_RAMP_MODE=lite
 Z2R_WSSIZE_RAMP_WSIZE=1
 Z2R_WSSIZE_RAMP_SCALE=1
 Z2R_WSSIZE_RAMP_OPEN=1
-Z2R_WSSIZE_RAMP_ARGS=
-Z2R_WSSIZE_RAMP_SKIP=--skip
-if [ "$Z2R_WSSIZE_RAMP_ENABLE" = 1 ]; then
-  Z2R_WSSIZE_RAMP_ARGS=":mode=$Z2R_WSSIZE_RAMP_MODE:wsize=$Z2R_WSSIZE_RAMP_WSIZE:scale=$Z2R_WSSIZE_RAMP_SCALE:open=$Z2R_WSSIZE_RAMP_OPEN"
-  Z2R_WSSIZE_RAMP_SKIP=
-fi
+Z2R_WSSIZE_RAMP_ARGS=:mode=lite:wsize=1:scale=1:open=1
+Z2R_WSSIZE_RAMP_SKIP=
 NFQWS2_UDP_PKT_OUT=5
 NFQWS2_UDP_PKT_IN=3
 # redirect outgoing traffic without connbytes limiter and incoming with connbytes limiter
@@ -233,7 +231,7 @@ ${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WS
 --hostlist-exclude=/opt/zator/lists/netrogat.txt
 --payload=tls_client_hello,http_req,http_reply,unknown,tls_server_hello
 --out-range=-s34228
---in-range=-s32768 --lua-desync=circular_locked:key=2:exclude_substrings=/opt/zator/lists/netrogat_substrings.txt:payload=tls_client_hello
+--in-range=-s32768 --lua-desync=circular_quality:key=2:fails=2:time=60:failure_detector=combined_failure_detector:success_detector=combined_success_detector:lock_successes=2:lock_tests=3:lock_rate=0.5:unlock_fails=3:hostkey=slm_desync_googlevideo_hostkey:default_strategy=41:soft_success_in=0:soft_success_bytes=32768:exclude_substrings=/opt/zator/lists/netrogat_substrings.txt:payload=tls_client_hello
 --import=z2r_tcp_tls_common
 #Z2R_AUTO_STANDARD_2_END
 

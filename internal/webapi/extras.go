@@ -153,35 +153,88 @@ func (s *Server) nfqws2ErrorsGet() map[string]any {
 }
 
 func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, error) {
-	u := deploy.New(s.paths)
-	if deploy.DetectOffline(os.Getenv, "").Offline {
-		u.Offline = true
+	out := map[string]any{"ok": true, "up_to_date": false, "installed": 0, "restart_required": false}
+	// Package C: product-backup до Apply (best-effort).
+	if s.app != nil {
+		if info, err := s.app.CreatePreUpdateBackup(); err == nil {
+			out["pre_update_backup"] = info.Name
+		} else {
+			out["pre_update_backup_warning"] = err.Error()
+		}
 	}
+	u := deploy.New(s.paths)
+	off := deploy.ResolveOfflineBundle(os.Getenv)
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
-	rep, err := u.Run(ctx, deploy.RunOptions{Variant: deploy.VariantFull})
-	if err != nil {
-		return nil, errf(http.StatusBadGateway, "Обновление не удалось: "+err.Error())
-	}
-	out := map[string]any{"ok": true, "up_to_date": false, "installed": 0, "restart_required": false}
-	installed := 0
-	upToDate := false
-	if rep != nil {
-		upToDate = rep.UpToDate
-		out["up_to_date"] = upToDate
-		if rep.Apply != nil {
-			installed = rep.Apply.Installed
+
+	var (
+		installed int
+		upToDate  bool
+		err       error
+	)
+	if off.Offline && off.Bundle != nil {
+		out["offline"] = true
+		out["offline_reason"] = off.Reason
+		ar, aerr := u.ApplyBundle(*off.Bundle, "")
+		if aerr != nil {
+			return nil, errf(http.StatusBadGateway, "Офлайн-обновление не удалось: "+aerr.Error())
+		}
+		if ar != nil {
+			installed = ar.Installed
 			out["installed"] = installed
 		}
-		if rep.Check != nil && rep.Check.Latest != nil {
-			out["release"] = rep.Check.Latest.Release
+		out["up_to_date"] = false
+	} else {
+		if off.Offline {
+			u.Offline = true
+		}
+		rep, rerr := u.Run(ctx, deploy.RunOptions{Variant: deploy.VariantFull})
+		err = rerr
+		if err != nil {
+			return nil, errf(http.StatusBadGateway, "Обновление не удалось: "+err.Error())
+		}
+		if rep != nil {
+			upToDate = rep.UpToDate
+			out["up_to_date"] = upToDate
+			if rep.Apply != nil {
+				installed = rep.Apply.Installed
+				out["installed"] = installed
+			}
+			if rep.Check != nil && rep.Check.Latest != nil {
+				out["release"] = rep.Check.Latest.Release
+			}
 		}
 	}
 	if installed > 0 && !upToDate {
-		out["restart_required"] = true
-		s.schedulePostUpdateRestarts()
-		out["webui_restart_scheduled"] = true
-		out["zapret2_restart_scheduled"] = true
+		verifyOK := true
+		if s.app != nil {
+			if err := s.app.VerifyAfterUpdate(); err != nil {
+				verifyOK = false
+				out["post_update_verify"] = "fail"
+				out["post_update_verify_detail"] = err.Error()
+				if rerr := s.app.RollbackPreUpdateBackup(); rerr != nil {
+					out["rollback"] = "fail"
+					out["rollback_detail"] = rerr.Error()
+					s.app.WriteServiceWarnings([]string{err.Error(), "rollback: " + rerr.Error()})
+				} else {
+					out["rollback"] = "ok"
+					out["post_update_verify"] = "ok"
+					out["post_update_verify_detail"] = "restored from pre-update backup"
+					verifyOK = true
+				}
+			} else {
+				out["post_update_verify"] = "ok"
+			}
+		}
+		if verifyOK {
+			out["restart_required"] = true
+			s.schedulePostUpdateRestarts()
+			out["webui_restart_scheduled"] = true
+			out["zapret2_restart_scheduled"] = true
+		} else {
+			out["restart_required"] = false
+			out["restart_skipped"] = "post-update verify failed — рестарт отложен; откат из pre_update_backup не удался"
+		}
 	}
 	return out, nil
 }
@@ -195,7 +248,18 @@ func (s *Server) schedulePostUpdateRestarts() {
 		time.Sleep(1500 * time.Millisecond)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		_ = s.svc.Restart(ctx, service.UnitZapret2)
+		if s.app != nil {
+			if err := s.app.RestartZapretTransactional(ctx, func(ctx context.Context) error {
+				return s.svc.Restart(ctx, service.UnitZapret2)
+			}); err != nil {
+				s.app.WriteServiceWarnings([]string{"post-update restart: " + err.Error()})
+			} else {
+				s.app.StartNfqwsWatchdog()
+				s.app.ClearServiceWarnings()
+			}
+		} else {
+			_ = s.svc.Restart(ctx, service.UnitZapret2)
+		}
 		_ = s.svc.Restart(ctx, service.UnitValidator)
 		_ = s.svc.Restart(ctx, service.UnitWebUI)
 	}()

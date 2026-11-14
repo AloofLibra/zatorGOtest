@@ -55,6 +55,8 @@ jobs:
             name: x86
           - goarch: amd64
             name: x86_64
+          - goarch: riscv64
+            name: riscv64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

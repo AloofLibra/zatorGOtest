@@ -54,7 +54,10 @@
 | DNS sniffer C binary orchestration | done (режим sniffer/ubus) |
 | Provider ASN detect | done |
 | Telemetry consent + send | done (токен из env) |
-| Watchdog / strategy-validator daemon | partial (service templates; отдельный daemon loop — follow-up) |
+| Watchdog / strategy-validator daemon | partial (validator templates; Entware nfqws2 respawn — `zator-nfqws-watchdog`) |
+| Pre-update backup + post-update verify | done (`CreatePreUpdateBackup`, `VerifyAfterUpdate`) |
+| Config inter-process write-lock | done (`fsutil.WithDirLock` in `Config.SaveTo`) |
+| Transactional backup restore | done (snapshot undo in `RestoreFile`) |
 | VPS panels 3x-ui/marzban/wg/3proxy | out of scope для ядра; можно добавить later |
 | Интерактивное ANSI-меню | removed (breaking) |
 

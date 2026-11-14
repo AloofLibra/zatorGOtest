@@ -70,7 +70,13 @@ asset_url() {
 }
 
 arch=$(detect_arch)
-asset="zator-linux-${arch}"
+# Lexra (RLX) — нет отдельного Go-таргета; релизный ассет = mipsel softfloat.
+asset_arch=$arch
+if [ "$arch" = lexra ]; then
+  asset_arch=mipsel
+  echo "zator-launcher: архитектура Lexra — скачиваем zator-linux-mipsel" >&2
+fi
+asset="zator-linux-${asset_arch}"
 install_dir="$ZATOR_BIN_DIR"
 mkdir -p "$install_dir"
 tmp="$install_dir/.${asset}.$$"

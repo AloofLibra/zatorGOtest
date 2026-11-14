@@ -27,8 +27,14 @@ const (
 	MaxListBytes = 262144
 	// DefaultCacheTTL — срок годности кеша (6 часов).
 	DefaultCacheTTL = 6 * time.Hour
-	// DefaultListURL — источник центрального списка.
-	DefaultListURL = "https://alooflibra.fun/z4r/googlevideo-ips.txt"
+	// DefaultListURL — источник по умолчанию: пусто (только локальный
+	// assets/lists/googlevideo-ipv4.txt). Удалённый feed — opt-in через
+	// EnvListURL / CentralList.URL.
+	DefaultListURL = ""
+	// LegacyRemoteListURL — прежний публичный feed (только явным URL).
+	LegacyRemoteListURL = "https://alooflibra.fun/z4r/googlevideo-ips.txt"
+	// EnvListURL — переменная окружения с URL удалённого списка.
+	EnvListURL = "Z2R_GOOGLEVIDEO_IPS_URL"
 	// DefaultFetchTimeout — таймаут загрузки списка.
 	DefaultFetchTimeout = 10 * time.Second
 	// ListFileName — имя файла кеша в каталоге списков.
@@ -168,10 +174,7 @@ func (c *CentralList) now() time.Time {
 }
 
 func (c *CentralList) url() string {
-	if c.URL != "" {
-		return c.URL
-	}
-	return DefaultListURL
+	return strings.TrimSpace(c.URL)
 }
 
 func (c *CentralList) ttl() time.Duration {
@@ -294,6 +297,19 @@ func (c *CentralList) Update(ctx context.Context, force bool) (UpdateResult, err
 			res.Count = c.Count()
 		}
 		return res, nil
+	}
+
+	// Без URL — только локальный файл из репозитория/ассетов (self-contained).
+	if c.url() == "" {
+		l, err := c.Load()
+		if err != nil {
+			return UpdateResult{}, err
+		}
+		if len(l.IPs) == 0 {
+			return UpdateResult{}, fmt.Errorf("%w: удалённый источник отключён, локальный список пуст", ErrFetch)
+		}
+		c.notify(l.IPs)
+		return UpdateResult{Status: UpdateFresh, Count: len(l.IPs), Generated: l.Generated}, nil
 	}
 
 	list, err := c.fetch(ctx)

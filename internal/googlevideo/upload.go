@@ -21,8 +21,10 @@ import (
 
 // Параметры отправки наблюдений.
 const (
-	// DefaultIngestURL — приёмник наблюдений.
-	DefaultIngestURL = "https://alooflibra.fun/z4r/googlevideo-observations"
+	// DefaultIngestURL — пусто (self-contained); удалённый ingest только явно.
+	DefaultIngestURL = ""
+	// LegacyIngestURL — прежний приёмник наблюдений (opt-in).
+	LegacyIngestURL = "https://alooflibra.fun/z4r/googlevideo-observations"
 	// DefaultUploadInterval — не чаще одной отправки за интервал (3 часа).
 	DefaultUploadInterval = 10800 * time.Second
 	// MaxUploadPairs — максимум пар host=ip в одной отправке.
@@ -131,6 +133,7 @@ func NewUploader(cfg UploaderConfig) (*Uploader, error) {
 	if cfg.Collector == nil {
 		return nil, fmt.Errorf("googlevideo: Uploader требует Collector")
 	}
+	cfg.IngestURL = strings.TrimSpace(cfg.IngestURL)
 	if cfg.IngestURL == "" {
 		cfg.IngestURL = DefaultIngestURL
 	}
@@ -236,7 +239,7 @@ func (u *Uploader) uniqueName(prefix string) string {
 //     неотправленный остаток возвращается в retry-файл; при ошибке весь пакет
 //     возвращается в retry-файл, а результат — UploadFailed и ErrUpload.
 func (u *Uploader) Upload(ctx context.Context, force bool) (UploadResult, error) {
-	if u.cfg.Consent == nil {
+	if u.cfg.Consent == nil || strings.TrimSpace(u.cfg.IngestURL) == "" {
 		return UploadResult{Status: UploadDisabled}, nil
 	}
 	consent := u.cfg.Consent()

@@ -171,6 +171,8 @@ type TargetResult struct {
 	TLS12Detail VersionDetail `json:"tls12_detail"`
 	TLS13Detail VersionDetail `json:"tls13_detail"`
 	Download    *Download     `json:"download"` // nil -> null (этап пропущен)
+	// Media — классификация googlevideo mid-stream / tiny (Package B); nil если не применимо.
+	Media *MediaProbe `json:"media,omitempty"`
 }
 
 // CheckResponse — тело ответа check.cgi.

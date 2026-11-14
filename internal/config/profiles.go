@@ -45,7 +45,7 @@ type profileMeta struct {
 // (config_profile_title / config_profile_proto_list).
 var profileTable = [MaxProfile + 1]profileMeta{
 	1:  {"YouTube TCP", "Основной TCP профиль для YouTube", "TCP 443 (YouTube)", []string{"tls", "http"}, 44},
-	2:  {"Googlevideo", "Видео-домены YouTube", "TCP 443 (Googlevideo)", []string{"tls"}, 44},
+	2:  {"Googlevideo", "Видео-домены YouTube (per-SNI quality, seed из лока)", "TCP 443 (Googlevideo)", []string{"tls"}, 44},
 	3:  {"RKN Лист", "Основные блокировки сайтов", "TCP 443 (RKN)", []string{"tls"}, 44},
 	4:  {"Discord TCP", "TCP профиль Discord", "TCP 443 (Discord)", []string{"tls"}, 28},
 	5:  {"YouTube QUIC", "UDP 443 для YouTube", "UDP 443 (QUIC)", []string{"udp"}, 32},

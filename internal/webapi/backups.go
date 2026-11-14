@@ -296,13 +296,18 @@ func (s *Server) restoreBackup(archivePath, mode string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Package C: сериализация с editConfigs + BlockFull после update.
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+
+	blockFull := s.app != nil && s.app.BlockFullRestore()
 	if layout == "manager" {
 		mgr := backup.NewIn(s.paths, s.paths.BackupDir)
 		bm, err := backup.ParseMode(mode)
 		if err != nil {
 			return 0, err
 		}
-		res, err := mgr.RestoreFile(archivePath, backup.RestoreOptions{Mode: bm})
+		res, err := mgr.RestoreFile(archivePath, backup.RestoreOptions{Mode: bm, BlockFull: blockFull})
 		if err != nil {
 			return 0, err
 		}
@@ -315,6 +320,33 @@ func (s *Server) restoreBackup(archivePath, mode string) (int, error) {
 	defer os.RemoveAll(tmp)
 	if err := extractPlainTar(archivePath, tmp); err != nil {
 		return 0, err
+	}
+	if mode == "full" && blockFull {
+		return 0, backup.ErrFullBlocked
+	}
+	snapRoot, err := os.MkdirTemp("", "zator-restore-snap-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(snapRoot)
+	type snap struct {
+		dst, snap string
+		missing   bool
+	}
+	var undo []snap
+	rollback := func() {
+		for i := len(undo) - 1; i >= 0; i-- {
+			e := undo[i]
+			if e.missing {
+				_ = os.Remove(e.dst)
+				continue
+			}
+			data, err := os.ReadFile(e.snap)
+			if err != nil {
+				continue
+			}
+			_ = fsutil.AtomicWriteFile(e.dst, data, 0o644)
+		}
 	}
 	count := 0
 	err = filepath.WalkDir(tmp, func(p string, d fs.DirEntry, walkErr error) error {
@@ -337,6 +369,18 @@ func (s *Server) restoreBackup(archivePath, mode string) (int, error) {
 		if err != nil {
 			return err
 		}
+		se := snap{dst: dst}
+		if old, err := os.ReadFile(dst); err == nil {
+			se.snap = filepath.Join(snapRoot, fmt.Sprintf("%d.bin", len(undo)))
+			if err := os.WriteFile(se.snap, old, 0o644); err != nil {
+				return err
+			}
+		} else if errors.Is(err, os.ErrNotExist) {
+			se.missing = true
+		} else {
+			return err
+		}
+		undo = append(undo, se)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
@@ -346,7 +390,11 @@ func (s *Server) restoreBackup(archivePath, mode string) (int, error) {
 		count++
 		return nil
 	})
-	return count, err
+	if err != nil {
+		rollback()
+		return count, err
+	}
+	return count, nil
 }
 
 // detectBackupLayout: "manager" (orchestra/|lists/ без orchestra_state) или "webui".

@@ -14,6 +14,8 @@ const (
 	EnvOffline = "Z2R_OFFLINE"
 	// EnvOfflineAlias — синоним ZATOR_OFFLINE=1.
 	EnvOfflineAlias = "ZATOR_OFFLINE"
+	// EnvBundleDir — каталог офлайн-бандла (vendor/ + zator-*.tar.gz).
+	EnvBundleDir = "ZATOR_BUNDLE_DIR"
 	// BundleVendorDir — подкаталог бандла с зависимостями.
 	BundleVendorDir = "vendor"
 	// BundleTarballGlob — шаблон архива zator внутри бандла.
@@ -98,4 +100,38 @@ func (u *Updater) ApplyBundle(b Bundle, tag string) (*ApplyResult, error) {
 		tracking = "offline-" + tag
 	}
 	return u.ApplyArchive(b.Tarball, ApplyOptions{Tracking: tracking})
+}
+
+// ResolveOfflineBundle ищет бандл в ZATOR_BUNDLE_DIR, cwd и рядом с бинарником.
+// Offline=true также при Z2R_OFFLINE=1 (даже без бандла).
+func ResolveOfflineBundle(getenv func(string) string) OfflineStatus {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	dirs := make([]string, 0, 4)
+	if v := strings.TrimSpace(getenv(EnvBundleDir)); v != "" {
+		dirs = append(dirs, v)
+	}
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		dirs = append(dirs, cwd)
+	}
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		dirs = append(dirs, filepath.Dir(exe))
+	}
+	var found *Bundle
+	for _, d := range dirs {
+		if b, ok := FindBundle(d); ok {
+			bb := b
+			found = &bb
+			break
+		}
+	}
+	st := DetectOffline(getenv, "")
+	if found != nil {
+		st.Bundle = found
+		if !st.Offline {
+			st.Offline, st.Reason = true, "bundle"
+		}
+	}
+	return st
 }

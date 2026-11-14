@@ -1,6 +1,7 @@
 package webapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/paths"
 )
 
 const (
@@ -260,11 +262,27 @@ func (s *Server) googlevideoList(d listDef) (map[string]any, error) {
 		}
 		items = append(items, item)
 	}
+	autoLocks := s.googlevideoAutoLocks()
 	return map[string]any{
 		"list": d.name, "title": d.title, "description": d.description, "kind": d.kind,
 		"is_custom_rkn": false, "max_strategy": 0, "items": items,
 		"collection": s.app.GooglevideoCollectionStatus(),
+		"auto_locks": autoLocks,
 	}, nil
+}
+
+// googlevideoAutoLocks читает выученные sn→strat для профиля 2 (live + state backup).
+func (s *Server) googlevideoAutoLocks() []map[string]any {
+	live, _ := googlevideo.ParseAutoLockedTSV(paths.LiveAutoLockedTSV())
+	backup, _ := googlevideo.ParseAutoLockedTSV(s.paths.AutoLockedTSV)
+	merged := googlevideo.FilterAskey(googlevideo.MergeAutoLocked(live, backup), "2")
+	out := make([]map[string]any, 0, len(merged))
+	for _, l := range merged {
+		out = append(out, map[string]any{
+			"host": l.Host, "strategy": l.Strategy, "scope": l.Scope, "askey": l.Askey,
+		})
+	}
+	return out
 }
 
 // GET|POST /cgi-bin/domains.cgi
@@ -544,6 +562,15 @@ func (s *Server) googlevideoAction(p params) (map[string]any, error) {
 			return nil, errf(http.StatusInternalServerError, "Не удалось обновить список: "+err.Error())
 		}
 		return map[string]any{"ok": true, "added": n}, nil
+	case "refresh_ips":
+		force := p.Get("force") == "1" || strings.EqualFold(p.Get("force"), "true")
+		res, err := s.app.RefreshGooglevideoIPv4(context.Background(), force)
+		if err != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось обновить googlevideo-ipv4: "+err.Error())
+		}
+		return map[string]any{
+			"ok": true, "status": res.Status, "count": res.Count, "generated": res.Generated,
+		}, nil
 	case "add":
 		host, ok := googlevideoNormalize(p.Get("domain"))
 		if !ok {

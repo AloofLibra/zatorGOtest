@@ -83,6 +83,20 @@ z2r_load_ko()
 	return 0
 }
 
+# Флаг для zator-nfqws-watchdog: пользователь хочет, чтобы nfqws2 был запущен.
+Z2R_NFQWS_WANT_RUNNING="${Z2R_NFQWS_WANT_RUNNING:-/opt/zator/state/nfqws2.want_running}"
+
+z2r_mark_want_running()
+{
+	mkdir -p "$(dirname "$Z2R_NFQWS_WANT_RUNNING")" 2>/dev/null || true
+	echo 1 >"$Z2R_NFQWS_WANT_RUNNING" 2>/dev/null || true
+}
+
+z2r_clear_want_running()
+{
+	rm -f "$Z2R_NFQWS_WANT_RUNNING" 2>/dev/null || true
+}
+
 do_start()
 {
 	z2r_load_ko ip_set
@@ -105,10 +119,12 @@ do_start()
 	fi
 
 	zapret_run_daemons
+	z2r_mark_want_running
 	[ "$INIT_APPLY_FW" != "1" ] || { zapret_apply_firewall; }
 }
 do_stop()
 {
+	z2r_clear_want_running
 	zapret_stop_daemons
 	[ "$INIT_APPLY_FW" != "1" ] || zapret_unapply_firewall
 }
@@ -141,13 +157,25 @@ case "$1" in
 	
 	start-daemons|start_daemons)
 		zapret_run_daemons
+		z2r_mark_want_running
 		;;
 	stop-daemons|stop_daemons)
+		z2r_clear_want_running
 		zapret_stop_daemons
 		;;
 	restart-daemons|restart_daemons)
 		zapret_stop_daemons
 		zapret_run_daemons
+		z2r_mark_want_running
+		;;
+	status)
+		# Для service.Status fallback на Entware (pidof/proc предпочтительнее).
+		if pidof nfqws2 >/dev/null 2>&1; then
+			echo "zapret2 running"
+			exit 0
+		fi
+		echo "zapret2 stopped"
+		exit 3
 		;;
 
 	reload-ifsets|reload_ifsets)	
@@ -162,7 +190,7 @@ case "$1" in
 		
   *)
 	N=/etc/init.d/$NAME
-	echo "Usage: $N {start|stop|restart|start-fw|stop-fw|restart-fw|start-daemons|stop-daemons|restart-daemons|reload-ifsets|list-ifsets|list-table}" >&2
+	echo "Usage: $N {start|stop|restart|status|start-fw|stop-fw|restart-fw|start-daemons|stop-daemons|restart-daemons|reload-ifsets|list-ifsets|list-table}" >&2
 	exit 1
 	;;
 esac

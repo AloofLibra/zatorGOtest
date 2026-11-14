@@ -16,6 +16,7 @@ targets=(
   "ppc:ppc64::"
   "x86:386::"
   "x86_64:amd64::"
+  "riscv64:riscv64::"
 )
 
 export CGO_ENABLED=0

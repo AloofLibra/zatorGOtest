@@ -228,28 +228,55 @@ func (c *Checker) ProfileTarget(ctx context.Context, profile int) (Target, bool)
 }
 
 // CheckProfile — check.cgi?profile=N: проверка одной цели профиля.
-// Профили 5/6 — пустой список и пояснение; 10 — серия DNS-проб антиспуфа;
-// прочие — пустой список. Profile 2: при fail Googlevideo — контроль YouTube.
 func (c *Checker) CheckProfile(ctx context.Context, profile int) CheckResponse {
+	return c.CheckProfileOpts(ctx, profile, ProfileCheckOptions{})
+}
+
+// CheckProfileOpts — CheckProfile с опциями (media_url для профиля 2).
+// Профили 5/6 — пустой список; 10 — DNS-антиспуф. Profile 2: media-классификация
+// + при fail контроль YouTube.
+func (c *Checker) CheckProfileOpts(ctx context.Context, profile int, opts ProfileCheckOptions) CheckResponse {
 	switch profile {
 	case 5, 6:
 		return CheckResponse{Results: []TargetResult{}, Message: MessageUDPProfile}
 	case 10:
 		return CheckResponse{Results: []TargetResult{c.CheckDNSAntispoof(ctx)}}
 	}
+	if profile == 2 {
+		return c.checkProfileGooglevideo(ctx, opts)
+	}
 	t, ok := c.ProfileTarget(ctx, profile)
 	if !ok {
 		return CheckResponse{Results: []TargetResult{}, Message: MessageNoTLSProfile}
 	}
 	primary, retried := c.CheckTargetReliable(ctx, t.Label, t.URL)
-	resp := CheckResponse{Results: []TargetResult{primary}, Retried: retried}
-	if profile == 2 && primary.Verdict == VerdictFail && ctx.Err() == nil {
+	return CheckResponse{Results: []TargetResult{primary}, Retried: retried}
+}
+
+func (c *Checker) checkProfileGooglevideo(ctx context.Context, opts ProfileCheckOptions) CheckResponse {
+	primary := c.CheckGooglevideoMedia(ctx, opts.MediaURL)
+	resp := CheckResponse{Results: []TargetResult{primary}}
+	if primary.Media != nil {
+		switch primary.Media.Class {
+		case MediaMidstream:
+			resp.Message = "TLS CDN зелёный, но поток срезается (16K→64K) — mid-stream DPI: WSSIZE lite + свежий googlevideo-ipv4"
+		case MediaTiny:
+			resp.Message = "TLS OK, тело tiny — ротируйте стратегию профиля 2 (не WSSIZE)"
+		case MediaPlay:
+			resp.Message = "Media Range OK; если в браузере рвётся — смотрите QUIC/h3 (UDP) или клиент"
+		case MediaTLS:
+			resp.Message = "Проверен только TLS CDN. Для mid-stream добавьте media_url=… из DevTools (videoplayback)"
+		}
+	}
+	if primary.Verdict == VerdictFail && ctx.Err() == nil {
 		ctrl, r2 := c.CheckTargetReliable(ctx, LabelYouTube+" (контроль)", URLYouTube)
-		resp.Retried = resp.Retried || r2
+		resp.Retried = r2
 		resp.Results = append(resp.Results, ctrl)
 		switch ctrl.Verdict {
 		case VerdictOK, VerdictWarn:
-			resp.Message = "Googlevideo недоступен, YouTube отвечает — сбой на цели профиля 2 (не общий обрыв сети)"
+			if resp.Message == "" {
+				resp.Message = "Googlevideo недоступен, YouTube отвечает — сбой на цели профиля 2 (не общий обрыв сети)"
+			}
 		default:
 			resp.Message = "Недоступны Googlevideo и YouTube — общий сбой сети/DNS/DPI, не только стратегия профиля 2"
 		}
@@ -352,10 +379,37 @@ func (c *Checker) CheckYouTube(ctx context.Context) TargetResult {
 }
 
 // CheckGooglevideo — TLS/CDN-проверка реального кластера googlevideo.
-// Реальные медиаданные не проверяются (см. check_googlevideo_access):
-// корневой путь googlevideo обычно отдаёт 404 — это норма (verdict ok).
+// Корневой путь обычно 404 — это норма (verdict ok). Media-класс без URL = tls.
 func (c *Checker) CheckGooglevideo(ctx context.Context) TargetResult {
-	return c.CheckTarget(ctx, LabelGooglevideo, "https://"+c.ClusterDomain(ctx))
+	return c.CheckGooglevideoMedia(ctx, "")
+}
+
+// CheckGooglevideoMedia — TLS к кластеру + опциональные Range 16K/64K по mediaURL
+// (полный videoplayback из DevTools). Без URL mid-stream не диагностируется.
+func (c *Checker) CheckGooglevideoMedia(ctx context.Context, mediaURL string) TargetResult {
+	host := c.ClusterDomain(ctx)
+	rawURL := "https://" + host
+	r := c.CheckTarget(ctx, LabelGooglevideo, rawURL)
+
+	dnsFail := r.TLS12Detail.State == StateDNS || r.TLS13Detail.State == StateDNS
+	tlsOK := r.TLS12Detail.Answered() || r.TLS13Detail.Answered()
+
+	mediaURL = strings.TrimSpace(mediaURL)
+	hasURL := looksLikeGooglevideoMediaURL(mediaURL)
+	var d16, d64 *Download
+	if hasURL && tlsOK && ctx.Err() == nil {
+		a, b := ProbeMediaRanges(ctx, mediaURL, c.Options)
+		d16, d64 = &a, &b
+		// Показываем 64K-проб как download в результате (удобнее в UI).
+		r.Download = d64
+	}
+	media := ClassifyMediaRange(dnsFail, tlsOK, hasURL, d16, d64)
+	media.Host = host
+	if hasURL {
+		media.MediaURL = mediaURL
+	}
+	applyMediaToResult(&r, media)
+	return r
 }
 
 // CheckAccessList — порт check_access_list: DNS-гейт-подобная проверка не

@@ -285,14 +285,20 @@ func TestDefaultConfigModes(t *testing.T) {
 	if v, _ := c.Get("NFQWS2_PORTS_TCP"); v != "80,443,2053,2083,2087,2096,8443" {
 		t.Errorf("NFQWS2_PORTS_TCP = %q", v)
 	}
-	if v, _ := c.Get("Z2R_WSSIZE_RAMP_ENABLE"); v != "0" {
+	if v, _ := c.Get("Z2R_WSSIZE_RAMP_ENABLE"); v != "1" {
 		t.Errorf("Z2R_WSSIZE_RAMP_ENABLE = %q", v)
 	}
 	if v, _ := c.Get("Z2R_WSSIZE_MARK"); v != "0x04000000" {
 		t.Errorf("Z2R_WSSIZE_MARK = %q", v)
 	}
-	if v, _ := c.Get("Z2R_WSSIZE_RAMP_MODE"); v != "full" {
+	if v, _ := c.Get("Z2R_WSSIZE_RAMP_MODE"); v != "lite" {
 		t.Errorf("Z2R_WSSIZE_RAMP_MODE = %q", v)
+	}
+	if v, _ := c.Get("Z2R_WSSIZE_RAMP_ARGS"); !strings.Contains(v, "mode=lite") {
+		t.Errorf("Z2R_WSSIZE_RAMP_ARGS = %q", v)
+	}
+	if v, _ := c.Get("Z2R_WSSIZE_RAMP_SKIP"); v != "" {
+		t.Errorf("Z2R_WSSIZE_RAMP_SKIP = %q, want empty", v)
 	}
 	if ports := c.PortsFor("tcp"); len(ports.User) != 0 {
 		t.Errorf("tcp user ports = %v, want none", ports.User)

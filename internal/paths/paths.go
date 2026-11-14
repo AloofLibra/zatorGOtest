@@ -54,7 +54,12 @@ type Paths struct {
 	// Файлы состояния orchestra.
 	LockedTSV       string
 	LockedManualTSV string
+	// AutoLockedTSV — backup per-host auto-locks (SLM / circular_quality).
+	AutoLockedTSV string
 }
+
+// LiveAutoLockedTSV — активный файл auto-locks в tmpfs (пишет Lua).
+func LiveAutoLockedTSV() string { return "/tmp/auto_locked.tsv" }
 
 // New строит раскладку для заданных корней. Пустые значения заменяются
 // значениями по умолчанию.
@@ -94,6 +99,7 @@ func New(zatorRoot, zapretRoot string) Paths {
 
 		LockedTSV:       filepath.Join(stateDir, "orchestra", "locked.tsv"),
 		LockedManualTSV: filepath.Join(stateDir, "orchestra", "locked.manual.tsv"),
+		AutoLockedTSV:   filepath.Join(stateDir, "orchestra", "auto_locked.tsv"),
 	}
 }
 

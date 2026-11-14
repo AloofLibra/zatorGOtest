@@ -653,12 +653,25 @@ func (s *Server) postWssizeRamp(r *http.Request, p params) (map[string]any, erro
 				return err
 			}
 		}
+		if _, err := c.SyncWssizeRampVars(); err != nil {
+			return err
+		}
+		c.StripWssizeShellIf()
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	c, _ := s.readConfig()
-	_ = s.app.SyncCustomDHooks(c)
-	return map[string]any{"ok": true, "restarted": s.maybeRestart(r.Context(), p)}, nil
+	out := map[string]any{"ok": true, "restarted": s.maybeRestart(r.Context(), p)}
+	// При включении WSSIZE подтянуть ipv4 (force при явном refresh_ips=1).
+	if vars["Z2R_WSSIZE_RAMP_ENABLE"] == "1" || p.Get("refresh_ips") == "1" {
+		force := p.Get("refresh_ips") == "1"
+		if res, e := s.app.RefreshGooglevideoIPv4(r.Context(), force); e == nil {
+			out["ipv4_status"] = res.Status
+			out["ipv4_count"] = res.Count
+		} else {
+			out["ipv4_error"] = e.Error()
+		}
+	}
+	return out, nil
 }

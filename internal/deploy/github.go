@@ -87,9 +87,14 @@ func (u *Updater) FetchGitHubLatest(ctx context.Context) (*Latest, error) {
 	}, nil
 }
 
-// binaryAssetName — имя ассета бинарника для текущей архитектуры.
+// binaryAssetName — имя ассета бинарника для текущей архитектуры устройства.
+// Учитывает ReleaseArch (lexra → mipsel) и детект платформы, а не только GOARCH
+// бинарника (на Lexra SelfArch() дал бы mips/mipsel без cpuinfo).
 func binaryAssetName() string {
-	arch := platform.SelfArch()
+	arch := platform.Detect().Arch
+	if arch == platform.ArchUnknown {
+		arch = platform.SelfArch()
+	}
 	if arch == platform.ArchUnknown {
 		switch runtime.GOARCH {
 		case "amd64":
@@ -100,11 +105,16 @@ func binaryAssetName() string {
 			arch = platform.ArchARM64
 		case "arm":
 			arch = platform.ArchARM
+		case "riscv64":
+			arch = platform.ArchRISCV64
 		default:
 			arch = platform.Arch(runtime.GOARCH)
 		}
 	}
-	return "zator-linux-" + string(arch)
+	if name := platform.BinaryAssetName(arch); name != "" {
+		return name
+	}
+	return "zator-linux-" + string(platform.ReleaseArch(arch))
 }
 
 // FindGitHubBinaryURL ищет URL zator-linux-<arch> в latest-релизе.

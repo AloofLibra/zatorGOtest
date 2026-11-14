@@ -6,13 +6,13 @@
 
 | Метод | Путь | Назначение |
 | --- | --- | --- |
-| GET | `/api/status` | статус / профили / локи |
+| GET | `/api/status` | статус / профили / локи (`service_warnings`, `nfqws2_errors`, `post_update_verify`) |
 | GET | `/api/state` | агрегат для UI |
 | POST | `/api/set-lock` | фиксация стратегии |
 | POST | `/api/clear-lock` | сброс лока |
 | POST | `/api/service` | start/stop/restart zapret2 |
-| POST | `/api/check` | сетевая проверка |
-| GET/POST | `/api/domains` | списки доменов |
+| POST | `/api/check` | сетевая проверка (`profile=2&media_url=` — Range 16K/64K googlevideo) |
+| GET/POST | `/api/domains` | списки доменов (`action=refresh_ips` — googlevideo-ipv4 для WSSIZE) |
 | GET/POST | `/api/backups` | бэкапы |
 | GET | `/api/scopes` | client scopes |
 | GET/POST | `/api/settings` | настройки (`setting=…`) |

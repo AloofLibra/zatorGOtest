@@ -129,8 +129,11 @@ func (s *Server) statusPayload(ctx context.Context, scope string) map[string]any
 		}
 		profiles = append(profiles, sp)
 	}
-	return map[string]any{
-		"zapret2_running":       s.zapretRunning(ctx),
+	running := s.zapretRunning(ctx)
+	out := map[string]any{
+		"zapret2_running":       running,
+		"nfqws_watchdog":        s.app != nil && s.app.NfqwsWatchdogRunning(),
+		"nfqws_want_running":    s.app != nil && pathExists(s.app.NfqwsWantRunningPath()),
 		"strategy_locks_status": s.store.StatusText(),
 		"hostlist_mode":         cfg.HostlistText(),
 		"fwtype":                cfg.FWType(),
@@ -144,6 +147,68 @@ func (s *Server) statusPayload(ctx context.Context, scope string) map[string]any
 		"provider":              s.providerText(),
 		"client_scope":          s.clientScopeDiag(cfg),
 		"profiles":              profiles,
+	}
+	// Package C: честный health для Overview.
+	if s.app != nil {
+		if warns := s.app.ServiceWarnings(); len(warns) > 0 {
+			out["service_warnings"] = warns
+		}
+		if name := s.app.LastPreUpdateBackup(); name != "" {
+			out["pre_update_backup"] = name
+		}
+		if st, detail := s.app.PostUpdateVerifyStatus(); st != "" {
+			out["post_update_verify"] = st
+			if detail != "" {
+				out["post_update_verify_detail"] = detail
+			}
+		}
+		out["block_full_restore"] = s.app.BlockFullRestore()
+		out["fw_hook_present"] = s.app.FwHookPresent()
+		out["args_present"] = s.app.ArgsPresent()
+	}
+	errInfo := s.nfqws2ErrorsGet()
+	out["nfqws2_errors"] = map[string]any{
+		"available": errInfo["available"],
+		"lines":     errInfo["lines"],
+		"path":      errInfo["path"],
+	}
+	out["health"] = s.healthPayload(running)
+	return out
+}
+
+// healthPayload — агрегированный статус для Overview.
+func (s *Server) healthPayload(zapretRunning bool) map[string]any {
+	want := s.app != nil && pathExists(s.app.NfqwsWantRunningPath())
+	wd := s.app != nil && s.app.NfqwsWatchdogRunning()
+	fwHook := s.app != nil && s.app.FwHookPresent()
+	argsOK := s.app != nil && s.app.ArgsPresent()
+	warns := 0
+	postVerify := ""
+	fwEnsure := ""
+	if s.app != nil {
+		warns = len(s.app.ServiceWarnings())
+		postVerify, _ = s.app.PostUpdateVerifyStatus()
+		fwEnsure, _ = s.app.FwEnsureStatus()
+	}
+	overall := "ok"
+	switch {
+	case want && !zapretRunning:
+		overall = "down"
+	case warns > 0 || postVerify == "fail" || fwEnsure == "fail" || (zapretRunning && !argsOK):
+		overall = "degraded"
+	case !zapretRunning && !want:
+		overall = "ok"
+	}
+	return map[string]any{
+		"overall":            overall,
+		"zapret2_running":    zapretRunning,
+		"want_running":       want,
+		"watchdog":           wd,
+		"fw_hook_present":    fwHook,
+		"fw_ensure":          fwEnsure,
+		"args_present":       argsOK,
+		"post_update_verify": postVerify,
+		"service_warnings":   warns,
 	}
 }
 
@@ -166,6 +231,11 @@ func fileDate(path string) string {
 		return ""
 	}
 	return st.ModTime().UTC().Format("2006-01-02 15:04:05 UTC")
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func (s *Server) versionPayload() map[string]any {

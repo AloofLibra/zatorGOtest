@@ -57,6 +57,7 @@ const (
 type NetChecker interface {
 	Check(ctx context.Context) netcheck.CheckResponse
 	CheckProfile(ctx context.Context, profile int) netcheck.CheckResponse
+	CheckProfileOpts(ctx context.Context, profile int, opts netcheck.ProfileCheckOptions) netcheck.CheckResponse
 	CheckTarget(ctx context.Context, label, rawURL string) netcheck.TargetResult
 }
 
@@ -394,9 +395,22 @@ func (s *Server) zapretRunning(ctx context.Context) bool {
 }
 
 // restartIfRunning перезапускает zapret2, если он запущен; restarted — рестарт выполнен.
+// Использует transactional restart (Apply-gate + snapshot/rollback).
 func (s *Server) restartIfRunning(ctx context.Context) bool {
 	if s.svc == nil || !s.zapretRunning(ctx) {
 		return false
+	}
+	if s.app != nil {
+		err := s.app.RestartZapretTransactional(ctx, func(ctx context.Context) error {
+			return s.svc.Restart(ctx, service.UnitZapret2)
+		})
+		if err != nil {
+			s.app.WriteServiceWarnings([]string{err.Error()})
+			return false
+		}
+		s.app.StartNfqwsWatchdog()
+		s.app.ClearServiceWarnings()
+		return true
 	}
 	return s.svc.Restart(ctx, service.UnitZapret2) == nil
 }

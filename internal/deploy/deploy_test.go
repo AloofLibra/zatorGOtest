@@ -134,6 +134,21 @@ func TestDetectOfflineBundle(t *testing.T) {
 	}
 }
 
+func TestResolveOfflineBundleEnv(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "vendor"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "zator-full.tar.gz"), []byte("x"), 0o644)
+	st := ResolveOfflineBundle(func(k string) string {
+		if k == EnvBundleDir {
+			return dir
+		}
+		return ""
+	})
+	if !st.Offline || st.Bundle == nil || st.Bundle.Dir != dir {
+		t.Fatalf("%+v", st)
+	}
+}
+
 func TestKeepIfExists(t *testing.T) {
 	root := t.TempDir()
 	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))

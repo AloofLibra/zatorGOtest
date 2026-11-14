@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/AloofLibra/zator/internal/googlevideo"
@@ -119,4 +120,26 @@ func (a *App) StopGooglevideoCollection() {
 		_ = gvListener.Stop()
 		gvListener = nil
 	}
+}
+
+// GooglevideoCentralList — кеш lists/googlevideo-ipv4.txt для WSSIZE mark/ipset.
+// По умолчанию только локальный файл (из assets); удалённый feed — через
+// Z2R_GOOGLEVIDEO_IPS_URL.
+func (a *App) GooglevideoCentralList() *googlevideo.CentralList {
+	return &googlevideo.CentralList{
+		File: filepath.Join(a.Paths.ListsDir, googlevideo.ListFileName),
+		URL:  strings.TrimSpace(os.Getenv(googlevideo.EnvListURL)),
+	}
+}
+
+// RefreshGooglevideoIPv4 обновляет центральный ipv4-список (TTL или force).
+// Нужен для mid-stream: WSSIZE lite маркирует только адреса из этого файла/ipset.
+func (a *App) RefreshGooglevideoIPv4(ctx context.Context, force bool) (googlevideo.UpdateResult, error) {
+	if err := os.MkdirAll(a.Paths.ListsDir, 0o755); err != nil {
+		return googlevideo.UpdateResult{}, err
+	}
+	cl := a.GooglevideoCentralList()
+	// Подмешиваем локально наблюдаемые IP (коллектор) в OnUpdate не нужно —
+	// они живут отдельно; central list — публичный CIDR/IP feed.
+	return cl.Update(ctx, force)
 }

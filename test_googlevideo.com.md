@@ -12,8 +12,9 @@
 | только QUIC (h3) | UDP-профиль / форс TCP |
 | curl OK, плеер рвётся | клиент / кэш / расширение |
 
-> **Важно:** проверка Googlevideo в Web UI Zator — это TLS к корню CDN (404 нормален).  
-> Она **не** проверяет реальный видеопоток и **не** ловит mid-stream cut ~16 КБ.
+> **Важно:** обычная проверка Googlevideo в Web UI — TLS к корню CDN (404 нормален).  
+> Mid-stream / tiny: `check?profile=2&media_url=<URL videoplayback из DevTools>` — Range 16K/64K, поле `media.class` = `tls|tiny|midstream|play|dns`.  
+> Для WSSIZE: `domains?list=googlevideo&action=refresh_ips` обновляет `googlevideo-ipv4.txt`.
 
 ---
 

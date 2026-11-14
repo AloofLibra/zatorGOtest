@@ -106,6 +106,33 @@ func TestDetectLexra(t *testing.T) {
 	}
 }
 
+func TestReleaseArchAndBinaryAssetName(t *testing.T) {
+	if got := ReleaseArch(ArchLexra); got != ArchMIPSEL {
+		t.Fatalf("lexra → %q, want mipsel", got)
+	}
+	if got := ReleaseArch(ArchARM64); got != ArchARM64 {
+		t.Fatalf("arm64 → %q", got)
+	}
+	if got := BinaryAssetName(ArchLexra); got != "zator-linux-mipsel" {
+		t.Fatalf("BinaryAssetName(lexra) = %q", got)
+	}
+	if got := BinaryAssetName(ArchRISCV64); got != "zator-linux-riscv64" {
+		t.Fatalf("BinaryAssetName(riscv64) = %q", got)
+	}
+	released := ReleasedArches()
+	if len(released) < 10 {
+		t.Fatalf("ReleasedArches too short: %v", released)
+	}
+	for _, a := range released {
+		if a == ArchLexra {
+			t.Fatal("Lexra must not be in ReleasedArches")
+		}
+		if BinaryAssetName(a) == "" {
+			t.Fatalf("empty asset for %q", a)
+		}
+	}
+}
+
 func TestDetectRealDoesNotPanic(t *testing.T) {
 	p := Detect()
 	if p.Kind == "" || p.InitSystem == "" || p.FWType == "" {

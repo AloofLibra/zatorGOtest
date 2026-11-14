@@ -66,3 +66,22 @@ func TestWriteNfqws2Args(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestValidateNfqws2Args(t *testing.T) {
+	if err := ValidateNfqws2Args(nil); err == nil {
+		t.Fatal("empty")
+	}
+	if err := ValidateNfqws2Args([]string{"--qnum=200", "--new"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateNfqws2Args([]string{"--lua-desync=fake:blob=x;rm"}); err == nil {
+		t.Fatal("metachar")
+	}
+	if err := ValidateNfqws2Args([]string{"not-a-flag"}); err == nil {
+		t.Fatal("flag required")
+	}
+	c := Parse(`NFQWS2_OPT="--new --filter-tcp=80;evil"`)
+	if err := c.WriteNfqws2Args(filepath.Join(t.TempDir(), "a")); err == nil {
+		t.Fatal("write must reject metachar")
+	}
+}

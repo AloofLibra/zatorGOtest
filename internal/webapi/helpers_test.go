@@ -72,11 +72,19 @@ func okResult(label, target string) netcheck.TargetResult {
 func (c *fakeChecker) Check(context.Context) netcheck.CheckResponse {
 	return netcheck.CheckResponse{Results: []netcheck.TargetResult{okResult("YouTube", "https://www.youtube.com/")}}
 }
-func (c *fakeChecker) CheckProfile(_ context.Context, id int) netcheck.CheckResponse {
+func (c *fakeChecker) CheckProfile(ctx context.Context, id int) netcheck.CheckResponse {
+	return c.CheckProfileOpts(ctx, id, netcheck.ProfileCheckOptions{})
+}
+func (c *fakeChecker) CheckProfileOpts(_ context.Context, id int, _ netcheck.ProfileCheckOptions) netcheck.CheckResponse {
 	if id == 5 || id == 6 {
 		return netcheck.CheckResponse{Results: []netcheck.TargetResult{}, Message: netcheck.MessageUDPProfile}
 	}
-	return netcheck.CheckResponse{Results: []netcheck.TargetResult{okResult("profile", "https://x/")}}
+	r := okResult("profile", "https://x/")
+	if id == 2 {
+		r.Label = "Googlevideo"
+		r.Media = &netcheck.MediaProbe{Class: netcheck.MediaTLS, Text: "TLS only"}
+	}
+	return netcheck.CheckResponse{Results: []netcheck.TargetResult{r}}
 }
 func (c *fakeChecker) CheckTarget(_ context.Context, label, raw string) netcheck.TargetResult {
 	c.mu.Lock()

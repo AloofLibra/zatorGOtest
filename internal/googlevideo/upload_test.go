@@ -81,7 +81,10 @@ func newUploadEnv(t *testing.T, central CentralChecker, consent ConsentFunc) *up
 	if consent == nil {
 		consent = StaticConsent(true, "tok", "uuid-1")
 	}
-	up, err := NewUploader(UploaderConfig{Collector: col, Central: central, Consent: consent, Post: rec.post, Now: clk.Now})
+	up, err := NewUploader(UploaderConfig{
+		Collector: col, Central: central, Consent: consent, Post: rec.post, Now: clk.Now,
+		IngestURL: "https://ingest.test/upload",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,16 +111,19 @@ func TestNewUploader_Validation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if up.cfg.IngestURL != DefaultIngestURL || up.cfg.Interval != DefaultUploadInterval || up.cfg.Post == nil ||
+	if up.cfg.IngestURL != "" || up.cfg.Interval != DefaultUploadInterval || up.cfg.Post == nil ||
 		up.cfg.StampFile != filepath.Join(filepath.Dir(col.PendingFile()), UploadStampName) {
 		t.Errorf("defaults: %+v", up.cfg)
+	}
+	if DefaultIngestURL != "" {
+		t.Error("DefaultIngestURL must be empty (self-contained)")
 	}
 	if DefaultUploadInterval != 3*time.Hour || MaxUploadPairs != 24 || MaxUploadLegacyIPs != 64 {
 		t.Error("limits must match the reference implementation")
 	}
-	// Без Consent отправка отключена.
+	// Без Consent / без IngestURL отправка отключена.
 	if res, err := up.Upload(context.Background(), true); err != nil || res.Status != UploadDisabled {
-		t.Errorf("no consent func: %v %+v", err, res)
+		t.Errorf("no consent/url: %v %+v", err, res)
 	}
 }
 
@@ -175,7 +181,7 @@ func TestUpload_SuccessFlow(t *testing.T) {
 	if form.Get("observations") != want {
 		t.Errorf("observations = %q, want %q", form.Get("observations"), want)
 	}
-	if e.rec.urls[0] != DefaultIngestURL {
+	if e.rec.urls[0] != "https://ingest.test/upload" {
 		t.Errorf("url = %s", e.rec.urls[0])
 	}
 
@@ -574,7 +580,10 @@ func TestHTTPPost_Errors(t *testing.T) {
 func TestStubPost(t *testing.T) {
 	col, clk := newCollector(t, nil)
 	mustObserve(t, col, hostA, "9.9.9.9", 600)
-	up, _ := NewUploader(UploaderConfig{Collector: col, Now: clk.Now, Consent: StaticConsent(true, "t", "u"), Post: StubPost(200)})
+	up, _ := NewUploader(UploaderConfig{
+		Collector: col, Now: clk.Now, Consent: StaticConsent(true, "t", "u"), Post: StubPost(200),
+		IngestURL: "https://ingest.test/upload",
+	})
 	if res, err := up.Upload(context.Background(), false); err != nil || res.Status != UploadUploaded {
 		t.Errorf("stub accept: %v %+v", err, res)
 	}

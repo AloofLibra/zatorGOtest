@@ -10,3 +10,6 @@ dist/
 .env
 .DS_Store
 webui-src/node_modules/
+# Локальные архивы zapret2 (кладёт pack-offline.sh); списки/стратегии — в assets/.
+vendor/*.tar.gz
+vendor/zator-linux-*

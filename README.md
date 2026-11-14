@@ -85,7 +85,8 @@ zator version
 
 Статическая сборка (`CGO_ENABLED=0`):
 
-`arm`, `arm64`, `mips`, `mips64`, `mipsel`, `mipsel64`, `ppc`, `x86`, `x86_64`
+`arm`, `arm64`, `mips`, `mips64`, `mipsel`, `mipsel64`, `ppc`, `x86`, `x86_64`, `riscv64`
+(на Lexra/RLX лаунчер и обновления берут `mipsel`)
 
 ```sh
 make cross    # → dist/zator-linux-*
@@ -124,11 +125,14 @@ internal/
   service/           # start/stop/restart zapret2
   domains/           # списки доменов
   …
-assets/              # config.default, fake blobs, lua, lists
+assets/              # config.default, fake blobs, lua, lists, extra_strats, asn
 webui-src/           # Vue 3 + Vite исходники панели
 assets/webui/        # собранная статика (вшивается в бинарник)
+vendor/              # опционально: локальные архивы zapret2 (офлайн)
 docs/PARITY.md       # паритет с bash-zator
 ```
+
+Списки доменов, стратегии (`extra_strats`), Lua и ASN-таблица живут в `assets/` и вшиваются в бинарник — **без зависимости от чужих репозиториев** на runtime. Удалённые feed’ы (googlevideo-ips, ASN, telemetry/recs) отключены по умолчанию; включаются только явными env (`Z2R_GOOGLEVIDEO_IPS_URL`, `Z2R_RECS_URL`, …). Установка zapret2 сначала ищет архив в `vendor/` / `$ZATOR_VENDOR`, сеть — запасной путь.
 
 ---
 

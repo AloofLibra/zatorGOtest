@@ -46,12 +46,44 @@ const (
 	ArchUnknown  Arch = ""
 )
 
-// AllArches возвращает список поддерживаемых архитектур.
+// AllArches возвращает все известные архитектуры платформы (включая Lexra).
 func AllArches() []Arch {
 	return []Arch{
 		ArchARM, ArchARM64, ArchMIPS, ArchMIPS64, ArchMIPSEL, ArchMIPSEL64,
 		ArchPPC, ArchX86, ArchX86_64, ArchRISCV64, ArchLexra,
 	}
+}
+
+// ReleasedArches — архитектуры, для которых публикуется zator-linux-<arch>.
+// Lexra отдельного Go-таргета не имеет (см. ReleaseArch).
+func ReleasedArches() []Arch {
+	return []Arch{
+		ArchARM, ArchARM64, ArchMIPS, ArchMIPS64, ArchMIPSEL, ArchMIPSEL64,
+		ArchPPC, ArchX86, ArchX86_64, ArchRISCV64,
+	}
+}
+
+// ReleaseArch возвращает имя ассета релиза для архитектуры устройства.
+// Lexra (RLX) → mipsel softfloat: отдельного GOARCH нет, upstream zapret
+// держит linux-lexra, а zator собирается как mipsel.
+func ReleaseArch(a Arch) Arch {
+	switch a {
+	case ArchLexra:
+		return ArchMIPSEL
+	case ArchUnknown:
+		return ArchUnknown
+	default:
+		return a
+	}
+}
+
+// BinaryAssetName — имя файла релиза zator-linux-<arch> для данной arch.
+func BinaryAssetName(a Arch) string {
+	a = ReleaseArch(a)
+	if a == ArchUnknown {
+		return ""
+	}
+	return "zator-linux-" + string(a)
 }
 
 // InitSystem — система инициализации.

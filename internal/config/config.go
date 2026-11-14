@@ -113,12 +113,15 @@ func (c *Config) Save() error {
 }
 
 // SaveTo атомарно записывает конфиг в path (tmp-файл + rename). Права
-// существующего файла сохраняются.
+// существующего файла сохраняются. Межпроцессный mkdir-lock сериализует
+// WebUI/CLI/bootstrap (Package C).
 func (c *Config) SaveTo(path string) error {
-	if err := fsutil.AtomicWriteFile(path, []byte(c.String()), 0); err != nil {
-		return fmt.Errorf("config: save %s: %w", path, err)
-	}
-	return nil
+	return fsutil.WithDirLock(path, 0, 0, func() error {
+		if err := fsutil.AtomicWriteFile(path, []byte(c.String()), 0); err != nil {
+			return fmt.Errorf("config: save %s: %w", path, err)
+		}
+		return nil
+	})
 }
 
 // reindex пересобирает индекс присваиваний переменных.

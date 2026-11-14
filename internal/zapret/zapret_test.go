@@ -251,6 +251,42 @@ func TestDownloadAndInstall(t *testing.T) {
 
 func runtimeExecBit() bool { return os.PathSeparator == '/' }
 
+func TestInstallFromLocalArchive(t *testing.T) {
+	ver := "0.8.2"
+	dir := t.TempDir()
+	asset := AssetName(ver, false)
+	archPath := filepath.Join(dir, "vendor", asset)
+	if err := os.MkdirAll(filepath.Dir(archPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archPath, buildArchive(t, "zapret2-v"+ver), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "opt", "zapret2")
+	res, err := DownloadAndInstall(context.Background(), Options{
+		Root: root, Arch: platform.ArchX86_64, Version: ver,
+		VendorDir: filepath.Join(dir, "vendor"),
+		Offline:   true,
+		Client:    fastClient(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.URL, "file://") || res.Skipped {
+		t.Fatalf("local: %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(root, "binaries", "linux-x86_64", BinNfqws2)); err != nil {
+		t.Fatal(err)
+	}
+	// Offline без локального архива — ошибка, без сети.
+	if _, err := DownloadAndInstall(context.Background(), Options{
+		Root: filepath.Join(t.TempDir(), "z"), Arch: platform.ArchX86_64, Version: ver,
+		Offline: true, Client: fastClient(),
+	}); err == nil || !strings.Contains(err.Error(), "офлайн") {
+		t.Fatalf("offline without archive: %v", err)
+	}
+}
+
 func TestInstallSkipAndForce(t *testing.T) {
 	ver := "0.8.2"
 	var hits int32

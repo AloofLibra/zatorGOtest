@@ -45,8 +45,15 @@ const (
 	// EnvRecsURL переопределяет адрес подсказок.
 	EnvRecsURL = "Z2R_RECS_URL"
 
-	DefaultEndpoint  = "https://alooflibra.fun/z4r/telemetry"
-	DefaultRecsURL   = "https://alooflibra.fun/z4r/recommendations.tsv"
+	// DefaultEndpoint — пусто: отправка только при явном Endpoint / EnvStatsEndpoint
+	// и согласии пользователя (tel_enabled).
+	DefaultEndpoint = ""
+	// LegacyEndpoint — прежний сервер статистики (opt-in).
+	LegacyEndpoint = "https://alooflibra.fun/z4r/telemetry"
+	// DefaultRecsURL — пусто: подсказки только из локального кэша.
+	DefaultRecsURL = ""
+	// LegacyRecsURL — прежний удалённый TSV подсказок (opt-in через EnvRecsURL).
+	LegacyRecsURL    = "https://alooflibra.fun/z4r/recommendations.tsv"
 	DefaultChannelID = "z4r-sql-v3-modes"
 
 	// UUIDLength — длина идентификатора установки.
@@ -562,9 +569,9 @@ func (c *Client) SendSnapshot(ctx context.Context, s Stats) error {
 func (c *Client) post(ctx context.Context, s Stats) error {
 	form := s.Values()
 	form.Set("token", c.Token)
-	endpoint := c.Endpoint
+	endpoint := strings.TrimSpace(c.Endpoint)
 	if endpoint == "" {
-		endpoint = DefaultEndpoint
+		return fmt.Errorf("telemetry: endpoint не задан (self-contained; задайте %s)", EnvStatsEndpoint)
 	}
 	ctx, cancel := context.WithTimeout(ctx, SendTimeout)
 	defer cancel()
@@ -892,9 +899,9 @@ func (c *Client) refreshRecs(ctx context.Context, prov string) {
 }
 
 func (c *Client) downloadRecs(ctx context.Context, prov string) ([]byte, error) {
-	base := c.RecsURL
+	base := strings.TrimSpace(c.RecsURL)
 	if base == "" {
-		base = DefaultRecsURL
+		return nil, fmt.Errorf("telemetry: удалённые подсказки отключены (задайте %s)", EnvRecsURL)
 	}
 	u, err := url.Parse(base)
 	if err != nil {
