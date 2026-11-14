@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Релизы и changelog
+    url: https://github.com/Koviand/zatorGO/releases
+    about: Скачать бинарники и посмотреть, что вошло в версию
+  - name: Документация API
+    url: https://github.com/Koviand/zatorGO/blob/main/docs/API.md
+    about: HTTP / CGI эндпоинты Web UI
