@@ -23,8 +23,23 @@ export interface ProfileInfo {
   dns_desync_enabled?: boolean
 }
 
+export interface HealthPayload {
+  overall?: string
+  zapret2_running?: boolean
+  want_running?: boolean
+  watchdog?: boolean
+  webui_watchdog?: boolean
+  fw_hook_present?: boolean
+  fw_ensure?: string
+  args_present?: boolean
+  post_update_verify?: string
+  service_warnings?: number
+}
+
 export interface StatusPayload {
   zapret2_running?: boolean
+  nfqws_want_running?: boolean
+  nfqws_watchdog?: boolean
   strategy_locks_status?: string
   auto_mode?: string
   hostlist_mode?: string
@@ -33,9 +48,19 @@ export interface StatusPayload {
   tls_blob_mode?: string
   wireguard?: string
   rst_guard?: string
+  reasm?: string
+  quic443?: string
   provider?: string
   client_scope?: ClientScopeDiagnostics
   profiles?: ProfileInfo[]
+  health?: HealthPayload
+  service_warnings?: string[]
+  args_present?: boolean
+  fw_hook_present?: boolean
+  pre_update_backup?: string
+  post_update_verify?: string
+  post_update_verify_detail?: string
+  block_full_restore?: boolean
 }
 
 export interface ScopesPayload {

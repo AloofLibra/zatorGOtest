@@ -249,18 +249,31 @@ func (s *Server) schedulePostUpdateRestarts() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		if s.app != nil {
+			s.runtimeMu.Lock()
 			if err := s.app.RestartZapretTransactional(ctx, func(ctx context.Context) error {
 				return s.svc.Restart(ctx, service.UnitZapret2)
 			}); err != nil {
 				s.app.WriteServiceWarnings([]string{"post-update restart: " + err.Error()})
 			} else {
+				var warns []string
+				if st, d := s.app.FwEnsureStatus(); st == "fail" && d != "" {
+					warns = append(warns, "fw ensure: "+d)
+				}
 				s.app.StartNfqwsWatchdog()
-				s.app.ClearServiceWarnings()
+				if len(warns) > 0 {
+					s.app.WriteServiceWarnings(warns)
+				} else {
+					s.app.ClearServiceWarnings()
+				}
 			}
+			s.runtimeMu.Unlock()
 		} else {
 			_ = s.svc.Restart(ctx, service.UnitZapret2)
 		}
 		_ = s.svc.Restart(ctx, service.UnitValidator)
 		_ = s.svc.Restart(ctx, service.UnitWebUI)
+		if s.app != nil {
+			s.app.StartWebUIWatchdog()
+		}
 	}()
 }

@@ -57,6 +57,26 @@ func TestPreUpdateBackupMarkers(t *testing.T) {
 	}
 }
 
+func TestPreUpdateBinarySnapshotRestore(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+	a := NewWith(p, platform.Platform{})
+	_ = os.MkdirAll(p.BinDir, 0o755)
+	_ = os.MkdirAll(p.StateDir, 0o755)
+	_ = os.WriteFile(filepath.Join(p.BinDir, "zator"), []byte("BIN-V1"), 0o755)
+	if err := a.snapshotPreUpdateBinary(); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(p.BinDir, "zator"), []byte("BIN-V2"), 0o755)
+	if err := a.restorePreUpdateBinary(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(p.BinDir, "zator"))
+	if string(got) != "BIN-V1" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestVerifyAfterUpdateRequiresArgs(t *testing.T) {
 	root := t.TempDir()
 	p := paths.Paths{

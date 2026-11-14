@@ -289,13 +289,13 @@ async function saveCloneSize(profile: string) {
 
 <template>
   <section>
-    <div class="page-head">
+    <div class="page-head sticky-head">
       <div>
         <h1>Стратегии</h1>
-        <p>Локи рабочих стратегий по профилям. Новые тестовые desync и blob — во вкладке «Вручную».</p>
+        <p>Локи профилей. Тестовые desync — во «Вручную».</p>
       </div>
       <div class="actions">
-        <label class="field" style="min-width:160px">
+        <label class="field" style="min-width:140px">
           <span>Scope</span>
           <select :value="scope" :disabled="busyActive" @change="changeScope(($event.target as HTMLSelectElement).value)">
             <option v-for="s in scopeOptions" :key="s" :value="s">{{ s }}</option>
@@ -303,7 +303,7 @@ async function saveCloneSize(profile: string) {
         </label>
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh-locks' }" @click="refresh">Обновить</button>
         <router-link class="ghost btn-link" to="/manual">Вручную</router-link>
-        <button type="button" class="ghost" @click="focusSupersweep">К суперсвипу</button>
+        <button type="button" class="ghost" @click="focusSupersweep">Суперсвип</button>
       </div>
     </div>
 
@@ -313,36 +313,35 @@ async function saveCloneSize(profile: string) {
     <div v-if="!statusLoaded" class="loading">Загрузка…</div>
     <div v-else class="strategy-grid">
       <article :id="`strategy-${p.profile}`" v-for="p in locks" :key="p.profile" class="strategy" :class="{ 'is-gated': gated(p) }">
-        <div>
+        <div class="strategy-head">
           <h3>{{ p.profile }}. {{ p.label }}</h3>
-          <p v-if="p.description" class="meta">{{ p.description }}</p>
           <div class="meta">
-            lock: {{ p.current_lock || 'auto' }}
-            · max: {{ p.max_strategy ?? '—' }}
-            <template v-if="p.is_fallback"> · fallback {{ p.fallback_enabled ? 'вкл' : 'выкл' }}</template>
-            <template v-if="p.is_udp_games"> · games {{ p.udp_games_enabled ? 'вкл' : 'выкл' }}</template>
-            <template v-if="p.is_dns_desync"> · dns {{ p.dns_desync_enabled ? 'вкл' : 'выкл' }}</template>
+            lock {{ p.current_lock || 'auto' }} · max {{ p.max_strategy ?? '—' }}
+            <template v-if="p.is_fallback"> · fb {{ p.fallback_enabled ? 'on' : 'off' }}</template>
+            <template v-if="p.is_udp_games"> · games {{ p.udp_games_enabled ? 'on' : 'off' }}</template>
+            <template v-if="p.is_dns_desync"> · dns {{ p.dns_desync_enabled ? 'on' : 'off' }}</template>
           </div>
-          <p v-if="gated(p)" class="panel-d" style="color:var(--warn);margin-top:0.45rem">{{ gatedReason(p) }}</p>
         </div>
-        <div class="row">
+        <p v-if="p.description" class="meta" style="opacity:0.85">{{ p.description }}</p>
+        <p v-if="gated(p)" class="panel-d" style="color:var(--warn);margin:0">{{ gatedReason(p) }}</p>
+        <div class="strategy-actions">
           <input
             type="number" min="0" :max="p.max_strategy || 999"
             :value="draft[String(p.profile)] ?? ''"
-            :disabled="busyActive || gated(p)" placeholder="номер" style="max-width:7rem"
+            :disabled="busyActive || gated(p)" placeholder="№"
             @input="draft[String(p.profile)] = ($event.target as HTMLInputElement).value">
           <button type="button" class="primary" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `lock-${p.profile}` }"
-            @click="save(String(p.profile), p)">Зафиксировать</button>
+            @click="save(String(p.profile), p)">Лок</button>
           <button type="button" class="ghost" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `clear-${p.profile}` }"
             @click="reset(String(p.profile), p)">Авто</button>
           <button type="button" class="ghost" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `check-${p.profile}` }"
-            @click="check(String(p.profile), p)">Проверка</button>
+            @click="check(String(p.profile), p)">Check</button>
         </div>
-        <p v-if="draftDirty(p)" class="panel-d" style="color:var(--warn);margin-top:0.35rem">
-          Черновик {{ draftText(String(p.profile)) }} ≠ lock {{ p.current_lock || 'auto' }} — нажмите «Зафиксировать».
+        <p v-if="draftDirty(p)" class="panel-d" style="color:var(--warn);margin:0">
+          Черновик {{ draftText(String(p.profile)) }} ≠ {{ p.current_lock || 'auto' }}
         </p>
         <CheckResults
           v-if="!gated(p) && strategyChecks[String(p.profile)]"
@@ -351,7 +350,7 @@ async function saveCloneSize(profile: string) {
           empty-message="Нет результатов проверки."
           :empty-hidden="false"
         />
-        <div v-if="canOverride(p)" class="grid-2" style="margin-top:0.75rem">
+        <div v-if="canOverride(p)" class="grid-2" style="margin-top:0.35rem">
           <label class="field">
             <span>Режим фейков</span>
             <select v-model="fakeMode[String(p.profile)]" :disabled="busyActive"
@@ -362,10 +361,10 @@ async function saveCloneSize(profile: string) {
           </label>
           <div class="actions" style="align-items:end">
             <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `fake-${p.profile}` }"
-              @click="saveFake(String(p.profile))">Сохранить режим</button>
+              @click="saveFake(String(p.profile))">Сохранить</button>
           </div>
           <label class="field">
-            <span>TLS blob профиля</span>
+            <span>TLS blob</span>
             <select v-model="tlsProfile[String(p.profile)]" :disabled="busyActive"
               @change="markOverrideDirty(String(p.profile))">
               <option value="">как глобальный</option>
@@ -375,23 +374,24 @@ async function saveCloneSize(profile: string) {
           </label>
           <div class="actions" style="align-items:end">
             <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `tlsprof-${p.profile}` }"
-              @click="saveTlsProfile(String(p.profile))">Сохранить TLS</button>
+              @click="saveTlsProfile(String(p.profile))">TLS</button>
           </div>
           <label v-if="fakeMode[String(p.profile)] === 'clone'" class="field">
-            <span>Лимит клона (байт, пусто = без лимита)</span>
+            <span>Лимит клона</span>
             <input v-model="cloneSize[String(p.profile)]" :disabled="busyActive" placeholder="1200"
               @input="markOverrideDirty(String(p.profile))">
           </label>
           <div v-if="fakeMode[String(p.profile)] === 'clone'" class="actions" style="align-items:end">
             <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `clone-${p.profile}` }"
-              @click="saveCloneSize(String(p.profile))">Сохранить лимит</button>
+              @click="saveCloneSize(String(p.profile))">Лимит</button>
           </div>
         </div>
       </article>
     </div>
 
-    <h2 class="section-title" style="margin-top:1.5rem">Суперсвип</h2>
+    <div class="section-label" style="margin-top:1.35rem">Суперсвип · вторично</div>
     <SupersweepPanel
+      class="secondary"
       :scope="scope"
       :scopes="scopeOptions"
       @started="refresh"

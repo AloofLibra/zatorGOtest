@@ -251,6 +251,8 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 			if err != nil || !st.Running {
 				logHint := filepath.ToSlash(filepath.Join(a.Paths.StateDir, string(u)+".log"))
 				hard = append(hard, "zator-webui не запущен после start (лог: "+logHint+")")
+			} else {
+				a.StartWebUIWatchdog()
 			}
 		}
 	}

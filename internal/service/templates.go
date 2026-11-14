@@ -149,6 +149,15 @@ start() {
 	mkdir -p "$(dirname "$PIDFILE")"
 	if [ -n "$LOGFILE" ]; then
 		mkdir -p "$(dirname "$LOGFILE")"
+		# Ротация: не раздувать flash (Keenetic 128–256MB).
+		LOG_MAX_BYTES="${Z2R_SERVICE_LOG_MAX:-262144}"
+		if [ -f "$LOGFILE" ]; then
+			sz=$(wc -c <"$LOGFILE" 2>/dev/null || echo 0)
+			sz=$(echo "$sz" | tr -d ' \t')
+			if [ -n "$sz" ] && [ "$sz" -gt "$LOG_MAX_BYTES" ] 2>/dev/null; then
+				mv -f "$LOGFILE" "$LOGFILE.old" 2>/dev/null || true
+			fi
+		fi
 		: >>"$LOGFILE"
 	else
 		LOGFILE=/dev/null

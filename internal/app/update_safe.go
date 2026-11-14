@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,9 +10,13 @@ import (
 	"github.com/AloofLibra/zator/internal/backup"
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/deploy"
+	"github.com/AloofLibra/zator/internal/fsutil"
 )
 
-// CreatePreUpdateBackup снимает product-backup перед update (config+lists+orchestra).
+const preUpdateBinRel = "pre_update_bin/zator"
+
+// CreatePreUpdateBackup снимает product-backup перед update (config+lists+orchestra)
+// и снимок бинарника bin/zator (ModeSmart его не откатывает).
 func (a *App) CreatePreUpdateBackup() (backup.Info, error) {
 	mgr := backup.NewIn(a.Paths, a.Paths.BackupDir)
 	info, err := mgr.Create(backup.CreateOptions{IncludeLists: true})
@@ -19,7 +24,61 @@ func (a *App) CreatePreUpdateBackup() (backup.Info, error) {
 		return backup.Info{}, err
 	}
 	a.RememberPreUpdateBackup(info.Name)
+	_ = a.snapshotPreUpdateBinary()
 	return info, nil
+}
+
+func (a *App) preUpdateBinaryPath() string {
+	return filepath.Join(a.Paths.StateDir, filepath.FromSlash(preUpdateBinRel))
+}
+
+func (a *App) snapshotPreUpdateBinary() error {
+	src := filepath.Join(a.Paths.BinDir, "zator")
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	dst := a.preUpdateBinaryPath()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp := dst + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
+	}
+	_ = os.Remove(dst)
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func (a *App) restorePreUpdateBinary() error {
+	src := a.preUpdateBinaryPath()
+	st, err := os.Stat(src)
+	if err != nil || st.Size() == 0 {
+		return fmt.Errorf("нет снимка bin/zator")
+	}
+	dst := filepath.Join(a.Paths.BinDir, "zator")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	_ = os.MkdirAll(a.Paths.BinDir, 0o755)
+	return fsutil.AtomicWriteFile(dst, data, 0o755)
 }
 
 // VerifyAfterUpdate — проверка после Apply: bin, config, непустые валидные args.
@@ -61,8 +120,7 @@ func (a *App) VerifyAfterUpdate() error {
 	return nil
 }
 
-// RollbackPreUpdateBackup восстанавливает smart из LastPreUpdateBackup и
-// повторяет VerifyAfterUpdate.
+// RollbackPreUpdateBackup: smart restore архива + откат bin/zator из снимка.
 func (a *App) RollbackPreUpdateBackup() error {
 	name := a.LastPreUpdateBackup()
 	if name == "" {
@@ -72,11 +130,15 @@ func (a *App) RollbackPreUpdateBackup() error {
 	if _, err := mgr.Restore(name, backup.RestoreOptions{Mode: backup.ModeSmart}); err != nil {
 		return fmt.Errorf("rollback %s: %w", name, err)
 	}
+	binMsg := ""
+	if err := a.restorePreUpdateBinary(); err != nil {
+		binMsg = "; bin: " + err.Error()
+	}
 	a.ClearBlockFullRestore()
 	if err := a.VerifyAfterUpdate(); err != nil {
-		a.WriteServiceWarnings([]string{"rollback выполнен, verify всё ещё fail: " + err.Error()})
+		a.WriteServiceWarnings([]string{"rollback выполнен, verify всё ещё fail: " + err.Error() + binMsg})
 		return err
 	}
-	a.WriteServiceWarnings([]string{"выполнен smart-откат из pre-update backup " + name})
+	a.WriteServiceWarnings([]string{"выполнен smart-откат из pre-update backup " + name + binMsg})
 	return nil
 }

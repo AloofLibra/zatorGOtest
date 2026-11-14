@@ -250,20 +250,30 @@ defineExpose({ refresh })
 </template>
 
 <style scoped>
-.supersweep-panel { margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); font-size: .85rem; overflow-wrap: anywhere; }
-.supersweep-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
-.supersweep-panel h2, .supersweep-panel h3 { margin: 0; font-size: 1rem; }
-.supersweep-panel h3 { font-size: .9rem; }
-.supersweep-panel p { margin: .5rem 0; }
-.supersweep-panel progress { width: 100%; accent-color: var(--success); }
-.supersweep-meta { color: var(--muted); }
-.supersweep-controls { margin: .75rem 0 1rem; }
+.supersweep-panel {
+  margin-bottom: 0.75rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px dashed color-mix(in srgb, var(--line) 80%, var(--muted));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 65%, transparent);
+  box-shadow: none;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  opacity: 0.95;
+}
+.supersweep-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.65rem; }
+.supersweep-panel h2, .supersweep-panel h3 { margin: 0; font-size: 0.95rem; font-family: var(--font-display); }
+.supersweep-panel h3 { font-size: 0.88rem; }
+.supersweep-panel p { margin: 0.45rem 0; color: var(--muted); }
+.supersweep-panel progress { width: 100%; accent-color: var(--ok); }
+.supersweep-meta { color: var(--muted); font-family: var(--font-mono); font-size: 0.78rem; }
+.supersweep-controls { margin: 0.65rem 0 0.85rem; }
 .supersweep-controls textarea { width: 100%; resize: vertical; min-height: 4.5rem; }
-.supersweep-workers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: .75rem; margin: .75rem 0; }
-.supersweep-worker { min-width: 0; padding: .75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.supersweep-ok { color: var(--success); }
+.supersweep-workers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 0.65rem; margin: 0.65rem 0; }
+.supersweep-worker { min-width: 0; padding: 0.65rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+.supersweep-ok { color: var(--ok); }
 .supersweep-warn { color: var(--warn); }
 .supersweep-error, .supersweep-fail { color: var(--danger); }
-.supersweep-panel summary { cursor: pointer; margin-top: .75rem; }
-.supersweep-domains li { margin: .5rem 0; }
+.supersweep-panel summary { cursor: pointer; margin-top: 0.65rem; }
+.supersweep-domains li { margin: 0.45rem 0; }
 </style>

@@ -209,8 +209,8 @@ async function submitBlob() {
   <section>
     <div class="page-head">
       <div>
-        <h1>Добавить вручную</h1>
-        <p>Свои стратегии desync, blob и собранный список googlevideo CDN.</p>
+        <h1>Вручную</h1>
+        <p>Тестовые desync, загрузка blob и googlevideo CDN.</p>
       </div>
     </div>
 

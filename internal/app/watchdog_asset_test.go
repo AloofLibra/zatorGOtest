@@ -27,3 +27,16 @@ func TestNfqwsWatchdogHasBackoffAndRestartFW(t *testing.T) {
 		}
 	}
 }
+
+func TestWebUIWatchdogAsset(t *testing.T) {
+	data, err := fs.ReadFile(uiembed.Init(), "entware/webui-watchdog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, needle := range []string{"S92zator-webui", "MAX_PER_HOUR", "webui.want_running", "bump_backoff"} {
+		if !strings.Contains(s, needle) {
+			t.Errorf("webui-watchdog missing %q", needle)
+		}
+	}
+}

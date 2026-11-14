@@ -578,7 +578,7 @@ onMounted(async () => {
     <div class="page-head">
       <div>
         <h1>Настройки</h1>
-        <p>Параметры сгруппированы по задачам. Навигация сверху быстро переносит к нужному блоку.</p>
+        <p>Система, обход DPI, сеть и сервис — якоря сверху.</p>
       </div>
       <div class="actions">
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh-settings' }" @click="refresh">Обновить</button>

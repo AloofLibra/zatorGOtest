@@ -19,6 +19,14 @@ func (s *Server) sweepDir() string { return filepath.Join(s.paths.StateDir, "sup
 // probeDir — рабочий каталог изолированного nfqws2.
 func (s *Server) probeDir() string { return filepath.Join(s.paths.StateDir, "supersweep-probe") }
 
+// sweepRunningLocked — true, если sweeper уже создан и Running (без ленивого New).
+// Вызывать под runtimeMu или без — берёт sweepMu сам.
+func (s *Server) sweepRunningLocked() bool {
+	s.sweepMu.Lock()
+	defer s.sweepMu.Unlock()
+	return s.sweeper != nil && s.sweeper.Running()
+}
+
 // sweeperOrDefault возвращает Sweeper; по умолчанию лениво создаёт
 // *sweep.Coordinator с изолированным NfqwsProbe и приватным ProbeStore.
 func (s *Server) sweeperOrDefault() (Sweeper, error) {
@@ -102,6 +110,22 @@ func (s *Server) postSupersweep(_ *http.Request, p params) (map[string]any, erro
 	if action == "" {
 		action = strings.ToLower(p.Get("action"))
 	}
+	// status — read-only, без runtimeMu (не блокировать Overview).
+	if action == "status" {
+		sw, err := s.sweeperOrDefault()
+		if err != nil {
+			return nil, errf(http.StatusServiceUnavailable, "Суперавтопрогон недоступен: "+err.Error())
+		}
+		rep, err := sw.Report()
+		if err != nil {
+			return nil, errf(http.StatusInternalServerError, "Не удалось прочитать отчёт: "+err.Error())
+		}
+		return map[string]any{"ok": true, "report": rep, "running": sw.Running()}, nil
+	}
+
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+
 	sw, err := s.sweeperOrDefault()
 	if err != nil {
 		return nil, errf(http.StatusServiceUnavailable, "Суперавтопрогон недоступен: "+err.Error())
@@ -145,12 +169,6 @@ func (s *Server) postSupersweep(_ *http.Request, p params) (map[string]any, erro
 			return nil, errf(http.StatusInternalServerError, "Не удалось отменить суперавтопрогон: "+err.Error())
 		}
 		return map[string]any{"ok": true, "cancelled": true}, nil
-	case "status":
-		rep, err := sw.Report()
-		if err != nil {
-			return nil, errf(http.StatusInternalServerError, "Не удалось прочитать отчёт: "+err.Error())
-		}
-		return map[string]any{"ok": true, "report": rep, "running": sw.Running()}, nil
 	}
 	return nil, errf(http.StatusBadRequest, "Некорректное действие: "+action)
 }

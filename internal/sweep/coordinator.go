@@ -673,7 +673,21 @@ func (r *run) runPhase(ctx context.Context, phase string, specs []workerSpec) er
 	if err := r.c.cfg.Probe.Start(ctx, probeProfile); err != nil {
 		return fmt.Errorf("%w: профиль %d: %v", ErrProbe, probeProfile, err)
 	}
-	defer func() { _ = r.c.cfg.Probe.Stop() }()
+	defer func() {
+		var last error
+		for i := 0; i < 5; i++ {
+			last = r.c.cfg.Probe.Stop()
+			if last == nil {
+				return
+			}
+			r.c.logf("probe Stop retry %d: %v", i+1, last)
+			time.Sleep(200 * time.Millisecond)
+		}
+		if last != nil {
+			r.c.logf("probe Stop incomplete: %v", last)
+			_ = fsutil.AtomicWriteFile(r.path("cleanup_incomplete"), []byte(last.Error()+"\n"), 0o644)
+		}
+	}()
 	r.c.logf("=== Фаза %s (профиль %d) ===", phase, probeProfile)
 
 	if phase == WorkerRKN {

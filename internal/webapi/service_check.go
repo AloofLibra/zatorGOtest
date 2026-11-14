@@ -35,6 +35,18 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request, p params)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": msg, "detail": detail})
 		return
 	}
+
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+
+	if action != "stop" && s.sweepRunningLocked() {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  "Служба занята суперавтопрогоном",
+			"detail": "дождитесь окончания или отмените supersweep",
+		})
+		return
+	}
+
 	var err error
 	switch action {
 	case "start":
@@ -51,9 +63,17 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request, p params)
 		}
 		err = s.svc.Start(r.Context(), service.UnitZapret2)
 		if err == nil && s.app != nil {
-			_ = s.app.EnsureFirewallApplied(r.Context())
+			var warns []string
+			if e := s.app.EnsureFirewallApplied(r.Context()); e != nil {
+				warns = append(warns, "fw ensure: "+e.Error())
+			}
 			s.app.StartNfqwsWatchdog()
-			s.app.ClearServiceWarnings()
+			s.app.StartWebUIWatchdog()
+			if len(warns) > 0 {
+				s.app.WriteServiceWarnings(warns)
+			} else {
+				s.app.ClearServiceWarnings()
+			}
 		}
 	case "stop":
 		if s.app != nil {
@@ -74,8 +94,17 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request, p params)
 				})
 				return
 			}
+			var warns []string
+			if st, d := s.app.FwEnsureStatus(); st == "fail" && d != "" {
+				warns = append(warns, "fw ensure: "+d)
+			}
 			s.app.StartNfqwsWatchdog()
-			s.app.ClearServiceWarnings()
+			s.app.StartWebUIWatchdog()
+			if len(warns) > 0 {
+				s.app.WriteServiceWarnings(warns)
+			} else {
+				s.app.ClearServiceWarnings()
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
 		}

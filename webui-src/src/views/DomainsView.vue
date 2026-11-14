@@ -193,7 +193,7 @@ async function checkDomain(domain: string) {
     <div class="page-head">
       <div>
         <h1>Домены</h1>
-        <p>Списки hostlist: исключения, custom RKN и подстроки. Переключайте вкладки ниже.</p>
+        <p>Hostlist: исключения, custom RKN и подстроки.</p>
       </div>
       <div class="actions">
         <label v-if="scopes.enabled" class="field" style="margin:0">

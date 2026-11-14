@@ -23,12 +23,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +114,10 @@ type Server struct {
 
 	cfgMu  sync.Mutex // сериализует изменения config
 	listMu sync.Mutex // сериализует изменения списков доменов
+
+	// runtimeMu сериализует start/stop/restart zapret2 и supersweep start/cancel,
+	// чтобы не гонять службу во время прогона и наоборот.
+	runtimeMu sync.Mutex
 
 	sweepMu sync.Mutex
 	sweeper Sweeper
@@ -211,7 +218,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/cgi-bin/", notFound)
 	mux.HandleFunc("/api/", notFound)
 	mux.Handle("/", s.staticHandler())
-	return s.authMiddleware(mux)
+	return recoverMiddleware(s.authMiddleware(mux))
+}
+
+// recoverMiddleware ловит panic в handlers, чтобы Web UI не падал целиком.
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("webapi panic: %v\n%s", rec, debug.Stack())
+				if w.Header().Get("Content-Type") == "" {
+					writeError(w, http.StatusInternalServerError, fmt.Sprintf("внутренняя ошибка: %v", rec))
+				}
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // --- статика ---
@@ -400,6 +422,11 @@ func (s *Server) restartIfRunning(ctx context.Context) bool {
 	if s.svc == nil || !s.zapretRunning(ctx) {
 		return false
 	}
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	if s.sweepRunningLocked() {
+		return false
+	}
 	if s.app != nil {
 		err := s.app.RestartZapretTransactional(ctx, func(ctx context.Context) error {
 			return s.svc.Restart(ctx, service.UnitZapret2)
@@ -408,8 +435,17 @@ func (s *Server) restartIfRunning(ctx context.Context) bool {
 			s.app.WriteServiceWarnings([]string{err.Error()})
 			return false
 		}
+		var warns []string
+		if st, d := s.app.FwEnsureStatus(); st == "fail" && d != "" {
+			warns = append(warns, "fw ensure: "+d)
+		}
 		s.app.StartNfqwsWatchdog()
-		s.app.ClearServiceWarnings()
+		s.app.StartWebUIWatchdog()
+		if len(warns) > 0 {
+			s.app.WriteServiceWarnings(warns)
+		} else {
+			s.app.ClearServiceWarnings()
+		}
 		return true
 	}
 	return s.svc.Restart(ctx, service.UnitZapret2) == nil

@@ -180,6 +180,7 @@ func (s *Server) statusPayload(ctx context.Context, scope string) map[string]any
 func (s *Server) healthPayload(zapretRunning bool) map[string]any {
 	want := s.app != nil && pathExists(s.app.NfqwsWantRunningPath())
 	wd := s.app != nil && s.app.NfqwsWatchdogRunning()
+	webuiWD := s.app != nil && s.app.WebUIWatchdogRunning()
 	fwHook := s.app != nil && s.app.FwHookPresent()
 	argsOK := s.app != nil && s.app.ArgsPresent()
 	warns := 0
@@ -204,6 +205,7 @@ func (s *Server) healthPayload(zapretRunning bool) map[string]any {
 		"zapret2_running":    zapretRunning,
 		"want_running":       want,
 		"watchdog":           wd,
+		"webui_watchdog":     webuiWD,
 		"fw_hook_present":    fwHook,
 		"fw_ensure":          fwEnsure,
 		"args_present":       argsOK,

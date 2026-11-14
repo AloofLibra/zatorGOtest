@@ -268,8 +268,19 @@ func (p *NfqwsProbe) stopLocked(_ context.Context) error {
 
 	var errs []string
 	if p.ss != nil {
-		if err := p.ss.ForceCleanup(cleanCtx); err != nil {
-			errs = append(errs, "firewall: "+err.Error())
+		var last error
+		for i := 0; i < 5; i++ {
+			last = p.ss.ForceCleanup(cleanCtx)
+			if last == nil {
+				break
+			}
+			if !errors.Is(last, firewall.ErrCleanupIncomplete) {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		if last != nil {
+			errs = append(errs, "firewall: "+last.Error())
 		}
 		p.ss = nil
 	} else if p.cfg.Config != nil {
@@ -280,8 +291,19 @@ func (p *NfqwsProbe) stopLocked(_ context.Context) error {
 				ssCfg.PortRangeFile = p.cfg.PortRangeFile
 			}
 			if ss, err := firewall.NewSuperSweep(ssCfg, p.cfg.Runner); err == nil {
-				if err := ss.ForceCleanup(cleanCtx); err != nil && !errors.Is(err, firewall.ErrCleanupIncomplete) {
-					errs = append(errs, "orphan-firewall: "+err.Error())
+				var last error
+				for i := 0; i < 5; i++ {
+					last = ss.ForceCleanup(cleanCtx)
+					if last == nil {
+						break
+					}
+					if !errors.Is(last, firewall.ErrCleanupIncomplete) {
+						break
+					}
+					time.Sleep(200 * time.Millisecond)
+				}
+				if last != nil {
+					errs = append(errs, "orphan-firewall: "+last.Error())
 				}
 			}
 		}

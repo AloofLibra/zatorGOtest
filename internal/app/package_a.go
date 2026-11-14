@@ -206,6 +206,83 @@ func (a *App) StopNfqwsWatchdog() {
 	_ = runDetached(bin, "stop")
 }
 
+// WebUIWantRunningPath — флаг «пользователь хочет Web UI» для Entware-watchdog.
+func (a *App) WebUIWantRunningPath() string {
+	return filepath.Join(a.Paths.StateDir, "webui.want_running")
+}
+
+func (a *App) setWebUIWantRunning(want bool) {
+	path := a.WebUIWantRunningPath()
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	if want {
+		_ = fsutil.AtomicWriteFile(path, []byte("1\n"), 0o644)
+		return
+	}
+	_ = os.Remove(path)
+}
+
+func (a *App) deployWebUIWatchdog() error {
+	if a.Platform.InitSystem != platform.InitEntware && a.Platform.Kind != platform.KindEntware {
+		return nil
+	}
+	data, err := fs.ReadFile(uiembed.Init(), "entware/webui-watchdog")
+	if err != nil || len(data) == 0 {
+		return err
+	}
+	dst := filepath.Join(a.Paths.BinDir, "zator-webui-watchdog")
+	if err := os.MkdirAll(a.Paths.BinDir, 0o755); err != nil {
+		return err
+	}
+	if err := fsutil.AtomicWriteFile(dst, data, 0o755); err != nil {
+		return err
+	}
+	link := "/opt/etc/init.d/S93zator-webui-watchdog"
+	_ = os.MkdirAll(filepath.Dir(link), 0o755)
+	_ = os.Remove(link)
+	if err := os.Symlink(dst, link); err != nil {
+		_ = fsutil.AtomicWriteFile(link, data, 0o755)
+	}
+	return nil
+}
+
+// StartWebUIWatchdog поднимает respawn панели (Entware/Keenetic).
+func (a *App) StartWebUIWatchdog() {
+	if a.Platform.InitSystem != platform.InitEntware && a.Platform.Kind != platform.KindEntware {
+		return
+	}
+	_ = a.deployWebUIWatchdog()
+	a.setWebUIWantRunning(true)
+	bin := filepath.Join(a.Paths.BinDir, "zator-webui-watchdog")
+	if _, err := os.Stat(bin); err != nil {
+		return
+	}
+	_ = runDetached(bin, "start")
+}
+
+// StopWebUIWatchdog снимает want и останавливает loop.
+func (a *App) StopWebUIWatchdog() {
+	a.setWebUIWantRunning(false)
+	bin := filepath.Join(a.Paths.BinDir, "zator-webui-watchdog")
+	if _, err := os.Stat(bin); err != nil {
+		return
+	}
+	_ = runDetached(bin, "stop")
+}
+
+// WebUIWatchdogRunning — жив ли процесс webui-watchdog.
+func (a *App) WebUIWatchdogRunning() bool {
+	b, err := os.ReadFile("/var/run/zator-webui-watchdog.pid")
+	if err != nil {
+		return false
+	}
+	pid := strings.TrimSpace(string(b))
+	if pid == "" {
+		return false
+	}
+	_, err = os.Stat(filepath.Join("/proc", pid))
+	return err == nil
+}
+
 func runDetached(bin string, args ...string) error {
 	cmd := exec.Command(bin, args...)
 	return cmd.Start()
