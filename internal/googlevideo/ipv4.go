@@ -80,18 +80,22 @@ func PublicIPv4(s string) bool {
 }
 
 // NormalizeHostname приводит имя к нижнему регистру без завершающей точки и
-// проверяет, что это поддомен googlevideo.com из символов [a-z0-9.-] без
-// пустых меток и без ведущей точки (googlevideo_hostname_valid).
+// принимает media-CDN YouTube:
+//
+//	^rr\d+---sn-[a-z0-9-]+\.googlevideo\.com$
+//
+// (например rr18---sn-pmcg-bg0s.googlevideo.com). Остальные *.googlevideo.com
+// (redirector, манифесты и т.п.) отклоняются — они не узлы videoplayback.
 func NormalizeHostname(host string) (string, bool) {
-	h := strings.ToLower(host)
+	h := strings.ToLower(strings.TrimSpace(host))
 	h = strings.TrimSuffix(h, ".")
 	if h == "" || strings.Trim(h, "abcdefghijklmnopqrstuvwxyz0123456789.-") != "" {
 		return "", false
 	}
-	if strings.HasPrefix(h, ".") || strings.Contains(h, "..") || strings.HasSuffix(h, ".") {
+	if strings.HasPrefix(h, ".") || strings.Contains(h, "..") {
 		return "", false
 	}
-	if !strings.HasSuffix(h, ".googlevideo.com") || h == "googlevideo.com" {
+	if !IsRRMediaHost(h) {
 		return "", false
 	}
 	return h, true

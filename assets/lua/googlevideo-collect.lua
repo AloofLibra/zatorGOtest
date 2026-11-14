@@ -1,5 +1,6 @@
--- Collect rr*---sn-*.googlevideo.com hostnames seen in TLS SNI into a tmp log
+-- Collect YouTube media CDN hosts seen in TLS SNI into a tmp log
 -- that Go merges into /opt/zator/lists/googlevideo-hosts.txt.
+-- Pattern: ^rr\d+---sn-[a-z0-9-]+\.googlevideo\.com$
 -- Runs as nobody: write only under /tmp/z2r-googlevideo/.
 
 local Z2R_GV_DIR = "/tmp/z2r-googlevideo"
@@ -12,10 +13,8 @@ local function z2r_gv_is_collectable(host)
   if not host or host == "" then return false end
   host = string.lower(tostring(host))
   host = string.gsub(host, "%.$", "")
-  if host == "googlevideo.com" or host == "redirector.googlevideo.com" then
-    return false
-  end
-  return string.match(host, "%.googlevideo%.com$") ~= nil
+  -- Media videoplayback CDN only (not redirector / manifests / other GV labels).
+  return string.match(host, "^rr%d+%-%-%-sn%-[a-z0-9%-]+%.googlevideo%.com$") ~= nil
 end
 
 local function z2r_gv_ensure_dir()

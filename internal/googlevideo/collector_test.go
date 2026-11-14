@@ -295,8 +295,8 @@ func TestObserve_RowLimits(t *testing.T) {
 	now := clk.Now().Unix()
 	var local, pending strings.Builder
 	for i := 0; i < MaxStateRows; i++ {
-		fmt.Fprintf(&local, "old%d.googlevideo.com\t11.0.%d.%d\t%d\t%d\n", i, i>>8, i&255, now+1000, now-1)
-		fmt.Fprintf(&pending, "11.0.%d.%d\t%d\told%d.googlevideo.com\n", i>>8, i&255, now-1, i)
+		fmt.Fprintf(&local, "rr1---sn-old%d.googlevideo.com\t11.0.%d.%d\t%d\t%d\n", i, i>>8, i&255, now+1000, now-1)
+		fmt.Fprintf(&pending, "11.0.%d.%d\t%d\trr1---sn-old%d.googlevideo.com\n", i>>8, i&255, now-1, i)
 	}
 	writeText(t, c.LocalFile(), local.String())
 	writeText(t, c.PendingFile(), pending.String())
@@ -304,11 +304,11 @@ func TestObserve_RowLimits(t *testing.T) {
 	mustObserve(t, c, hostA, "9.9.9.9", 600)
 
 	rows := c.Local()
-	if len(rows) != MaxStateRows || rows[len(rows)-1].Host != hostA || rows[0].Host != "old1.googlevideo.com" {
+	if len(rows) != MaxStateRows || rows[len(rows)-1].Host != hostA || rows[0].Host != "rr1---sn-old1.googlevideo.com" {
 		t.Errorf("local: %d rows, first=%s last=%s", len(rows), rows[0].Host, rows[len(rows)-1].Host)
 	}
 	pend := ReadPendingFile(c.PendingFile())
-	if len(pend) != MaxStateRows || pend[len(pend)-1].Host != hostA || pend[0].Host != "old1.googlevideo.com" {
+	if len(pend) != MaxStateRows || pend[len(pend)-1].Host != hostA || pend[0].Host != "rr1---sn-old1.googlevideo.com" {
 		t.Errorf("pending: %d rows, first=%s", len(pend), pend[0].Host)
 	}
 }
@@ -330,7 +330,7 @@ func TestKernelIPs(t *testing.T) {
 	mustObserve(t, c, hostA, "9.9.9.9", 600)
 	mustObserve(t, c, hostB, "9.9.9.9", 600) // дубль IP
 	mustObserve(t, c, hostC, "8.8.4.4", 600) // в центральном списке
-	mustObserve(t, c, "x.googlevideo.com", "1.1.1.1", 30)
+	mustObserve(t, c, "rr9---sn-x.googlevideo.com", "1.1.1.1", 30)
 	if got := c.KernelIPs(); !reflect.DeepEqual(got, []string{"1.1.1.1", "9.9.9.9"}) {
 		t.Errorf("KernelIPs = %v", got)
 	}
@@ -349,10 +349,10 @@ func TestKernelIPs_Limit128(t *testing.T) {
 	now := clk.Now().Unix()
 	var b strings.Builder
 	for i := 0; i < 200; i++ {
-		fmt.Fprintf(&b, "h%d.googlevideo.com\t11.0.0.%d\t%d\t%d\n", i, i, now+100, now)
+		fmt.Fprintf(&b, "rr1---sn-h%d.googlevideo.com\t11.0.0.%d\t%d\t%d\n", i, i, now+100, now)
 	}
 	// Непубличные адреса в файле игнорируются.
-	fmt.Fprintf(&b, "p.googlevideo.com\t10.1.1.1\t%d\t%d\n", now+100, now)
+	fmt.Fprintf(&b, "rr1---sn-p.googlevideo.com\t10.1.1.1\t%d\t%d\n", now+100, now)
 	writeText(t, c.LocalFile(), b.String())
 	got := c.KernelIPs()
 	if len(got) != KernelIPLimit {
@@ -372,22 +372,22 @@ func TestLastObservation(t *testing.T) {
 	}
 	now := clk.Now().Unix()
 	writeText(t, c.LocalFile(), fmt.Sprintf(
-		"old.googlevideo.com\t9.9.9.8\t%d\t%d\nnew.googlevideo.com\t9.9.9.9\t%d\t%d\nlegacy.googlevideo.com\t9.9.9.7\t%d\n",
+		"rr1---sn-old.googlevideo.com\t9.9.9.8\t%d\t%d\nrr1---sn-new.googlevideo.com\t9.9.9.9\t%d\t%d\nrr1---sn-legacy.googlevideo.com\t9.9.9.7\t%d\n",
 		now+60, now-20, now+60, now-3, now+60))
 	last, ok := c.LastObservation()
-	if !ok || last.Host != "new.googlevideo.com" || last.IP != "9.9.9.9" || last.Age != 3*time.Second {
+	if !ok || last.Host != "rr1---sn-new.googlevideo.com" || last.IP != "9.9.9.9" || last.Age != 3*time.Second {
 		t.Fatalf("last = %+v", last)
 	}
-	if got := last.Describe(); got != "new.googlevideo.com → 9.9.9.9; 3 с назад" {
+	if got := last.Describe(); got != "rr1---sn-new.googlevideo.com → 9.9.9.9; 3 с назад" {
 		t.Errorf("Describe = %q", got)
 	}
 	// Наблюдение «из будущего» даёт нулевой возраст, а не отрицательный.
-	writeText(t, c.LocalFile(), fmt.Sprintf("f.googlevideo.com\t9.9.9.9\t%d\t%d\n", now+60, now+30))
+	writeText(t, c.LocalFile(), fmt.Sprintf("rr1---sn-f.googlevideo.com\t9.9.9.9\t%d\t%d\n", now+60, now+30))
 	if last, _ := c.LastObservation(); last.Age != 0 {
 		t.Errorf("age = %v", last.Age)
 	}
 	// Только старые трёхколоночные строки: observed неизвестен.
-	writeText(t, c.LocalFile(), fmt.Sprintf("l.googlevideo.com\t9.9.9.9\t%d\n", now+60))
+	writeText(t, c.LocalFile(), fmt.Sprintf("rr1---sn-l.googlevideo.com\t9.9.9.9\t%d\n", now+60))
 	if _, ok := c.LastObservation(); ok {
 		t.Error("legacy rows have no observation time")
 	}
@@ -492,7 +492,7 @@ func TestObserve_ConcurrentWriters(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := c.Observe(Observation{Host: fmt.Sprintf("h%d.googlevideo.com", i), IP: fmt.Sprintf("11.1.1.%d", i+1), TTL: 600})
+			_, err := c.Observe(Observation{Host: fmt.Sprintf("rr1---sn-h%d.googlevideo.com", i), IP: fmt.Sprintf("11.1.1.%d", i+1), TTL: 600})
 			if err != nil {
 				t.Error(err)
 			}

@@ -44,7 +44,7 @@ const (
 // Причины отклонения наблюдения. Все оборачивают ErrRejected.
 var (
 	ErrRejected    = errors.New("googlevideo: наблюдение отклонено")
-	ErrHostname    = fmt.Errorf("%w: имя вне *.googlevideo.com", ErrRejected)
+	ErrHostname    = fmt.Errorf("%w: имя вне rrN---sn-….googlevideo.com", ErrRejected)
 	ErrRecordType  = fmt.Errorf("%w: тип записи не A", ErrRejected)
 	ErrNonPublicIP = fmt.Errorf("%w: адрес не является публичным IPv4", ErrRejected)
 	ErrTTL         = fmt.Errorf("%w: некорректный TTL", ErrRejected)

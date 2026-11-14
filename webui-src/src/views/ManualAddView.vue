@@ -241,7 +241,8 @@ async function submitBlob() {
         <span class="chip">{{ googlevideo?.items?.length ?? 0 }}</span>
       </div>
       <p class="panel-d">
-        Автосбор rr*---sn-*.googlevideo.com (SNI + DNS). Сбор: {{ googlevideo?.collection || '—' }}.
+        Автосбор media CDN: <code>^rr\d+---sn-[a-z0-9-]+\.googlevideo\.com$</code>
+        (пример <code>rr18---sn-pmcg-bg0s.googlevideo.com</code>). Сбор: {{ googlevideo?.collection || '—' }}.
         Профиль 2 учит стратегию на каждый <code>sn-*</code> (seed из лока профиля).
       </p>
       <div class="actions" style="margin-top:0.65rem">

@@ -280,13 +280,13 @@ func TestManager_DedupTableReset(t *testing.T) {
 	col, clk := newCollector(t, nil)
 	m, _ := NewManager(ManagerConfig{Mode: ModeSniffer, Observer: col, Source: &fakeSource{}, Now: clk.Now, DedupMax: 2})
 	for i := 1; i <= 3; i++ {
-		m.handleLine(fmt.Sprintf("h%d.googlevideo.com\t11.0.0.%d\t600", i, i))
+		m.handleLine(fmt.Sprintf("rr1---sn-h%d.googlevideo.com\t11.0.0.%d\t600", i, i))
 	}
 	if len(m.recent) != 0 {
 		t.Errorf("table must reset after exceeding DedupMax, has %d", len(m.recent))
 	}
 	// После сброса пара принимается заново (Observer сам дедуплицирует очередь).
-	m.handleLine("h1.googlevideo.com\t11.0.0.1\t600")
+	m.handleLine("rr1---sn-h1.googlevideo.com\t11.0.0.1\t600")
 	if st := m.Status(); st.Accepted != 4 || st.Deduped != 0 {
 		t.Errorf("status = %+v", st)
 	}

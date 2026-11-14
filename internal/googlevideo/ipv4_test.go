@@ -60,22 +60,24 @@ func TestNormalizeHostname(t *testing.T) {
 		ok       bool
 	}{
 		{"rr1---sn-h5gtov-n8vl.googlevideo.com", "rr1---sn-h5gtov-n8vl.googlevideo.com", true},
+		{"rr18---sn-pmcg-bg0s.googlevideo.com", "rr18---sn-pmcg-bg0s.googlevideo.com", true},
 		{"RR2---SN-4G5EDNLY.GoogleVideo.COM", "rr2---sn-4g5ednly.googlevideo.com", true},
-		{"rr2.googlevideo.com.", "rr2.googlevideo.com", true},
-		{"a.b.googlevideo.com", "a.b.googlevideo.com", true},
+		{"rr2---sn-4g5ednly.googlevideo.com.", "rr2---sn-4g5ednly.googlevideo.com", true},
+		{"rr2.googlevideo.com.", "", false},          // не media RR
+		{"a.b.googlevideo.com", "", false},           // не media RR
+		{"redirector.googlevideo.com", "", false},
+		{"sn-pmcg-bg0s.googlevideo.com", "", false}, // без rrN---
 		{"googlevideo.com", "", false},
 		{"googlevideo.com.", "", false},
 		{".googlevideo.com", "", false},
 		{"a..googlevideo.com", "", false},
-		{"rr1.googlevideo.com..", "", false},
 		{"evilgooglevideo.com", "", false},
 		{"rr1.googlevideo.com.evil.org", "", false},
 		{"youtube.com", "", false},
 		{"", "", false},
-		{"rr1.googlevideo.com ", "", false},
-		{"rr_1.googlevideo.com", "", false},
-		{"rr1.googlevideo.com/x", "", false},
-		{"rr1.googlevideo.cоm", "", false}, // кириллическая «о»
+		{"rr_1---sn-abc.googlevideo.com", "", false},
+		{"rr1---sn-abc.googlevideo.com/x", "", false},
+		{"rr1---sn-abc.googlevideo.cоm", "", false}, // кириллическая «о»
 	}
 	for _, tc := range cases {
 		got, ok := NormalizeHostname(tc.in)

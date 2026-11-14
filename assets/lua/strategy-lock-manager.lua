@@ -55,18 +55,19 @@ function slm_should_keep_full_hostname(hostname)
 end
 
 --- Extract per-POP hostkey for googlevideo media SNI.
---- rrN---sn-<id>.googlevideo.com / sn-<id>.googlevideo.com → sn-<id>
---- so rr1/rr2/rr5 of the same POP share one quality/auto-lock record.
+--- Canonical: ^rr\d+---sn-[a-z0-9-]+\.googlevideo\.com$
+--- Also accepts sn-<id>.googlevideo.com → sn-<id>
+--- so rr1/rr2/rr18 of the same POP share one quality/auto-lock record.
 --- @param hostname string
 --- @return string|nil
 function slm_googlevideo_hostkey(hostname)
     local key = slm_normalize_hostkey(hostname)
     if not key then return nil end
-    local sn = key:match("^rr%d+%-%-%-sn%-([^.]+)%.googlevideo%.com$")
+    local sn = key:match("^rr%d+%-%-%-sn%-([a-z0-9%-]+)%.googlevideo%.com$")
     if sn and sn ~= "" then
         return "sn-" .. sn
     end
-    sn = key:match("^sn%-([^.]+)%.googlevideo%.com$")
+    sn = key:match("^sn%-([a-z0-9%-]+)%.googlevideo%.com$")
     if sn and sn ~= "" then
         return "sn-" .. sn
     end

@@ -43,7 +43,7 @@ func TestDomainsGooglevideo(t *testing.T) {
 
 	resp, out = e.post("/cgi-bin/domains.cgi", "list", "googlevideo", "action", "add",
 		"domain", "example.com")
-	wantError(t, resp, out, 400, "Нужен поддомен *.googlevideo.com: example.com")
+	wantError(t, resp, out, 400, "Нужен media CDN host rrN---sn-….googlevideo.com: example.com")
 
 	items := domainItems(t, e, "googlevideo")
 	if len(items) != 1 || items[0]["value"] != "rr1---sn-2oi5h5-54.googlevideo.com" {

@@ -239,7 +239,7 @@ func TestUpload_ThrottleAndForce(t *testing.T) {
 	}
 	// Своя длительность интервала.
 	e.up.cfg.Interval = time.Minute
-	mustObserve(t, e.col, "d.googlevideo.com", "1.0.0.1", 600)
+	mustObserve(t, e.col, "rr1---sn-d.googlevideo.com", "1.0.0.1", 600)
 	e.clk.Advance(2 * time.Minute)
 	if res := e.upload(false); res.Status != UploadUploaded {
 		t.Errorf("1m interval: %+v", res)
@@ -306,7 +306,7 @@ func TestUpload_PairLimitLeavesRemainder(t *testing.T) {
 	now := e.clk.Now().Unix()
 	var b strings.Builder
 	for i := 0; i < 30; i++ {
-		fmt.Fprintf(&b, "11.0.0.%d\t%d\th%d.googlevideo.com\n", i+1, now-10, i)
+		fmt.Fprintf(&b, "11.0.0.%d\t%d\trr1---sn-h%d.googlevideo.com\n", i+1, now-10, i)
 	}
 	writeText(t, e.col.PendingFile(), b.String())
 
@@ -318,7 +318,7 @@ func TestUpload_PairLimitLeavesRemainder(t *testing.T) {
 		t.Errorf("pairs in form = %d", n)
 	}
 	left := e.col.Pending()
-	if len(left) != 6 || left[0].Host != "h24.googlevideo.com" {
+	if len(left) != 6 || left[0].Host != "rr1---sn-h24.googlevideo.com" {
 		t.Errorf("leftover = %+v", left)
 	}
 	if len(e.col.Reported()) != 24 {

@@ -58,7 +58,7 @@ var domainLists = map[string]listDef{
 	},
 	"googlevideo": {
 		name: "googlevideo", title: "Googlevideo (CDN-узлы)", kind: listKindDomain,
-		description: "Собранные rr*---sn-*.googlevideo.com (SNI + DNS). Файл lists/googlevideo-hosts.txt.",
+		description: "Media CDN YouTube: ^rr\\d+---sn-[a-z0-9-]+\\.googlevideo\\.com$ (SNI + DNS). Файл lists/googlevideo-hosts.txt.",
 		file:        func(s *Server) string { return s.paths.GooglevideoHostsFile() },
 	},
 }
@@ -108,7 +108,7 @@ func (d listDef) normalize(v string) (string, error) {
 	if d.name == "googlevideo" {
 		n, ok := googlevideoNormalize(v)
 		if !ok {
-			return "", errf(http.StatusBadRequest, "Нужен поддомен *.googlevideo.com: "+v)
+			return "", errf(http.StatusBadRequest, "Нужен media CDN host rrN---sn-….googlevideo.com: "+v)
 		}
 		return n, nil
 	}
@@ -574,7 +574,7 @@ func (s *Server) googlevideoAction(p params) (map[string]any, error) {
 	case "add":
 		host, ok := googlevideoNormalize(p.Get("domain"))
 		if !ok {
-			return nil, errf(http.StatusBadRequest, "Нужен поддомен *.googlevideo.com: "+p.Get("domain"))
+			return nil, errf(http.StatusBadRequest, "Нужен media CDN host rrN---sn-….googlevideo.com: "+p.Get("domain"))
 		}
 		added, aerr := h.Add(host)
 		if aerr != nil {
@@ -584,7 +584,7 @@ func (s *Server) googlevideoAction(p params) (map[string]any, error) {
 	case "remove":
 		host, ok := googlevideoNormalize(p.Get("domain"))
 		if !ok {
-			return nil, errf(http.StatusBadRequest, "Нужен поддомен *.googlevideo.com: "+p.Get("domain"))
+			return nil, errf(http.StatusBadRequest, "Нужен media CDN host rrN---sn-….googlevideo.com: "+p.Get("domain"))
 		}
 		if _, err := h.Remove(host); err != nil {
 			return nil, errf(http.StatusInternalServerError, "Не удалось удалить: "+err.Error())
