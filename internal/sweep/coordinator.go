@@ -41,6 +41,9 @@ type Config struct {
 	ProbeStore Locker
 	// Checker — проверка цели (обычно *netcheck.Checker).
 	Checker TargetChecker
+	// ResolveMedia prepares signed YouTube audio/video URLs before the isolated
+	// nfqws2 probe is started; URLs stay in memory for this run only.
+	ResolveMedia func(context.Context) (netcheck.YouTubeMedia, error)
 	// Probe — изолированный nfqws2; по умолчанию NoopProbe.
 	Probe Probe
 
@@ -82,10 +85,9 @@ type Params struct {
 	RKNPar int
 	// Domains — домены РКН; «example.com» или URL.
 	Domains []string
-	// MediaStatus — статус медиапроверки googlevideo. Пусто — медиапроверка
-	// выключена (обычные ok/warn/fail). "ready" — Checker сам делает
-	// медиапробу. Любое другое значение (например resolver_unavailable)
-	// помечает результаты googlevideo как unknown (TLS/CDN-тест без медиаданных).
+	// MediaStatus — статус подготовки YouTube media URLs. "ready" означает,
+	// что URLs доступны в памяти координатора; любая другая непустая строка
+	// помечает результаты Googlevideo как unknown и не даёт выбрать победителя.
 	MediaStatus string
 }
 
@@ -284,13 +286,14 @@ func (c *Coordinator) Start(ctx context.Context, p Params) error {
 
 // run — состояние одного прогона.
 type run struct {
-	c       *Coordinator
-	p       Params
-	targets []DomainTarget
-	maxes   map[int]int
-	started time.Time
-	state   State
-	alive   string
+	c         *Coordinator
+	p         Params
+	targets   []DomainTarget
+	maxes     map[int]int
+	started   time.Time
+	state     State
+	alive     string
+	mediaURLs *netcheck.YouTubeMedia
 
 	errMu  sync.Mutex
 	err    error
@@ -506,6 +509,17 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 	}()
 
 	gvURL := "https://" + netcheck.FallbackClusterDomain + "/"
+	if c.cfg.ResolveMedia != nil && ctx.Err() == nil {
+		media, err := c.cfg.ResolveMedia(ctx)
+		if err != nil {
+			r.p.MediaStatus = err.Error()
+			c.logf("YouTube media probe: UNKNOWN (%s)", r.p.MediaStatus)
+		} else {
+			r.mediaURLs = &media
+			r.p.MediaStatus = "ready"
+			c.logf("YouTube media URLs готовы: audio=%s video=%s", media.AudioHost, media.VideoHost)
+		}
+	}
 	if c.cfg.GVURL != nil {
 		if u := c.cfg.GVURL(ctx); u != "" {
 			gvURL = u
@@ -640,6 +654,28 @@ type guarded struct {
 }
 
 func (g guarded) CheckTarget(ctx context.Context, label, url string) netcheck.TargetResult {
+	return g.withProbe(ctx, label, url, func() netcheck.TargetResult {
+		return g.inner.CheckTarget(ctx, label, url)
+	})
+}
+
+func (g guarded) CheckGooglevideoMediaURLs(ctx context.Context, targetURL string, media netcheck.YouTubeMedia) netcheck.TargetResult {
+	checker, ok := g.inner.(MediaTargetChecker)
+	if !ok {
+		return unknownMediaTarget(targetURL, media.VideoID, "media_checker_unavailable")
+	}
+	return g.withProbe(ctx, netcheck.LabelGooglevideo, targetURL, func() netcheck.TargetResult {
+		return checker.CheckGooglevideoMediaURLs(ctx, targetURL, media)
+	})
+}
+
+func unknownMediaTarget(targetURL, videoID, reason string) netcheck.TargetResult {
+	m := &netcheck.MediaProbe{Class: netcheck.MediaUnknown, Text: "Медиапоток не подтверждён: " + reason,
+		VideoID: videoID, ResolverStatus: reason}
+	return netcheck.TargetResult{Label: netcheck.LabelGooglevideo, Target: targetURL, Verdict: netcheck.VerdictUnknown, Text: m.Text, Media: m}
+}
+
+func (g guarded) withProbe(ctx context.Context, label, url string, check func() netcheck.TargetResult) netcheck.TargetResult {
 	probe := g.r.c.cfg.Probe
 	for attempt := 0; attempt < 2; attempt++ {
 		if !probe.Healthy(ctx) {
@@ -648,7 +684,7 @@ func (g guarded) CheckTarget(ctx context.Context, label, url string) netcheck.Ta
 				return netcheck.TargetResult{Label: label, Target: url}
 			}
 		}
-		res := g.inner.CheckTarget(ctx, label, url)
+		res := check()
 		if probe.Healthy(ctx) {
 			return res
 		}
@@ -704,10 +740,15 @@ func (r *run) runPhase(ctx context.Context, phase string, specs []workerSpec) er
 
 func (r *run) runProfile(ctx context.Context, s workerSpec) error {
 	env := r.env(s.profile)
+	var mediaURLs *netcheck.YouTubeMedia
+	if s.name == WorkerGV {
+		mediaURLs = r.mediaURLs
+	}
 	res, err := env.AutoSweepProfile(ctx, ProfileSweepConfig{
 		Name: s.name, Profile: s.profile, Protos: s.protos, Label: s.label, URL: s.url,
 		Max: s.max, TLSPref: r.p.TLSPref, Pause: s.pause, GreenPause: r.p.GreenPause,
 		MarkUnknown: s.name == WorkerGV && r.p.MediaStatus != "" && r.p.MediaStatus != "ready",
+		MediaURLs:   mediaURLs,
 		OnTry: func(n int) {
 			_ = fsutil.AtomicWriteFile(r.path(currentFile(s.name)), []byte(s.url+"\t"+strconv.Itoa(n)+"\n"), 0o644)
 		},

@@ -235,6 +235,7 @@ async function check(profile: string, p: ProfileInfo) {
       if (v === 'ok') showToast(`Профиль ${profile}: цель доступна при локе ${payload.lock || expect}`)
       else if (v === 'warn') showToast(`Профиль ${profile}: предупреждение при проверке`, 'warning')
       else if (v === 'fail') showToast(`Профиль ${profile}: цель недоступна`, 'warning')
+      else if (v === 'unknown') showToast(payload.message || `Профиль ${profile}: медиапоток не подтверждён`, 'info')
       else if (payload.message) showToast(payload.message, 'info')
     })
   } catch (e) {

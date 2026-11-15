@@ -119,6 +119,7 @@ func (a *App) removeRuntime() error {
 		a.Paths.WebUIDir,
 		a.Paths.LuaDir,
 		a.Paths.DataDir,
+		filepath.Join(a.Paths.ZatorRoot, "blockcheck2.d"),
 		filepath.Join(a.Paths.ExtraStratsDir, "cache"),
 		a.Paths.OrchestraDir,
 	} {
@@ -159,6 +160,16 @@ func (a *App) syncAssets() error {
 	}
 	if err := copyFSKeepExisting(uiembed.ExtraStrats(), a.Paths.ExtraStratsDir); err != nil {
 		return fmt.Errorf("распаковка extra_strats: %w", err)
+	}
+	blockcheckRoot := filepath.Join(a.Paths.ZapretRoot, "blockcheck2.d")
+	blockcheckDir := filepath.Join(blockcheckRoot, "z4r")
+	if st, err := os.Stat(a.Paths.ZapretRoot); err == nil && st.IsDir() {
+		if err := copyFS(uiembed.Blockcheck2(), blockcheckRoot); err != nil {
+			return fmt.Errorf("распаковка Blockcheck2: %w", err)
+		}
+		if err := os.Chmod(filepath.Join(blockcheckDir, "10-list.sh"), 0o755); err != nil {
+			return fmt.Errorf("права Blockcheck2: %w", err)
+		}
 	}
 	if data, err := uiembed.ConfigDefault(); err == nil {
 		dst := filepath.Join(a.Paths.ConfigDir, "config.default")

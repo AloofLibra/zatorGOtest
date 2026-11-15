@@ -36,8 +36,8 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 	if gvSeeder != nil {
 		return
 	}
-	// Живой probe через profile-2 lock ломает чужой трафик на 2+ с — по умолчанию
-	// только transfer/default seed. Изолированный NfqwsProbe — отдельный контур (supersweep).
+	// Live probing would change the working profile lock; background mode only
+	// transfers a majority of learned locks and otherwise waits for a real probe.
 	seeder := googlevideo.NewSeeder(googlevideo.SeederConfig{
 		LivePath:  paths.LiveAutoLockedTSV(),
 		StatePath: a.Paths.AutoLockedTSV,

@@ -58,18 +58,25 @@ func (s *Server) sweeperOrDefault() (Sweeper, error) {
 	opts.DialContext = netcheck.BindPortRangeDialer(
 		firewall.SuperSweepPortFirst, firewall.SuperSweepPortLast)
 	checker := netcheck.NewChecker(opts)
+	checker.MediaResolver = func(ctx context.Context, videoID string) (netcheck.YouTubeMedia, error) {
+		// Innertube runs outside the test port range; only media GETs enter probe.
+		return netcheck.ResolveYouTubeMedia(ctx, videoID, netcheck.DefaultOptions())
+	}
 	if base, ok := s.checker.(*netcheck.Checker); ok {
 		checker.RedirectorURL = base.RedirectorURL
 		checker.DNS = base.DNS
 	}
 
 	cfg := sweep.Config{
-		Dir:         s.sweepDir(),
-		ArchiveDir:  s.paths.StateDir,
-		Store:       s.store,
-		ProbeStore:  probeStore,
-		Probe:       probe,
-		Checker:     checker,
+		Dir:        s.sweepDir(),
+		ArchiveDir: s.paths.StateDir,
+		Store:      s.store,
+		ProbeStore: probeStore,
+		Probe:      probe,
+		Checker:    checker,
+		ResolveMedia: func(ctx context.Context) (netcheck.YouTubeMedia, error) {
+			return checker.MediaResolver(ctx, netcheck.DefaultYouTubeVideoID)
+		},
 		MaxStrategy: s.maxStrategy,
 		GVURL:       func(ctx context.Context) string { return "https://" + checker.ClusterDomain(ctx) },
 	}

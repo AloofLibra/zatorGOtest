@@ -607,6 +607,30 @@ func TestCoordinator_MediaStatusMakesGoogleVideoUnknown(t *testing.T) {
 	}
 }
 
+func TestCoordinatorResolvesMediaBeforeIsolatedGVPhase(t *testing.T) {
+	e := newCoordEnv(t, true, fullScenario, nil)
+	e.c.cfg.ResolveMedia = func(context.Context) (netcheck.YouTubeMedia, error) {
+		if len(e.probe.startList()) != 0 {
+			t.Fatal("Innertube URLs must be prepared before the isolated probe starts")
+		}
+		return netcheck.YouTubeMedia{VideoID: netcheck.DefaultYouTubeVideoID,
+			AudioURL:  "https://rr1---sn-a.googlevideo.com/videoplayback?sig=a&expire=1999999999",
+			VideoURL:  "https://rr2---sn-b.googlevideo.com/videoplayback?sig=b&expire=1999999999",
+			AudioHost: "rr1---sn-a.googlevideo.com", VideoHost: "rr2---sn-b.googlevideo.com"}, nil
+	}
+	rep, err := e.c.Run(context.Background(), fastParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gv := worker(t, rep, WorkerGV)
+	if gv.OK != 1 || gv.Applied != "1" || !strings.Contains(gv.Label, "[media TCP]") {
+		t.Fatalf("media-backed GV result = %+v", gv)
+	}
+	if got := strings.TrimSpace(string(mustRead(t, filepath.Join(e.dir, fileMediaStatus)))); got != "ready" {
+		t.Fatalf("media status = %q", got)
+	}
+}
+
 func TestCoordinator_NoGreenKeepsPrevLocks(t *testing.T) {
 	e := newCoordEnv(t, false, func(string, int) netcheck.TargetResult { return resFail() }, nil)
 	e.setPrev()

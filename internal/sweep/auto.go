@@ -66,6 +66,8 @@ type ProfileSweepConfig struct {
 	GreenPause time.Duration
 	// MarkUnknown — результаты ok/warn помечаются unknown.
 	MarkUnknown bool
+	// MediaURLs — Innertube URLs prepared before the isolated probe.
+	MediaURLs *netcheck.YouTubeMedia
 
 	// OnTry вызывается перед каждой пробой (текущая стратегия для WebUI).
 	OnTry func(strategy int)
@@ -149,7 +151,7 @@ func (e *Env) AutoSweepProfile(ctx context.Context, cfg ProfileSweepConfig) (Pro
 		}
 		tr, err := e.Try(ctx, TryRequest{
 			Profile: cfg.Profile, Protos: cfg.Protos, Strategy: s,
-			Label: cfg.Label, URL: cfg.URL, TLSPref: cfg.TLSPref, MarkUnknown: cfg.MarkUnknown,
+			Label: cfg.Label, URL: cfg.URL, TLSPref: cfg.TLSPref, MarkUnknown: cfg.MarkUnknown, MediaURLs: cfg.MediaURLs,
 		})
 		if err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {

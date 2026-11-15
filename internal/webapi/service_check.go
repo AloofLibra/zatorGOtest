@@ -162,6 +162,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request, p params) {
 		opts := netcheck.ProfileCheckOptions{}
 		if id == 2 {
 			opts.MediaURL = strings.TrimSpace(p.Get("media_url"))
+			opts.VideoID = strings.TrimSpace(p.Get("video_id"))
 		}
 		checkResp := s.checker.CheckProfileOpts(ctx, id, opts)
 		checkResp.WaitedApply = resp.WaitedApply

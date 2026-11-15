@@ -87,6 +87,16 @@ func (s *scripted) CheckTarget(ctx context.Context, label, url string) netcheck.
 	return res
 }
 
+func (s *scripted) CheckGooglevideoMediaURLs(ctx context.Context, targetURL string, media netcheck.YouTubeMedia) netcheck.TargetResult {
+	res := s.CheckTarget(ctx, netcheck.LabelGooglevideo, targetURL)
+	class := netcheck.MediaUnknown
+	if res.TLS12Detail.Answered() && res.TLS13Detail.Answered() && res.Download != nil && res.Download.Size >= 32<<10 {
+		class = netcheck.MediaPlay
+	}
+	res.Media = &netcheck.MediaProbe{Class: class, Text: "test media " + class, VideoID: media.VideoID}
+	return res
+}
+
 func (s *scripted) callLog() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

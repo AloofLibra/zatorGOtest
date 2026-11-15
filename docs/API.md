@@ -11,7 +11,7 @@
 | POST | `/api/set-lock` | фиксация стратегии |
 | POST | `/api/clear-lock` | сброс лока |
 | POST | `/api/service` | start/stop/restart zapret2 |
-| POST | `/api/check` | сетевая проверка (`profile=2&media_url=` — Range 16K/64K googlevideo) |
+| POST | `/api/check` | сетевая проверка; профиль 2 автоматически получает подписанные YouTube audio/video URL через Innertube. Опционально принимает `video_id` или подписанный `media_url`; `verdict=unknown` означает, что медиа получить/подтвердить не удалось. |
 | GET/POST | `/api/domains` | списки доменов (`action=refresh_ips` — googlevideo-ipv4 для WSSIZE) |
 | GET/POST | `/api/backups` | бэкапы |
 | GET | `/api/scopes` | client scopes |

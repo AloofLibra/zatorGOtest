@@ -13,6 +13,9 @@ func TestMostCommonStrategy(t *testing.T) {
 		{Askey: "2", Host: "sn-a", Strategy: 41},
 		{Askey: "2", Host: "sn-b", Strategy: 41},
 		{Askey: "2", Host: "sn-c", Strategy: 16},
+		{Askey: "2", Host: "sn-seed-a", Strategy: 44, Source: SourceSeed},
+		{Askey: "2", Host: "sn-seed-b", Strategy: 44, Source: SourceSeed},
+		{Askey: "2", Host: "sn-seed-c", Strategy: 44, Source: SourceSeed},
 	}
 	s, n := MostCommonStrategy(locks)
 	if s != 41 || n != 2 {
@@ -34,6 +37,11 @@ func TestMissingHostKeysAndCandidates(t *testing.T) {
 	cands := CandidateStrategies(locks, 41, 44, 3)
 	if len(cands) < 2 || cands[0] != 41 {
 		t.Fatalf("cands=%v", cands)
+	}
+	for _, candidate := range cands {
+		if candidate == 44 {
+			t.Fatalf("unverified seed incorrectly ranked as probe evidence: %v", cands)
+		}
 	}
 }
 
@@ -112,5 +120,43 @@ func TestSeederTransferWithoutProbe(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected seed for sn-new: %+v", got)
+	}
+}
+
+func TestSeederWithoutProbeDoesNotWriteUntestedDefault(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.tsv")
+	_ = UpsertAutoLock(live, AutoLock{Askey: "2", Host: "sn-seed1", Strategy: 41, Source: SourceSeed})
+	_ = UpsertAutoLock(live, AutoLock{Askey: "2", Host: "sn-seed2", Strategy: 41, Source: SourceSeed})
+	s := NewSeeder(SeederConfig{LivePath: live, ListHosts: func() ([]string, error) {
+		return []string{"rr1---sn-new.googlevideo.com"}, nil
+	}})
+	s.tick(context.Background())
+	got, err := ParseAutoLockedTSV(live)
+	if err != nil {
+		t.Fatalf("unverified seed was written: locks=%+v err=%v", got, err)
+	}
+	for _, lock := range got {
+		if lock.Host == "sn-new" {
+			t.Fatalf("unverified seed was written: locks=%+v", got)
+		}
+	}
+	status := s.Status()
+	if status.LastResult != "unknown" || status.LastError != "probe_unavailable" {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestSeederProbeWritesLearnedSource(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.tsv")
+	s := NewSeeder(SeederConfig{LivePath: live, DefaultStrat: 41, MaxStrat: 44,
+		ListHosts: func() ([]string, error) { return []string{"rr1---sn-new.googlevideo.com"}, nil },
+		Probe:     func(context.Context, string, int) (bool, string, error) { return true, "media verified", nil },
+	})
+	s.tick(context.Background())
+	got, err := ParseAutoLockedTSV(live)
+	if err != nil || len(got) != 1 || got[0].Source != SourceLearned || got[0].Strategy != 41 {
+		t.Fatalf("verified result = %+v err=%v", got, err)
 	}
 }

@@ -80,6 +80,9 @@ func TestInstallUpdateUninstall(t *testing.T) {
 	if err := a.SetPassword("test-pass"); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(a.Paths.ZapretRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.Install(); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +94,11 @@ func TestInstallUpdateUninstall(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(a.Paths.WebUIDir, "index.html")); err != nil {
 		t.Errorf("index.html не распакован: %v", err)
+	}
+	for _, name := range []string{"10-list.sh", "list_https_tls12.txt", "list_https_tls13.txt"} {
+		if st, err := os.Stat(filepath.Join(a.Paths.ZapretRoot, "blockcheck2.d", "z4r", name)); err != nil || st.Size() == 0 {
+			t.Errorf("Blockcheck2 %s не установлен или пуст: %v", name, err)
+		}
 	}
 	hash := a.Config.PasswordHash
 	if err := a.Update(); err != nil {

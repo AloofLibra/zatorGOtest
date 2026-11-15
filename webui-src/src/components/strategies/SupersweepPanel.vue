@@ -27,7 +27,7 @@ const states = {
   idle: 'Нет прогона', starting: 'Подготовка', running: 'Выполняется', applying: 'Применение результатов',
   done: 'Завершён', cancelled: 'Отменён', interrupted: 'Прерван',
 }
-const verdicts = { ok: 'Работает', warn: 'С предупреждением', fail: 'Не работает' }
+const verdicts = { ok: 'Работает', warn: 'С предупреждением', fail: 'Не работает', unknown: 'Не проверено' }
 const stateLabel = computed(() => data.value ? states[data.value.state] : 'Загрузка…')
 const active = computed(() => !!data.value?.active)
 const scopeOptions = computed(() => {

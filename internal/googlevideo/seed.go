@@ -14,7 +14,7 @@ type SeedStatus struct {
 	Strategy   int    `json:"strategy,omitempty"`
 	LastHost   string `json:"last_host,omitempty"`
 	LastStrat  int    `json:"last_strategy,omitempty"`
-	LastResult string `json:"last_result,omitempty"` // ok|fail|seeded|error
+	LastResult string `json:"last_result,omitempty"` // ok|fail|seeded|unknown|error
 	LastError  string `json:"last_error,omitempty"`
 	UpdatedAt  int64  `json:"updated_at,omitempty"`
 	Pending    int    `json:"pending"`
@@ -166,7 +166,7 @@ func (s *Seeder) tick(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			if err := s.commitSeed(hk, transfer); err != nil {
+			if err := s.commit(hk, transfer, SourceSeed); err != nil {
 				s.setStatus(func(st *SeedStatus) {
 					st.LastResult = "error"
 					st.LastError = err.Error()
@@ -196,21 +196,13 @@ func (s *Seeder) tick(ctx context.Context) {
 	}
 	cands := CandidateStrategies(locks, s.cfg.DefaultStrat, s.cfg.MaxStrat, s.cfg.TailMax)
 	if s.cfg.Probe == nil {
-		// Без probe — seed default/transfer.
-		strat := s.cfg.DefaultStrat
-		if t, n := MostCommonStrategy(locks); n >= 1 {
-			strat = t
-		}
-		_ = s.commitSeed(hk, strat)
+		// Never turn an untested default into a lock or transfer evidence.
 		s.setStatus(func(st *SeedStatus) {
 			st.LastHost = hk
-			st.LastStrat = strat
-			st.LastResult = "seeded"
-			st.LastError = ""
+			st.LastStrat = 0
+			st.LastResult = "unknown"
+			st.LastError = "probe_unavailable"
 		})
-		if s.cfg.OnSeeded != nil {
-			s.cfg.OnSeeded(hk, strat)
-		}
 		return
 	}
 
@@ -250,7 +242,7 @@ func (s *Seeder) tick(ctx context.Context) {
 			}
 			continue
 		}
-		if err := s.commitSeed(hk, strat); err != nil {
+		if err := s.commit(hk, strat, SourceLearned); err != nil {
 			s.setStatus(func(st *SeedStatus) {
 				st.State = "idle"
 				st.LastResult = "error"
@@ -282,13 +274,13 @@ func (s *Seeder) tick(ctx context.Context) {
 	})
 }
 
-func (s *Seeder) commitSeed(hostKey string, strategy int) error {
+func (s *Seeder) commit(hostKey string, strategy int, source string) error {
 	lock := AutoLock{
 		Askey:    "2",
 		Scope:    "default",
 		Host:     hostKey,
 		Strategy: strategy,
-		Source:   SourceSeed,
+		Source:   source,
 	}
 	if err := UpsertAutoLock(s.cfg.LivePath, lock); err != nil {
 		return err

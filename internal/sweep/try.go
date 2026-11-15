@@ -77,6 +77,8 @@ type TryRequest struct {
 	// MarkUnknown — вместо ok/warn/fail вернуть unknown (TLS/CDN-тест
 	// googlevideo без медиапроверки); fail остаётся fail.
 	MarkUnknown bool
+	// MediaURLs — ссылки, заранее полученные через Innertube до старта probe.
+	MediaURLs *netcheck.YouTubeMedia
 }
 
 // TryResult — итог пробы.
@@ -132,7 +134,17 @@ func (e *Env) Try(ctx context.Context, req TryRequest) (TryResult, error) {
 		return TryResult{}, err
 	}
 
-	tr := e.Checker.CheckTarget(ctx, req.Label, req.URL)
+	var tr netcheck.TargetResult
+	if req.MediaURLs != nil {
+		if checker, ok := e.Checker.(MediaTargetChecker); ok {
+			tr = checker.CheckGooglevideoMediaURLs(ctx, req.URL, *req.MediaURLs)
+		} else {
+			tr = netcheck.TargetResult{Label: req.Label, Target: req.URL, Verdict: netcheck.VerdictUnknown,
+				Text: "Изолированная медиапроверка недоступна", Media: &netcheck.MediaProbe{Class: netcheck.MediaUnknown, Text: "Изолированная медиапроверка недоступна"}}
+		}
+	} else {
+		tr = e.Checker.CheckTarget(ctx, req.Label, req.URL)
+	}
 	if err := ctx.Err(); err != nil {
 		return TryResult{}, err
 	}
@@ -145,6 +157,16 @@ func buildTry(req TryRequest, tr netcheck.TargetResult) TryResult {
 		pref = netcheck.PrefAny
 	}
 	verdict, short := netcheck.ShortResult(tr.TLS12Detail, tr.TLS13Detail, tr.Download, pref)
+	if req.MediaURLs != nil && tr.Media != nil {
+		switch tr.Media.Class {
+		case netcheck.MediaPlay:
+			verdict, short = TokenOK, tr.Media.Text
+		case netcheck.MediaMidstream, netcheck.MediaTiny, netcheck.MediaDNS, netcheck.MediaNone:
+			verdict, short = TokenFail, tr.Media.Text
+		default:
+			verdict, short = TokenUnknown, tr.Media.Text
+		}
+	}
 	if req.MarkUnknown && verdict != TokenFail {
 		verdict = TokenUnknown
 		short = "Плюшевый TLS/CDN-тест — медиаданные не проверены; " + short

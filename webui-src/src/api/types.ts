@@ -88,6 +88,17 @@ export interface CheckItem {
   tls12_detail?: CheckDetail
   tls13_detail?: CheckDetail
   download?: CheckDetail
+  media?: {
+    class?: string
+    text?: string
+    video_id?: string
+    host?: string
+    audio_host?: string
+    audio_bytes?: number
+    size_16k?: number
+    size_64k?: number
+    resolver_status?: string
+  }
 }
 
 export interface CheckPayload {

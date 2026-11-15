@@ -27,5 +27,8 @@ var Files embed.FS
 //go:embed all:extra_strats
 var ExtraStrats embed.FS
 
+//go:embed all:blockcheck2
+var Blockcheck2 embed.FS
+
 //go:embed all:init
 var Init embed.FS

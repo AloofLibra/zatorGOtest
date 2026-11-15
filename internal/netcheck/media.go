@@ -11,6 +11,7 @@ const (
 	MediaNone      = "none"      // нет данных / TLS не прошёл
 	MediaDNS       = "dns"       // NXDOMAIN / DNS fail
 	MediaTLS       = "tls"       // TLS к CDN OK, media URL не проверялся
+	MediaUnknown   = "unknown"   // Innertube или media URL недоступны; медиа не подтверждено
 	MediaTiny      = "tiny"      // после TLS пришло ≪ 16 КБ (tiny_after_tls)
 	MediaMidstream = "midstream" // ~16 КБ ок, 64 КБ срезан
 	MediaPlay      = "play"      // ≥64 КБ ушли
@@ -26,19 +27,24 @@ const (
 
 // MediaProbe — классификация обрыва видеопотока (поле media в TargetResult).
 type MediaProbe struct {
-	Class    string `json:"class"`
-	Text     string `json:"text"`
-	Size16K  int    `json:"size_16k,omitempty"`
-	Size64K  int    `json:"size_64k,omitempty"`
-	MediaURL string `json:"media_url,omitempty"`
-	Host     string `json:"host,omitempty"`
+	Class          string `json:"class"`
+	Text           string `json:"text"`
+	Size16K        int    `json:"size_16k,omitempty"`
+	Size64K        int    `json:"size_64k,omitempty"`
+	Host           string `json:"host,omitempty"`
+	VideoID        string `json:"video_id,omitempty"`
+	AudioHost      string `json:"audio_host,omitempty"`
+	AudioBytes     int    `json:"audio_bytes,omitempty"`
+	ResolverStatus string `json:"resolver_status,omitempty"`
 }
 
 // ProfileCheckOptions — доп. параметры CheckProfile (media_url для профиля 2).
 type ProfileCheckOptions struct {
-	// MediaURL — полный URL videoplayback из DevTools; без него mid-stream
-	// по Range недоступен (корень CDN отдаёт tiny 404).
+	// MediaURL — необязательный подписанный URL videoplayback. Если пуст, URLs
+	// автономно получаются через Innertube.
 	MediaURL string
+	// VideoID задаёт ролик для автономного получения (по умолчанию встроенный).
+	VideoID string
 }
 
 // ClassifyMediaRange выносит класс по TLS/DNS и двум Range-пробам.
@@ -58,7 +64,7 @@ func ClassifyMediaRange(dnsFail, tlsOK bool, hasURL bool, d16, d64 *Download) Me
 	case !hasURL:
 		return MediaProbe{
 			Class: MediaTLS,
-			Text:  "TLS к CDN OK (404 корня нормален). Для mid-stream/tiny передайте media_url сегмента videoplayback.",
+			Text:  "TLS к CDN OK (404 корня нормален), медиапоток ещё не проверен.",
 		}
 	}
 
@@ -98,6 +104,10 @@ func ClassifyMediaRange(dnsFail, tlsOK bool, hasURL bool, d16, d64 *Download) Me
 // ProbeMediaRanges делает Range 16K и 64K на mediaURL.
 func ProbeMediaRanges(ctx context.Context, mediaURL string, opts Options) (d16, d64 Download) {
 	opts = opts.withDefaults()
+	if _, err := validateYouTubeMediaURL(mediaURL); err != nil {
+		invalid := Download{State: DLFail, Text: "invalid or expired YouTube media URL"}
+		return invalid, invalid
+	}
 	o16 := opts
 	o16.DownloadRange = MediaRange16K
 	d16 = ProbeDownload(ctx, mediaURL, o16)
@@ -139,17 +149,14 @@ func applyMediaToResult(r *TargetResult, media MediaProbe) {
 		if r.Verdict == VerdictOK {
 			r.Text = r.Text + " " + m.Text
 		}
+	case MediaUnknown:
+		r.Verdict = VerdictUnknown
+		r.Text = m.Text
 	}
 }
 
-// looksLikeGooglevideoMediaURL — грубая проверка videoplayback / googlevideo.
+// looksLikeGooglevideoMediaURL проверяет подписанный URL media сегмента.
 func looksLikeGooglevideoMediaURL(u string) bool {
-	u = strings.ToLower(strings.TrimSpace(u))
-	if u == "" {
-		return false
-	}
-	if !strings.HasPrefix(u, "https://") {
-		return false
-	}
-	return strings.Contains(u, "googlevideo.com") || strings.Contains(u, "videoplayback")
+	_, err := validateYouTubeMediaURL(strings.TrimSpace(u))
+	return err == nil
 }

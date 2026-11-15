@@ -61,6 +61,7 @@ func Lists() fs.FS       { return mustSub(assets.Lists, "lists") }
 func Data() fs.FS        { return mustSub(assets.Data, "data") }
 func Files() fs.FS       { return mustSub(assets.Files, "files") }
 func ExtraStrats() fs.FS { return mustSub(assets.ExtraStrats, "extra_strats") }
+func Blockcheck2() fs.FS { return mustSub(assets.Blockcheck2, "blockcheck2") }
 func Init() fs.FS        { return mustSub(assets.Init, "init") }
 
 // Fake — совместимость: files/fake.

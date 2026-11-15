@@ -61,8 +61,9 @@ func (f *fakeSvc) called() []string {
 
 // fakeChecker — заглушка NetChecker без сети.
 type fakeChecker struct {
-	mu      sync.Mutex
-	targets []string
+	mu          sync.Mutex
+	targets     []string
+	lastOptions netcheck.ProfileCheckOptions
 }
 
 func okResult(label, target string) netcheck.TargetResult {
@@ -75,7 +76,10 @@ func (c *fakeChecker) Check(context.Context) netcheck.CheckResponse {
 func (c *fakeChecker) CheckProfile(ctx context.Context, id int) netcheck.CheckResponse {
 	return c.CheckProfileOpts(ctx, id, netcheck.ProfileCheckOptions{})
 }
-func (c *fakeChecker) CheckProfileOpts(_ context.Context, id int, _ netcheck.ProfileCheckOptions) netcheck.CheckResponse {
+func (c *fakeChecker) CheckProfileOpts(_ context.Context, id int, opts netcheck.ProfileCheckOptions) netcheck.CheckResponse {
+	c.mu.Lock()
+	c.lastOptions = opts
+	c.mu.Unlock()
 	if id == 5 || id == 6 {
 		return netcheck.CheckResponse{Results: []netcheck.TargetResult{}, Message: netcheck.MessageUDPProfile}
 	}

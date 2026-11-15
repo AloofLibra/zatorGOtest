@@ -180,6 +180,13 @@ func TestCheck(t *testing.T) {
 	if out["message"] == nil || len(out["results"].([]any)) != 0 {
 		t.Errorf("UDP profile: %v", out)
 	}
+	_, _ = e.post("/cgi-bin/check.cgi", "profile", "2", "video_id", "BPk1uJ4txPc")
+	e.checker.mu.Lock()
+	videoID := e.checker.lastOptions.VideoID
+	e.checker.mu.Unlock()
+	if videoID != "BPk1uJ4txPc" {
+		t.Fatalf("profile 2 video_id = %q", videoID)
+	}
 	resp, out = e.post("/cgi-bin/check.cgi", "profile", "abc")
 	wantError(t, resp, out, http.StatusBadRequest, "Некорректный профиль")
 }

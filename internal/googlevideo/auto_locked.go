@@ -120,14 +120,15 @@ func MergeAutoLocked(live, backup []AutoLock) []AutoLock {
 	return out
 }
 
-// MostCommonStrategy — наиболее частая стратегия среди локов (tie → меньший номер).
+// MostCommonStrategy — most frequent learned/legacy strategy; seed rows are
+// proposals, not evidence (ties choose the smaller number).
 func MostCommonStrategy(locks []AutoLock) (strat, count int) {
 	if len(locks) == 0 {
 		return 0, 0
 	}
 	counts := map[int]int{}
 	for _, l := range locks {
-		if l.Strategy >= 1 {
+		if l.Strategy >= 1 && l.Source != SourceSeed {
 			counts[l.Strategy]++
 		}
 	}
@@ -204,7 +205,7 @@ func CandidateStrategies(locks []AutoLock, defaultStrat, maxStrat, tailMax int) 
 	var ranked []pair
 	counts := map[int]int{}
 	for _, l := range locks {
-		if l.Strategy >= 1 {
+		if l.Strategy >= 1 && l.Source != SourceSeed {
 			counts[l.Strategy]++
 		}
 	}
@@ -238,9 +239,6 @@ func FormatAutoLockedLine(l AutoLock) string {
 	src := l.Source
 	if src == "" {
 		src = SourceLearned
-	}
-	if scope == "default" && src == SourceLearned {
-		return fmt.Sprintf("%s\t%s\t%d", l.Askey, l.Host, l.Strategy)
 	}
 	if scope == "default" {
 		return fmt.Sprintf("%s\t%s\t%d\t%s", l.Askey, l.Host, l.Strategy, src)

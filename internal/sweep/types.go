@@ -86,6 +86,14 @@ type TargetChecker interface {
 
 var _ TargetChecker = (*netcheck.Checker)(nil)
 
+// MediaTargetChecker checks audio/video URLs prepared before the isolated
+// nfqws2 probe starts; only the signed media requests enter that probe.
+type MediaTargetChecker interface {
+	CheckGooglevideoMediaURLs(ctx context.Context, targetURL string, media netcheck.YouTubeMedia) netcheck.TargetResult
+}
+
+var _ MediaTargetChecker = (*netcheck.Checker)(nil)
+
 // Probe — изолированная тестовая очередь nfqws2 одной фазы. Реальная
 // реализация поднимает отдельный nfqws2/правила firewall; координатору важны
 // только Start/Healthy/Stop.

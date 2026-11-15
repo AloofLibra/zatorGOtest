@@ -2,7 +2,7 @@
 //
 // Движок параллельно пробует TLS 1.2 и TLS 1.3 (GET с ограничением тела,
 // редиректы следуют, проверка сертификата опциональна — как curl -L -k),
-// затем при 2xx/3xx докачивает до 64 КБ и выносит вердикт ok|warn|fail.
+// затем при 2xx/3xx докачивает до 64 КБ и выносит вердикт ok|warn|fail|unknown.
 // JSON-структуры совпадают с ответом check.cgi (api_check).
 package netcheck
 
@@ -24,9 +24,10 @@ const (
 
 // Вердикты проверки цели.
 const (
-	VerdictOK   = "ok"
-	VerdictWarn = "warn"
-	VerdictFail = "fail"
+	VerdictOK      = "ok"
+	VerdictWarn    = "warn"
+	VerdictFail    = "fail"
+	VerdictUnknown = "unknown"
 )
 
 // Состояния версии TLS (z2r_tls_version_state).

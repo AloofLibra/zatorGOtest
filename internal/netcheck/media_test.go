@@ -4,13 +4,13 @@ import "testing"
 
 func TestClassifyMediaRange(t *testing.T) {
 	tests := []struct {
-		name    string
-		dns     bool
-		tls     bool
-		hasURL  bool
-		d16     *Download
-		d64     *Download
-		want    string
+		name   string
+		dns    bool
+		tls    bool
+		hasURL bool
+		d16    *Download
+		d64    *Download
+		want   string
 	}{
 		{"dns", true, false, false, nil, nil, MediaDNS},
 		{"tls only", false, true, false, nil, nil, MediaTLS},
@@ -31,10 +31,9 @@ func TestClassifyMediaRange(t *testing.T) {
 
 func TestLooksLikeGooglevideoMediaURL(t *testing.T) {
 	ok := []string{
-		"https://rr1---sn-abc.googlevideo.com/videoplayback?id=1",
-		"https://host.example/videoplayback?ei=1",
+		"https://rr1---sn-abc.googlevideo.com/videoplayback?sig=abc&expire=1999999999",
 	}
-	bad := []string{"", "http://x", "https://www.youtube.com/", "ftp://gv"}
+	bad := []string{"", "http://x", "https://www.youtube.com/", "ftp://gv", "https://fakegooglevideo.com/videoplayback?sig=x", "https://rr1.googlevideo.com/videoplayback?id=1"}
 	for _, u := range ok {
 		if !looksLikeGooglevideoMediaURL(u) {
 			t.Errorf("want ok: %s", u)
@@ -52,5 +51,13 @@ func TestApplyMediaToResultMidstream(t *testing.T) {
 	applyMediaToResult(&r, MediaProbe{Class: MediaMidstream, Text: "cut"})
 	if r.Verdict != VerdictFail || r.Media == nil || r.Media.Class != MediaMidstream {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestApplyMediaUnknownDoesNotReportTLSAsMediaSuccess(t *testing.T) {
+	r := TargetResult{Verdict: VerdictOK, Text: "TLS CDN отвечает"}
+	applyMediaToResult(&r, MediaProbe{Class: MediaUnknown, Text: "Медиаданные не получены"})
+	if r.Verdict != VerdictUnknown || r.Text != "Медиаданные не получены" {
+		t.Fatalf("unknown media result = %+v", r)
 	}
 }
