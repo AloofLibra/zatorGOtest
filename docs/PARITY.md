@@ -9,7 +9,7 @@
 | --- | --- | --- | --- |
 | Vue 3 WebUI и API | Полный интерфейс Zator | Основные экраны/API перенесены; check-контракт расширен для media | Продолжить контрактную проверку сценариев |
 | YouTube media | Innertube, подписанные audio/video URL, ограниченная загрузка | Профиль 2 автономно получает URL, проверяет аудио/видео Range и обновляет просроченные ссылки один раз | Успешный media-run на роутере пока не подтверждён |
-| Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | CLI запущен на OpenWrt ARM64, сохранил SUMMARY и восстановил procd-службу; оба целевых домена завершились `curl code 6` до TLS-проверки, отсутствует `ncat` для port-check | Повторить тест, когда DNS целевого домена работает; установить ncat только если нужна port-check проверка |
+| Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | Go CLI передаёт upstream имя хоста; на OpenWrt ARM64 `example.com` прошёл TLS 1.2 и TLS 1.3 (`working without bypass`), SUMMARY сохранён, procd-служба восстановлена | Отдельный port-check недоступен без ncat; DPI-blocked hostname требует отдельного тестового окна/цели |
 | Быстрый подбор | Однопрофильный/доменный подбор, отмена, применение результата | WebUI запускает один профиль и адрес через существующий coordinator; на OpenWrt ARM64 проверены API start/cancel, отдельный probe и очистка; TLS preference, прогресс и автоматическое применение зелёного победителя поддержаны | Роутерный прогон отменён до проверки кандидатов; полный цикл и применение победителя не проверены |
 | WSSIZE Full/Lite | Full/Lite, SYN/ACK, window scale, nftables/iptables, Googlevideo set, toggles | Backend и contract tests покрывают оба режима, nftables/ipset и выключение без навязывания пользовательского значения | CPU и порядок реальных firewall правил требуют измерения на роутере |
 | Авторотация/детекторы | Lua `circular_quality`, success/failure detectors, SLM | Текущие Lua assets сохранены; Go seed пишет provenance, learned-only transfer; validator service доступен | Проверить ложноположительные срабатывания и client-scope на реальном трафике |
@@ -21,7 +21,7 @@
 | OpenWrt/Keenetic | Проверены отдельные платформенные сценарии | На тестовом OpenWrt ARM64 Go CLI через procd остановил/запустил zapret2; nftables правила восстановлены штатным init; ARM64 loopback smoke пройден | Повторить полный install/update/reboot и WSSIZE порядок правил; Keenetic E2E не выполнен |
 | Нагрузка слабого роутера | Измерения зависят от устройства | На тестовом OpenWrt API-only ARM64 процесс: RSS 8.8 MiB, 6 threads; system idle 95–97% в двух 5-секундных окнах | Устройство имеет 496716 KiB RAM; тест не запускал collector/watchdog. Повторить полный idle и явную проверку на целевом слабом роутере |
 
-На тестовом OpenWrt 25.12.4/ARM64 временный Go WebUI ответил на loopback; профиль 2 получил timeout от Googlevideo, а контрольный YouTube ответил. Поэтому реальную медиазагрузку на роутере пока нельзя считать проверенной. Быстрый профиль на loopback запущен и отменён через API: отчёт перешёл в `cancelled`, процесс с очередью 65535 завершился, правила `z2r_supersweep`/`Z2R_SS` после очистки отсутствовали; действующий `/etc/init.d/zapret2` оставался `running`. Blockcheck2 дважды запустился через Go CLI и сохранил SUMMARY; `youtube.com` и `rutracker.org` не разрешились в момент целевого запроса (`curl code 6`), хотя общая DNS-проверка Blockcheck2 прошла. Список также сообщает об отсутствии подходящего `ncat`.
+На тестовом OpenWrt 25.12.4/ARM64 временный Go WebUI ответил на loopback; профиль 2 получил timeout от Googlevideo, а контрольный YouTube ответил. Поэтому реальную медиазагрузку на роутере пока нельзя считать проверенной. Быстрый профиль на loopback запущен и отменён через API: отчёт перешёл в `cancelled`, процесс с очередью 65535 завершился, правила `z2r_supersweep`/`Z2R_SS` после очистки отсутствовали; действующий `/etc/init.d/zapret2` оставался `running`. Первые запуски Blockcheck2 завершались с `curl code 6`: CLI передавал полный URL вместо hostname в `DOMAINS`. После исправления `example.com` прошёл TLS 1.2/1.3 без обхода; SUMMARY сохранён и zapret2 восстановлен. Подходящего `ncat` на роутере нет, port-check не выполнялся.
 
 Для сборки проверены все 10 целей `scripts/crossbuild.sh` (arm, arm64, mips, mips64, mipsel, mipsel64, ppc, 386, amd64, riscv64); бинарники создавались во временном каталоге Windows-хоста. Это подтверждает компиляцию, но запуск на MIPS/ARM и размер runtime-памяти там не проверены.
 
@@ -47,7 +47,7 @@
 | service start/stop/restart | done |
 | check (TLS 1.2/1.3) | done |
 | Profile 2 YouTube media check | partial: Innertube resolves signed audio/video URLs, checks bounded ranges and refreshes stale HTTP URLs once; router media success remains unverified |
-| Blockcheck2 TLS 1.2/1.3 lists | partial on router: Go CLI calls upstream `blockcheck2.sh`, captures log and SUMMARY, and restores service; target TLS requests aborted at DNS resolution |
+| Blockcheck2 TLS 1.2/1.3 lists | verified on OpenWrt ARM64: Go CLI invokes upstream `blockcheck2.sh`, captures log/SUMMARY, and restores service; `example.com` succeeded with TLS 1.2/1.3 without bypass |
 | domains (netrogat/custom/substring) | done |
 | backups create/list/download/delete/upload | done |
 | scopes | done |

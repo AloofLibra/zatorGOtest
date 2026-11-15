@@ -29,7 +29,7 @@ func cmdBlockcheck(args []string, stdout, stderr io.Writer) (exitCode int) {
 		fmt.Fprintf(stderr, "ошибка конфигурации: %v\n", err)
 		return 1
 	}
-	url, _, ok := sweep.NormalizeTestURL(args[1])
+	url, domain, ok := sweep.NormalizeTestURL(args[1])
 	if !ok {
 		fmt.Fprintln(stderr, "некорректный адрес проверки")
 		return 2
@@ -102,7 +102,7 @@ func cmdBlockcheck(args []string, stdout, stderr io.Writer) (exitCode int) {
 
 	cmd := exec.CommandContext(ctx, bash, blockcheck)
 	cmd.Env = withEnv(os.Environ(), map[string]string{
-		"TEST": "z4r", "DOMAINS": url, "TESTDIR": testDir,
+		"TEST": "z4r", "DOMAINS": domain, "TESTDIR": testDir,
 		"CURL_HTTPS_GET": "1", "BATCH": "1", "ENABLE_HTTP": "0",
 		"ENABLE_HTTPS_TLS12": "1", "ENABLE_HTTPS_TLS13": "1", "ENABLE_HTTP3": "0",
 		"ZAPRET_BASE": a.Paths.ZapretRoot,
