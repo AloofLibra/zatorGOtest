@@ -46,7 +46,7 @@
 | set-lock / clear-lock | done |
 | service start/stop/restart | done |
 | check (TLS 1.2/1.3) | done |
-| Profile 2 YouTube media check | partial: Innertube resolves signed audio/video URLs, checks bounded ranges and refreshes stale HTTP URLs once; router media success remains unverified |
+| Profile 2 YouTube media check | partial: signed media ranges succeeded on the OpenWrt router through `AWG_pers`; primary WAN remains blocked/timed out and client playback is unverified |
 | Blockcheck2 TLS 1.2/1.3 lists | verified on OpenWrt ARM64: Go CLI invokes upstream `blockcheck2.sh`, captures log/SUMMARY, and restores service; `example.com` succeeded with TLS 1.2/1.3 without bypass |
 | domains (netrogat/custom/substring) | done |
 | backups create/list/download/delete/upload | done |
