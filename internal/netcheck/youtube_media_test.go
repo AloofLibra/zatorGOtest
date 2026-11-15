@@ -3,6 +3,7 @@ package netcheck
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -12,6 +13,30 @@ import (
 	"testing"
 	"time"
 )
+
+func TestProfileMediaResolverRunsWhenGooglevideoPreflightFails(t *testing.T) {
+	checker := NewChecker(Options{
+		InsecureSkipVerify: true,
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errors.New("no route")
+		},
+	})
+	checker.RedirectorURL = "https://127.0.0.1:9/report_mapping?di=no"
+	called := false
+	checker.MediaResolver = func(context.Context, string) (YouTubeMedia, error) {
+		called = true
+		return YouTubeMedia{}, errors.New("innertube_denied")
+	}
+
+	response := checker.checkProfileGooglevideo(context.Background(), ProfileCheckOptions{})
+	result := response.Results[0]
+	if !called || result.Media == nil || result.Media.Class != MediaUnknown || result.Media.ResolverStatus != "innertube_denied" || result.Verdict != VerdictUnknown {
+		t.Fatalf("resolver called=%v result=%+v", called, result)
+	}
+	if !strings.Contains(response.Message, "TLS к Googlevideo не подтверждён") || strings.Contains(response.Message, "TLS CDN отвечает") {
+		t.Fatalf("incorrect media status message: %q", response.Message)
+	}
+}
 
 func TestResolveYouTubeMedia(t *testing.T) {
 	var calls int

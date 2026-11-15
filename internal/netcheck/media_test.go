@@ -61,3 +61,11 @@ func TestApplyMediaUnknownDoesNotReportTLSAsMediaSuccess(t *testing.T) {
 		t.Fatalf("unknown media result = %+v", r)
 	}
 }
+
+func TestApplyMediaPlayOverridesFailedCDNRootProbe(t *testing.T) {
+	r := TargetResult{Verdict: VerdictFail, Text: "CDN root timed out"}
+	applyMediaToResult(&r, MediaProbe{Class: MediaPlay, Text: "Media OK"})
+	if r.Verdict != VerdictOK || r.Text != "Media OK" {
+		t.Fatalf("media success should be authoritative: %+v", r)
+	}
+}

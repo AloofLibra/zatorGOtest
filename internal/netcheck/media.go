@@ -141,9 +141,8 @@ func applyMediaToResult(r *TargetResult, media MediaProbe) {
 			r.Text = m.Text
 		}
 	case MediaPlay:
-		if r.Verdict == VerdictOK || r.Verdict == "" {
-			r.Text = m.Text
-		}
+		r.Verdict = VerdictOK
+		r.Text = m.Text
 	case MediaTLS:
 		// TLS-only: оставляем ok на 404 корня, но текст поясняет ограничение.
 		if r.Verdict == VerdictOK {

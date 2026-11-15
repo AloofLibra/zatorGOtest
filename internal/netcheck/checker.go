@@ -262,15 +262,19 @@ func (c *Checker) checkProfileGooglevideo(ctx context.Context, opts ProfileCheck
 	if primary.Media != nil {
 		switch primary.Media.Class {
 		case MediaMidstream:
-			resp.Message = "TLS CDN зелёный, но поток срезается (16K→64K) — mid-stream DPI: WSSIZE lite + свежий googlevideo-ipv4"
+			resp.Message = "Диапазон media 16K проходит, 64K срезается — возможен mid-stream DPI: WSSIZE Lite + свежий googlevideo-ipv4"
 		case MediaTiny:
-			resp.Message = "TLS OK, тело tiny — ротируйте стратегию профиля 2 (не WSSIZE)"
+			resp.Message = "Медиадиапазоны tiny — ротируйте стратегию профиля 2 (не WSSIZE)"
 		case MediaPlay:
 			resp.Message = "Media Range OK; если в браузере рвётся — смотрите QUIC/h3 (UDP) или клиент"
 		case MediaTLS:
 			resp.Message = "Проверен только TLS CDN; медиапоток не проверен"
 		case MediaUnknown:
-			resp.Message = "TLS CDN отвечает, но медиапоток не подтверждён: " + primary.Media.ResolverStatus
+			if primary.TLS12Detail.Answered() || primary.TLS13Detail.Answered() {
+				resp.Message = "TLS CDN отвечает, но медиапоток не подтверждён: " + primary.Media.ResolverStatus
+			} else {
+				resp.Message = "TLS к Googlevideo не подтверждён; медиапоток неизвестен: " + primary.Media.ResolverStatus
+			}
 		}
 	}
 	if primary.Verdict == VerdictFail && ctx.Err() == nil {
@@ -403,15 +407,12 @@ func (c *Checker) CheckGooglevideoMediaURLs(ctx context.Context, targetURL strin
 	if audioErr != nil || videoErr != nil {
 		return unknownMediaTarget(targetURL, media.VideoID, "invalid_media_url")
 	}
-	r := c.CheckTarget(ctx, LabelGooglevideo, media.VideoURL)
+	// Probe only the unsigned host root here; the bounded range requests below
+	// validate the signed URL without issuing an unbounded GET to videoplayback.
+	r := c.CheckTarget(ctx, LabelGooglevideo, "https://"+videoHost+"/")
 	// Signed query parameters are credentials; never echo them in API results.
 	r.Target = "https://" + videoHost + "/videoplayback"
 	dnsFail := r.TLS12Detail.State == StateDNS || r.TLS13Detail.State == StateDNS
-	tlsOK := r.TLS12Detail.Answered() || r.TLS13Detail.Answered()
-	if !tlsOK {
-		applyMediaToResult(&r, ClassifyMediaRange(dnsFail, false, false, nil, nil))
-		return r
-	}
 
 	a16, a64 := ProbeMediaRanges(ctx, media.AudioURL, c.Options)
 	v16, v64 := ProbeMediaRanges(ctx, media.VideoURL, c.Options)
@@ -447,7 +448,8 @@ func (c *Checker) CheckGooglevideoMediaURLs(ctx context.Context, targetURL strin
 	if ctx.Err() != nil {
 		status = "cancelled"
 	}
-	result := ClassifyMediaRange(false, true, true, &v16, &v64)
+	mediaTLSOK := a16.Code != 0 || a64.Code != 0 || v16.Code != 0 || v64.Code != 0 || r.TLS12Detail.Answered() || r.TLS13Detail.Answered()
+	result := ClassifyMediaRange(dnsFail && !mediaTLSOK, mediaTLSOK, true, &v16, &v64)
 	result.Host = videoHost
 	result.AudioHost = audioHost
 	result.VideoID = media.VideoID
@@ -483,16 +485,18 @@ func (c *Checker) CheckGooglevideoMediaWithOptions(ctx context.Context, options 
 	var media YouTubeMedia
 	resolverStatus := ""
 	audioBytes := 0
-	if mediaURL != "" && !hasURL && tlsOK {
+	mediaHTTP := tlsOK
+	if mediaURL != "" && !hasURL {
 		resolverStatus = "invalid_media_url"
 	}
-	if hasURL && tlsOK && ctx.Err() == nil {
+	if hasURL && ctx.Err() == nil {
 		a, b := ProbeMediaRanges(ctx, mediaURL, c.Options)
 		d16, d64 = &a, &b
+		mediaHTTP = mediaHTTP || a.Code != 0 || b.Code != 0
 		// Показываем 64K-проб как download в результате (удобнее в UI).
 		r.Download = d64
 		media.VideoURL = mediaURL
-	} else if mediaURL == "" && tlsOK && ctx.Err() == nil {
+	} else if mediaURL == "" && ctx.Err() == nil {
 		videoID := strings.TrimSpace(options.VideoID)
 		if videoID == "" {
 			videoID = DefaultYouTubeVideoID
@@ -513,6 +517,7 @@ func (c *Checker) CheckGooglevideoMediaWithOptions(ctx context.Context, options 
 			if ctx.Err() == nil {
 				v16, v64 = ProbeMediaRanges(ctx, resolved.VideoURL, c.Options)
 			}
+			mediaHTTP = mediaHTTP || a16.Code != 0 || a64.Code != 0 || v16.Code != 0 || v64.Code != 0
 			if staleYouTubeMedia(a16, a64, v16, v64) && ctx.Err() == nil {
 				refreshed, refreshErr := resolver(ctx, videoID)
 				if refreshErr != nil {
@@ -523,6 +528,7 @@ func (c *Checker) CheckGooglevideoMediaWithOptions(ctx context.Context, options 
 					if ctx.Err() == nil {
 						v16, v64 = ProbeMediaRanges(ctx, refreshed.VideoURL, c.Options)
 					}
+					mediaHTTP = mediaHTTP || a16.Code != 0 || a64.Code != 0 || v16.Code != 0 || v64.Code != 0
 				}
 			}
 			audioBytes = a16.Size + a64.Size
@@ -540,7 +546,7 @@ func (c *Checker) CheckGooglevideoMediaWithOptions(ctx context.Context, options 
 			}
 		}
 	}
-	result := ClassifyMediaRange(dnsFail, tlsOK, hasURL || media.VideoURL != "", d16, d64)
+	result := ClassifyMediaRange(dnsFail && !mediaHTTP, mediaHTTP, hasURL || media.VideoURL != "", d16, d64)
 	result.Host = host
 	forceUnknown := strings.HasPrefix(resolverStatus, "signed_url") || resolverStatus == "invalid_media_url"
 	if resolverStatus != "" && (forceUnknown || result.Class != MediaMidstream && result.Class != MediaTiny) {
