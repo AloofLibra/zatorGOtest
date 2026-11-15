@@ -703,11 +703,19 @@ func (g guarded) CheckTarget(ctx context.Context, label, url string) netcheck.Ta
 }
 
 func (g guarded) CheckGooglevideoMediaURLs(ctx context.Context, targetURL string, media netcheck.YouTubeMedia) netcheck.TargetResult {
+	return g.CheckGooglevideoMediaURLsWithTLS(ctx, targetURL, media, netcheck.PrefBoth)
+}
+
+func (g guarded) CheckGooglevideoMediaURLsWithTLS(ctx context.Context, targetURL string, media netcheck.YouTubeMedia, pref netcheck.TLSPref) netcheck.TargetResult {
 	checker, ok := g.inner.(MediaTargetChecker)
-	if !ok {
+	withTLS, tlsOK := g.inner.(MediaTargetCheckerWithTLS)
+	if !ok && !tlsOK {
 		return unknownMediaTarget(targetURL, media.VideoID, "media_checker_unavailable")
 	}
 	return g.withProbe(ctx, netcheck.LabelGooglevideo, targetURL, func() netcheck.TargetResult {
+		if tlsOK {
+			return withTLS.CheckGooglevideoMediaURLsWithTLS(ctx, targetURL, media, pref)
+		}
 		return checker.CheckGooglevideoMediaURLs(ctx, targetURL, media)
 	})
 }

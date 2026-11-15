@@ -56,12 +56,13 @@ type scripted struct {
 	store *orchestra.Store
 	scope string
 
-	mu     sync.Mutex
-	keyFor map[string]string // URL -> ключ лока (профиль или домен)
-	decide func(key string, strategy int) netcheck.TargetResult
-	hook   func(call int, key string, strategy int, ctx context.Context)
-	calls  int
-	log    []string
+	mu           sync.Mutex
+	keyFor       map[string]string // URL -> ключ лока (профиль или домен)
+	decide       func(key string, strategy int) netcheck.TargetResult
+	hook         func(call int, key string, strategy int, ctx context.Context)
+	calls        int
+	log          []string
+	mediaTLSPref netcheck.TLSPref
 }
 
 func newScripted(st *orchestra.Store, keyFor map[string]string, decide func(key string, strategy int) netcheck.TargetResult) *scripted {
@@ -95,6 +96,13 @@ func (s *scripted) CheckGooglevideoMediaURLs(ctx context.Context, targetURL stri
 	}
 	res.Media = &netcheck.MediaProbe{Class: class, Text: "test media " + class, VideoID: media.VideoID}
 	return res
+}
+
+func (s *scripted) CheckGooglevideoMediaURLsWithTLS(ctx context.Context, targetURL string, media netcheck.YouTubeMedia, pref netcheck.TLSPref) netcheck.TargetResult {
+	s.mu.Lock()
+	s.mediaTLSPref = pref
+	s.mu.Unlock()
+	return s.CheckGooglevideoMediaURLs(ctx, targetURL, media)
 }
 
 func (s *scripted) callLog() []string {

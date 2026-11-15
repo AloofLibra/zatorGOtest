@@ -69,3 +69,23 @@ func TestApplyMediaPlayOverridesFailedCDNRootProbe(t *testing.T) {
 		t.Fatalf("media success should be authoritative: %+v", r)
 	}
 }
+
+func TestAllMediaVersionsHaveNetworkFailure(t *testing.T) {
+	if !allMediaVersionsHaveNetworkFailure(VersionDetail{State: StateTimeout}, VersionDetail{State: StateTLS}) {
+		t.Fatal("timeouts on both requested TLS versions must classify as transport failure")
+	}
+	for _, details := range [][]VersionDetail{
+		{{State: StateDNS}, {State: StateTimeout}},
+		{{State: StateTimeout}, {State: StateHTTP}},
+		{{State: StateTimeout}, {State: StateNone}},
+	} {
+		if allMediaVersionsHaveNetworkFailure(details...) {
+			t.Fatalf("non-network condition classified as transport failure: %+v", details)
+		}
+	}
+	r := TargetResult{Verdict: VerdictOK}
+	applyMediaToResult(&r, MediaProbe{Class: MediaFail, Text: "network failure"})
+	if r.Verdict != VerdictFail {
+		t.Fatalf("media fail verdict = %q", r.Verdict)
+	}
+}

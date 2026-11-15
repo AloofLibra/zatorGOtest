@@ -92,7 +92,12 @@ type MediaTargetChecker interface {
 	CheckGooglevideoMediaURLs(ctx context.Context, targetURL string, media netcheck.YouTubeMedia) netcheck.TargetResult
 }
 
+type MediaTargetCheckerWithTLS interface {
+	CheckGooglevideoMediaURLsWithTLS(ctx context.Context, targetURL string, media netcheck.YouTubeMedia, pref netcheck.TLSPref) netcheck.TargetResult
+}
+
 var _ MediaTargetChecker = (*netcheck.Checker)(nil)
+var _ MediaTargetCheckerWithTLS = (*netcheck.Checker)(nil)
 
 // Probe — изолированная тестовая очередь nfqws2 одной фазы. Реальная
 // реализация поднимает отдельный nfqws2/правила firewall; координатору важны

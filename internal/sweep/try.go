@@ -136,7 +136,9 @@ func (e *Env) Try(ctx context.Context, req TryRequest) (TryResult, error) {
 
 	var tr netcheck.TargetResult
 	if req.MediaURLs != nil {
-		if checker, ok := e.Checker.(MediaTargetChecker); ok {
+		if checker, ok := e.Checker.(MediaTargetCheckerWithTLS); ok {
+			tr = checker.CheckGooglevideoMediaURLsWithTLS(ctx, req.URL, *req.MediaURLs, req.TLSPref)
+		} else if checker, ok := e.Checker.(MediaTargetChecker); ok {
 			tr = checker.CheckGooglevideoMediaURLs(ctx, req.URL, *req.MediaURLs)
 		} else {
 			tr = netcheck.TargetResult{Label: req.Label, Target: req.URL, Verdict: netcheck.VerdictUnknown,
@@ -161,7 +163,9 @@ func buildTry(req TryRequest, tr netcheck.TargetResult) TryResult {
 		switch tr.Media.Class {
 		case netcheck.MediaPlay:
 			verdict, short = TokenOK, tr.Media.Text
-		case netcheck.MediaMidstream, netcheck.MediaTiny, netcheck.MediaDNS, netcheck.MediaNone:
+		case netcheck.MediaWarn:
+			verdict, short = TokenWarn, tr.Media.Text
+		case netcheck.MediaMidstream, netcheck.MediaTiny, netcheck.MediaDNS, netcheck.MediaNone, netcheck.MediaFail:
 			verdict, short = TokenFail, tr.Media.Text
 		default:
 			verdict, short = TokenUnknown, tr.Media.Text

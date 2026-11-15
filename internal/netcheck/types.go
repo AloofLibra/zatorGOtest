@@ -139,7 +139,9 @@ type Download struct {
 	// Retry — успех достигнут со второй попытки.
 	Retry bool `json:"-"`
 	// Err — класс ошибки (в JSON не попадает).
-	Err ErrKind `json:"-"`
+	Err   ErrKind `json:"-"`
+	Proto string  `json:"-"`
+	IP    string  `json:"-"`
 }
 
 // Seconds возвращает время докачки в секундах (0, если неизвестно).

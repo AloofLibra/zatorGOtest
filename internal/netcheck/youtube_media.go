@@ -29,11 +29,15 @@ var youtubeMediaHostRE = regexp.MustCompile(`^[a-z0-9.-]+$`)
 // YouTubeMedia contains short-lived URLs returned by Innertube. Do not log or
 // persist these URLs: they contain signed playback credentials.
 type YouTubeMedia struct {
-	VideoID   string
-	AudioURL  string
-	VideoURL  string
-	AudioHost string
-	VideoHost string
+	VideoID     string
+	AudioURL    string
+	VideoURL    string
+	AudioHost   string
+	VideoHost   string
+	AudioLength int64
+	VideoLength int64
+	AudioMIME   string
+	VideoMIME   string
 }
 
 // MediaResolver may be replaced by tests or callers with a local resolver.
@@ -138,7 +142,7 @@ func resolveYouTubeMedia(ctx context.Context, videoID string, opts Options, apiB
 		if err != nil {
 			continue
 		}
-		item := selectedYouTubeFormat{url: f.URL, host: host, size: parseContentLength(f.ContentLength), bitrate: f.Bitrate}
+		item := selectedYouTubeFormat{url: f.URL, host: host, mime: mime, size: parseContentLength(f.ContentLength), bitrate: f.Bitrate}
 		if kind == "audio" {
 			chooseFormat(&audio, item, 1<<20)
 		} else {
@@ -151,11 +155,13 @@ func resolveYouTubeMedia(ctx context.Context, videoID string, opts Options, apiB
 		}
 		return YouTubeMedia{}, errors.New("media_urls_missing")
 	}
-	return YouTubeMedia{VideoID: videoID, AudioURL: audio.url, VideoURL: video.url, AudioHost: audio.host, VideoHost: video.host}, nil
+	return YouTubeMedia{VideoID: videoID, AudioURL: audio.url, VideoURL: video.url, AudioHost: audio.host, VideoHost: video.host,
+		AudioLength: audio.size, VideoLength: video.size, AudioMIME: audio.mime, VideoMIME: video.mime}, nil
 }
 
 type selectedYouTubeFormat struct {
 	url, host     string
+	mime          string
 	size, bitrate int64
 }
 

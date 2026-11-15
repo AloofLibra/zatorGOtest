@@ -46,6 +46,24 @@ func TestTry_SetsLocksAndBuildsVerdict(t *testing.T) {
 	}
 }
 
+func TestTry_PassesTLSPreferenceIntoMediaCheck(t *testing.T) {
+	env, _, checker := newEnv(t, func(string, int) netcheck.TargetResult { return resGood("0.5") })
+	media := &netcheck.YouTubeMedia{VideoID: netcheck.DefaultYouTubeVideoID}
+	got, err := env.Try(context.Background(), TryRequest{Profile: 2, Strategy: 4, URL: "u2", TLSPref: netcheck.Pref13, MediaURLs: media})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker.mu.Lock()
+	pref := checker.mediaTLSPref
+	checker.mu.Unlock()
+	if pref != netcheck.Pref13 {
+		t.Fatalf("media TLS pref = %q, want %q", pref, netcheck.Pref13)
+	}
+	if got.Verdict != TokenOK {
+		t.Fatalf("media result = %+v", got)
+	}
+}
+
 func TestTry_ExplicitProtosAndProfileDefaults(t *testing.T) {
 	env, st, _ := newEnv(t, func(string, int) netcheck.TargetResult { return resGood("1.0") })
 	if _, err := env.Try(context.Background(), TryRequest{Profile: 2, Strategy: 3, URL: "u2"}); err != nil {

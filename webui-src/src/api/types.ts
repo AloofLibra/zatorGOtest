@@ -95,6 +95,8 @@ export interface CheckItem {
     host?: string
     audio_host?: string
     audio_bytes?: number
+    video_range_bytes?: number
+    video_middle_bytes?: number
     size_16k?: number
     size_64k?: number
     resolver_status?: string
