@@ -9,8 +9,8 @@
 | --- | --- | --- | --- |
 | Vue 3 WebUI и API | Полный интерфейс Zator | Основные экраны/API перенесены; check-контракт расширен для media | Продолжить контрактную проверку сценариев |
 | YouTube media | Innertube, подписанные audio/video URL, ограниченная загрузка | Профиль 2 автономно получает URL, проверяет аудио/видео Range и обновляет просроченные ссылки один раз | Успешный media-run на роутере пока не подтверждён |
-| Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | Списки и z4r loader встроены; CLI `blockcheck2 -y <domain>` запускает upstream-скрипт и сохраняет SUMMARY | Проверить запуск на отдельном стенде: штатный тест временно останавливает zapret2 |
-| Быстрый подбор | Однопрофильный/доменный подбор, отмена, применение результата | WebUI запускает один профиль и адрес через существующий coordinator; TLS preference, прогресс, cancel, isolated probe и автоматическое применение зелёного победителя поддержаны | Проверить полный быстрый цикл на роутере |
+| Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | CLI запущен на OpenWrt ARM64, сохранил SUMMARY и восстановил procd-службу; оба целевых домена завершились `curl code 6` до TLS-проверки, отсутствует `ncat` для port-check | Повторить тест, когда DNS целевого домена работает; установить ncat только если нужна port-check проверка |
+| Быстрый подбор | Однопрофильный/доменный подбор, отмена, применение результата | WebUI запускает один профиль и адрес через существующий coordinator; на OpenWrt ARM64 проверены API start/cancel, отдельный probe и очистка; TLS preference, прогресс и автоматическое применение зелёного победителя поддержаны | Роутерный прогон отменён до проверки кандидатов; полный цикл и применение победителя не проверены |
 | WSSIZE Full/Lite | Full/Lite, SYN/ACK, window scale, nftables/iptables, Googlevideo set, toggles | Backend и contract tests покрывают оба режима, nftables/ipset и выключение без навязывания пользовательского значения | CPU и порядок реальных firewall правил требуют измерения на роутере |
 | Авторотация/детекторы | Lua `circular_quality`, success/failure detectors, SLM | Текущие Lua assets сохранены; Go seed пишет provenance, learned-only transfer; validator service доступен | Проверить ложноположительные срабатывания и client-scope на реальном трафике |
 | Пользовательские настройки | Профили, blob/SNI/clone, DNS/RST/reassembly/fallback/WG/QUIC/UDP, scopes, provider, telemetry, backup | Существующие WebUI/API/config backend и contract tests сохранены; требуется сквозное применение на платформах | Полный settings round-trip на роутере ещё не проверен |
@@ -18,10 +18,12 @@
 | SuperSweep | Фазы, media probe, локи, прогресс и изолированный transport | URLs подготавливаются до старта `NfqwsProbe`; media verdict участвует в выборе победителя | Проверить полный цикл на роутере |
 | Googlevideo collector/seed | UBus/AF_PACKET, queue/upload, центральный IP-set и проверка/apply стратегий | A/CNAME parser, TTL/public-IP checks, bounded RAM dedupe, tmpfs queue, central feed, UBus/AF_PACKET reconnect; consent/token-gated 3-hour upload; new IPs merge incrementally into nft set/ipset; seed provenance fixed | Поведение на Keenetic и доставка наблюдений серверу требуют platform E2E |
 | Установка, обновление, откат | Bash installer и rollback | CLI, offline/update и безопасное сохранение данных есть в Go | Повторить install/update/rollback сценарии на стенде |
-| OpenWrt/Keenetic | Проверены отдельные платформенные сценарии | Платформенные backend есть; ARM64 loopback smoke пройден | Проверить службы/firewall без вмешательства в рабочую установку |
-| Нагрузка слабого роутера | Измерения зависят от устройства | Замеры CPU/RSS отсутствуют | Измерить простой и явные проверки на целевом устройстве |
+| OpenWrt/Keenetic | Проверены отдельные платформенные сценарии | На тестовом OpenWrt ARM64 Go CLI через procd остановил/запустил zapret2; nftables правила восстановлены штатным init; ARM64 loopback smoke пройден | Повторить полный install/update/reboot и WSSIZE порядок правил; Keenetic E2E не выполнен |
+| Нагрузка слабого роутера | Измерения зависят от устройства | На тестовом OpenWrt API-only ARM64 процесс: RSS 8.8 MiB, 6 threads; system idle 95–97% в двух 5-секундных окнах | Устройство имеет 496716 KiB RAM; тест не запускал collector/watchdog. Повторить полный idle и явную проверку на целевом слабом роутере |
 
-На тестовом OpenWrt 25.12.4/ARM64 временный Go WebUI ответил на loopback; профиль 2 получил timeout от Googlevideo, а контрольный YouTube ответил. Поэтому реальную медиазагрузку на роутере пока нельзя считать проверенной. Текущая Bash-служба и её firewall не менялись.
+На тестовом OpenWrt 25.12.4/ARM64 временный Go WebUI ответил на loopback; профиль 2 получил timeout от Googlevideo, а контрольный YouTube ответил. Поэтому реальную медиазагрузку на роутере пока нельзя считать проверенной. Быстрый профиль на loopback запущен и отменён через API: отчёт перешёл в `cancelled`, процесс с очередью 65535 завершился, правила `z2r_supersweep`/`Z2R_SS` после очистки отсутствовали; действующий `/etc/init.d/zapret2` оставался `running`. Blockcheck2 дважды запустился через Go CLI и сохранил SUMMARY; `youtube.com` и `rutracker.org` не разрешились в момент целевого запроса (`curl code 6`), хотя общая DNS-проверка Blockcheck2 прошла. Список также сообщает об отсутствии подходящего `ncat`.
+
+Для сборки проверены все 10 целей `scripts/crossbuild.sh` (arm, arm64, mips, mips64, mipsel, mipsel64, ppc, 386, amd64, riscv64); бинарники создавались во временном каталоге Windows-хоста. Это подтверждает компиляцию, но запуск на MIPS/ARM и размер runtime-памяти там не проверены.
 
 ## Bootstrap / лаунчер
 
@@ -45,7 +47,7 @@
 | service start/stop/restart | done |
 | check (TLS 1.2/1.3) | done |
 | Profile 2 YouTube media check | partial: Innertube resolves signed audio/video URLs, checks bounded ranges and refreshes stale HTTP URLs once; router media success remains unverified |
-| Blockcheck2 TLS 1.2/1.3 lists | done in code: z4r assets installed, CLI calls upstream `blockcheck2.sh`, captures log and SUMMARY; router run pending |
+| Blockcheck2 TLS 1.2/1.3 lists | partial on router: Go CLI calls upstream `blockcheck2.sh`, captures log and SUMMARY, and restores service; target TLS requests aborted at DNS resolution |
 | domains (netrogat/custom/substring) | done |
 | backups create/list/download/delete/upload | done |
 | scopes | done |
@@ -98,11 +100,12 @@
 
 - [ ] Ubuntu 22/24: `curl …/zator-launcher.sh | sh`, открыть Web UI, start zapret2
 - [ ] Debian cloud VPS: install + check YouTube/Discord
-- [ ] OpenWRT: procd unit, nftables, wssize-ramp
+- [ ] OpenWRT: full install/update/reboot, nftables and wssize-ramp order (Go CLI stop/start smoke passed)
 - [ ] OpenWRT: Go WebUI/profile-2 media probe isolated from live Bash service
+- [x] OpenWRT: quick-profile API start/cancel; isolated probe and SuperSweep firewall cleanup
 - [x] OpenWRT ARM64 Go binary, loopback WebUI and status API smoke (temporary `/tmp` roots)
 - [ ] Router media end-to-end: Googlevideo TLS timed out while the YouTube control check answered; Innertube/media transfer was not reached
-- [ ] Blockcheck2 launch through Go CLI and summary availability on router
+- [x] Blockcheck2 Go CLI launch and SUMMARY creation on router (target TLS checks aborted with DNS code 6; port-check unavailable without ncat)
 - [ ] Keenetic Entware: S90, ndm hook, iptables
 - [ ] Merlin: firewall-start hook
 - [ ] MIPS/arm бинарник стартует, Web UI отвечает, locks пишутся атомарно
