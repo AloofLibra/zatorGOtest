@@ -154,13 +154,13 @@ func (s *Server) nfqws2ErrorsGet() map[string]any {
 
 func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, error) {
 	out := map[string]any{"ok": true, "up_to_date": false, "installed": 0, "restart_required": false}
-	// Package C: product-backup до Apply (best-effort).
+	// Создать полный pre-update backup до Apply; при ошибке обновление не начинать.
 	if s.app != nil {
-		if info, err := s.app.CreatePreUpdateBackup(); err == nil {
-			out["pre_update_backup"] = info.Name
-		} else {
-			out["pre_update_backup_warning"] = err.Error()
+		info, err := s.app.CreatePreUpdateBackup()
+		if err != nil {
+			return nil, errf(http.StatusInternalServerError, "Обновление отменено: pre-update backup не создан: "+err.Error())
 		}
+		out["pre_update_backup"] = info.Name
 	}
 	u := deploy.New(s.paths)
 	off := deploy.ResolveOfflineBundle(os.Getenv)

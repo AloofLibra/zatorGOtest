@@ -461,7 +461,8 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if info, err := a.CreatePreUpdateBackup(); err != nil {
-		fmt.Fprintf(stderr, "предупреждение: pre-update backup: %v\n", err)
+		fmt.Fprintf(stderr, "обновление отменено: pre-update backup не создан: %v\n", err)
+		return 1
 	} else {
 		fmt.Fprintf(stdout, "pre-update backup: %s\n", info.Name)
 	}

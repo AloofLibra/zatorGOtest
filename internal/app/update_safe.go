@@ -24,7 +24,9 @@ func (a *App) CreatePreUpdateBackup() (backup.Info, error) {
 		return backup.Info{}, err
 	}
 	a.RememberPreUpdateBackup(info.Name)
-	_ = a.snapshotPreUpdateBinary()
+	if err := a.snapshotPreUpdateBinary(); err != nil {
+		return info, fmt.Errorf("снимок bin/zator: %w", err)
+	}
 	return info, nil
 }
 
