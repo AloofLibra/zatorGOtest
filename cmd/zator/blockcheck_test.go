@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestWriteBlockcheckSummary(t *testing.T) {
@@ -23,5 +25,20 @@ func TestWriteBlockcheckSummary(t *testing.T) {
 	}
 	if want := "* SUMMARY\nTLS 1.2: result\nTLS 1.3: result\n"; string(got) != want {
 		t.Fatalf("summary = %q, want %q", got, want)
+	}
+}
+
+func TestWaitForState(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	calls := 0
+	if err := waitForState(ctx, false, func() bool {
+		calls++
+		return calls < 3
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if calls < 3 {
+		t.Fatalf("state was not polled until stopped: %d polls", calls)
 	}
 }

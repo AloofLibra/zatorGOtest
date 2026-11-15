@@ -62,20 +62,27 @@ func cmdBlockcheck(args []string, stdout, stderr io.Writer) (exitCode int) {
 	if wasRunning {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		err = ctl.Stop(stopCtx, service.UnitZapret2)
-		cancel()
 		if err != nil {
+			cancel()
 			fmt.Fprintf(stderr, "не удалось безопасно остановить zapret2: %v\n", err)
 			return 1
 		}
-		if service.IsNfqws2Running() {
+		if err := waitForNfqws2(stopCtx, false); err != nil {
+			cancel()
 			fmt.Fprintln(stderr, "zapret2 всё ещё запущен после stop; Blockcheck2 не будет запущен")
 			return 1
 		}
+		cancel()
 		defer func() {
 			restartCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 			if err := ctl.Restart(restartCtx, service.UnitZapret2); err != nil {
 				fmt.Fprintf(stderr, "ОШИБКА: Blockcheck2 завершён, но zapret2 не восстановлен: %v\n", err)
+				exitCode = 1
+				return
+			}
+			if err := waitForNfqws2(restartCtx, true); err != nil {
+				fmt.Fprintf(stderr, "ОШИБКА: команда restart завершилась, но nfqws2 не запустился: %v\n", err)
 				exitCode = 1
 			}
 		}()
@@ -132,6 +139,25 @@ func cmdBlockcheck(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return 1
 	}
 	return exitCode
+}
+
+func waitForNfqws2(ctx context.Context, wantRunning bool) error {
+	return waitForState(ctx, wantRunning, service.IsNfqws2Running)
+}
+
+func waitForState(ctx context.Context, want bool, isRunning func() bool) error {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if isRunning() == want {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func findBash() (string, error) {
