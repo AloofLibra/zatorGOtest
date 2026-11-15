@@ -7,14 +7,20 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/googlevideo"
+	"github.com/AloofLibra/zator/internal/telemetry"
 )
 
 var (
-	gvMu       sync.Mutex
-	gvListener *googlevideo.Manager
-	gvCollect  *googlevideo.Collector
+	gvMu         sync.Mutex
+	gvListener   *googlevideo.Manager
+	gvCollect    *googlevideo.Collector
+	gvUploadStop context.CancelFunc
+	gvUploadDone chan struct{}
 )
 
 // GooglevideoHosts возвращает обёртку над lists/googlevideo-hosts.txt.
@@ -109,6 +115,7 @@ func (a *App) StartGooglevideoCollection(ctx context.Context) error {
 		Mode:        mode,
 		SnifferPath: filepath.Join(a.Paths.ZatorRoot, googlevideo.DefaultSnifferRelPath),
 		Observer:    gvCollect,
+		OnObserved:  a.addGooglevideoIPToKernelSet,
 	})
 	if err != nil {
 		return err
@@ -117,18 +124,86 @@ func (a *App) StartGooglevideoCollection(ctx context.Context) error {
 		return fmt.Errorf("googlevideo listener: %w", err)
 	}
 	gvListener = mgr
+	a.startGooglevideoUploader(ctx, gvCollect)
 	return nil
+}
+
+func (a *App) addGooglevideoIPToKernelSet(obs googlevideo.Observation, result googlevideo.ObserveResult) error {
+	if result.Central {
+		return nil
+	}
+	cfg, err := config.Load(a.Paths.ZapretConfig)
+	if err != nil {
+		return err
+	}
+	wcfg, err := firewall.WssizeConfigFromGetter(cfg.Get, a.Paths.ZatorRoot)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return firewall.NewWssize(wcfg, firewall.ExecRunner{}).AddIPs(ctx, []string{obs.IP})
 }
 
 // StopGooglevideoCollection останавливает listener (для тестов/shutdown).
 func (a *App) StopGooglevideoCollection() {
 	a.StopGooglevideoSeeder()
 	gvMu.Lock()
+	stopUpload, uploadDone := gvUploadStop, gvUploadDone
+	gvUploadStop, gvUploadDone = nil, nil
 	defer gvMu.Unlock()
+	if stopUpload != nil {
+		stopUpload()
+	}
 	if gvListener != nil {
 		_ = gvListener.Stop()
 		gvListener = nil
 	}
+	if uploadDone != nil {
+		<-uploadDone
+	}
+}
+
+func (a *App) startGooglevideoUploader(parent context.Context, collector *googlevideo.Collector) {
+	if gvUploadStop != nil || collector == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(parent)
+	client := telemetry.New(a.Paths)
+	uploader, err := googlevideo.NewUploader(googlevideo.UploaderConfig{
+		Collector: collector,
+		Central:   a.GooglevideoCentralList(),
+		IngestURL: googlevideo.IngestURLFromEnv(),
+		Consent: func() googlevideo.Consent {
+			settings, err := client.LoadSettings()
+			if err != nil || !settings.Enabled || strings.TrimSpace(settings.UUID) == "" {
+				return googlevideo.Consent{}
+			}
+			return googlevideo.Consent{Enabled: true, UUID: settings.UUID, Token: os.Getenv(telemetry.EnvStatsToken)}
+		},
+	})
+	if err != nil {
+		cancel()
+		return
+	}
+	done := make(chan struct{})
+	gvUploadStop, gvUploadDone = cancel, done
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := uploader.Upload(ctx, false); err != nil {
+					// Очередь остаётся на диске и будет повторена в следующий цикл.
+					continue
+				}
+			}
+		}
+	}()
 }
 
 // GooglevideoCentralList — кеш lists/googlevideo-ipv4.txt для WSSIZE mark/ipset.

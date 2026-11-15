@@ -127,6 +127,17 @@ func TestNewUploader_Validation(t *testing.T) {
 	}
 }
 
+func TestIngestURLFromEnv(t *testing.T) {
+	t.Setenv(EnvIngestURL, "")
+	if got := IngestURLFromEnv(); got != LegacyIngestURL {
+		t.Fatalf("default ingest URL = %q", got)
+	}
+	t.Setenv(EnvIngestURL, " https://collector.example/ingest ")
+	if got := IngestURLFromEnv(); got != "https://collector.example/ingest" {
+		t.Fatalf("override ingest URL = %q", got)
+	}
+}
+
 func TestUpload_ConsentGate(t *testing.T) {
 	for name, consent := range map[string]ConsentFunc{
 		"disabled":    StaticConsent(false, "tok", "u"),

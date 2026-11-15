@@ -260,7 +260,10 @@ func TestManager_ProcessesEventsAndDeduplicates(t *testing.T) {
 func TestManager_DedupExpiresWithTTL(t *testing.T) {
 	col, clk := newCollector(t, nil)
 	src := &fakeSource{ran: make(chan int, 4)}
-	m, _ := NewManager(ManagerConfig{Mode: ModeSniffer, Observer: col, Source: src, Now: clk.Now})
+	observed := 0
+	m, _ := NewManager(ManagerConfig{Mode: ModeSniffer, Observer: col, Source: src, Now: clk.Now,
+		OnObserved: func(Observation, ObserveResult) error { observed++; return nil },
+	})
 	line := hostA + "\t9.9.9.9\t60"
 
 	m.handleLine(line)
@@ -273,6 +276,9 @@ func TestManager_DedupExpiresWithTTL(t *testing.T) {
 	m.handleLine(line)
 	if st := m.Status(); st.Accepted != 2 || st.Deduped != 1 {
 		t.Errorf("after ttl: %+v", st)
+	}
+	if observed != 2 {
+		t.Errorf("OnObserved calls = %d, want 2", observed)
 	}
 }
 

@@ -230,6 +230,8 @@ type ManagerConfig struct {
 	Now func() time.Time
 	// Logf — необязательный журнал.
 	Logf func(format string, args ...any)
+	// OnObserved вызывается после локальной фиксации валидного ответа.
+	OnObserved func(Observation, ObserveResult) error
 }
 
 // Manager запускает внешний источник DNS-событий и передаёт наблюдения
@@ -425,7 +427,8 @@ func (m *Manager) handleLine(line string) {
 	}
 	m.mu.Unlock()
 
-	if _, err := m.cfg.Observer.Observe(obs); err != nil {
+	result, err := m.cfg.Observer.Observe(obs)
+	if err != nil {
 		m.mu.Lock()
 		if errors.Is(err, ErrRejected) {
 			m.status.Rejected++
@@ -435,6 +438,14 @@ func (m *Manager) handleLine(line string) {
 		}
 		m.mu.Unlock()
 		return
+	}
+	if m.cfg.OnObserved != nil {
+		if err := m.cfg.OnObserved(obs, result); err != nil {
+			m.mu.Lock()
+			m.status.Errors++
+			m.status.LastError = err.Error()
+			m.mu.Unlock()
+		}
 	}
 	m.mu.Lock()
 	m.status.Accepted++

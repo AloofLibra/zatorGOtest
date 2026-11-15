@@ -12,7 +12,7 @@
 | Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | Списки и z4r loader встроены; установка раскладывает файлы в `$ZAPRET2_ROOT/blockcheck2.d/z4r` | Go CLI/WebUI пока не запускает blockcheck2 и не показывает его summary |
 | Быстрый подбор | Однопрофильный/доменный подбор, отмена, применение результата | Есть `AutoSweepProfile` как библиотечный механизм; отдельного API/UI для запуска нет | Реализовать короткий пользовательский сценарий без полного SuperSweep |
 | SuperSweep | Фазы, media probe, локи, прогресс и изолированный transport | URLs подготавливаются до старта `NfqwsProbe`; media verdict участвует в выборе победителя | Проверить полный цикл на роутере |
-| Googlevideo collector/seed | Collector, проверка и применение стратегий Bash | Collector и seed-пути есть в Go | Сверить качество и подтверждение seed с текущим эталоном |
+| Googlevideo collector/seed | UBus/AF_PACKET, queue/upload, центральный IP-set и проверка/apply стратегий | A/CNAME parser, TTL/public-IP checks, bounded RAM dedupe, tmpfs queue, central feed, UBus/AF_PACKET reconnect; consent/token-gated 3-hour upload; new IPs merge incrementally into nft set/ipset; seed provenance fixed | Поведение на Keenetic и доставка наблюдений серверу требуют platform E2E |
 | Установка, обновление, откат | Bash installer и rollback | CLI, offline/update и безопасное сохранение данных есть в Go | Повторить install/update/rollback сценарии на стенде |
 | OpenWrt/Keenetic | Проверены отдельные платформенные сценарии | Платформенные backend есть; ARM64 loopback smoke пройден | Проверить службы/firewall без вмешательства в рабочую установку |
 | Нагрузка слабого роутера | Измерения зависят от устройства | Замеры CPU/RSS отсутствуют | Измерить простой и явные проверки на целевом устройстве |
@@ -70,8 +70,8 @@
 | Firewall client-scope | done |
 | wssize-ramp rules + custom.d | done |
 | SuperSweep marks/chains | done |
-| Googlevideo central list + collector | done |
-| DNS sniffer C binary orchestration | done (режим sniffer/ubus) |
+| Googlevideo central list + collector | done (central cache, local queue, telemetry uploader wired; router verification pending) |
+| DNS sniffer C binary orchestration | done (режим sniffer/ubus, без dnsmasq-full; reconnect manager) |
 | Provider ASN detect | done |
 | Telemetry consent + send | done (токен из env) |
 | Watchdog / strategy-validator daemon | partial (validator templates; Entware nfqws2 respawn — `zator-nfqws-watchdog`) |

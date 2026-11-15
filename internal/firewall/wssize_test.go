@@ -621,6 +621,34 @@ func TestWssizeIptablesRuleSpecs(t *testing.T) {
 	}
 }
 
+func TestWssizeAddIPsMergesIncrementally(t *testing.T) {
+	t.Run("nftables", func(t *testing.T) {
+		r := NewRecordingRunner("nft")
+		r.Handler = nftHandler(map[string]string{"set": "table inet zapret2 { set z2r_googlevideo4 { type ipv4_addr; elements = { 1.1.1.1 } } }"})
+		cfg := testWssizeConfig(BackendNftables)
+		cfg.NFQWS2Enable = true
+		if err := NewWssize(cfg, r).AddIPs(context.Background(), []string{"8.8.8.8", "8.8.8.8"}); err != nil {
+			t.Fatal(err)
+		}
+		calls := r.Calls()
+		if len(calls) != 3 || calls[2].Name != "nft" || calls[2].Stdin != "add element inet zapret2 z2r_googlevideo4 { 8.8.8.8 }\n" {
+			t.Fatalf("incremental nft update = %#v", calls)
+		}
+	})
+	t.Run("iptables", func(t *testing.T) {
+		r := NewRecordingRunner("ipset")
+		cfg := testWssizeConfig(BackendIptables)
+		cfg.NFQWS2Enable = true
+		if err := NewWssize(cfg, r).AddIPs(context.Background(), []string{"8.8.4.4"}); err != nil {
+			t.Fatal(err)
+		}
+		calls := r.Calls()
+		if len(calls) != 2 || calls[1].Stdin != "add z2r_googlevideo4 8.8.4.4 -exist\n" {
+			t.Fatalf("incremental ipset update = %#v", calls)
+		}
+	})
+}
+
 func contains(s []string, v string) bool {
 	for _, x := range s {
 		if x == v {

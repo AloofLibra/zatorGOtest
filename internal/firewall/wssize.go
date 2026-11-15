@@ -419,6 +419,52 @@ func NewWssize(cfg WssizeConfig, r Runner) *Wssize {
 // Config возвращает действующую конфигурацию.
 func (w *Wssize) Config() WssizeConfig { return w.cfg }
 
+// AddIPs merges newly observed Googlevideo addresses into the kernel set
+// without reinstalling hooks or restarting nfqws2.
+func (w *Wssize) AddIPs(ctx context.Context, raw []string) error {
+	if !w.cfg.Active() || len(raw) == 0 {
+		return nil
+	}
+	var ips []netip.Addr
+	seen := make(map[netip.Addr]struct{}, len(raw))
+	for _, value := range raw {
+		a, err := netip.ParseAddr(strings.TrimSpace(value))
+		if err != nil || !a.Is4() || !a.IsGlobalUnicast() || a.IsPrivate() {
+			return ErrInvalidIPv4
+		}
+		if _, ok := seen[a]; ok {
+			continue
+		}
+		seen[a] = struct{}{}
+		ips = append(ips, a)
+	}
+	switch w.cfg.Backend {
+	case BackendNftables:
+		if _, err := w.r.LookPath("nft"); err != nil {
+			return fmt.Errorf("%w: nft", ErrBackendUnavailable)
+		}
+		if err := w.nftEnsureSet(ctx); err != nil {
+			return err
+		}
+		return w.nftMergeSet(ctx, ips, false)
+	case BackendIptables:
+		if _, err := w.r.LookPath("ipset"); err != nil {
+			return ErrIpsetMissing
+		}
+		if _, err := run(ctx, w.r, "ipset", "create", w.cfg.SetName, "hash:ip", "family", "inet", "timeout", "604800", "-exist"); err != nil {
+			return err
+		}
+		var b strings.Builder
+		for _, ip := range ips {
+			fmt.Fprintf(&b, "add %s %s -exist\n", w.cfg.SetName, ip)
+		}
+		_, err := runStdin(ctx, w.r, b.String(), "ipset", "restore", "-exist")
+		return err
+	default:
+		return ErrNoBackend
+	}
+}
+
 // Apply устанавливает правила wssize_ramp. Если функция или nfqws2 выключены —
 // снимает собственные правила (Active=false). Общий набор z2r_googlevideo4
 // никогда не удаляется: его заполняет dnsmasq независимо от zapret2.

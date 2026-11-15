@@ -25,6 +25,8 @@ const (
 	DefaultIngestURL = ""
 	// LegacyIngestURL — прежний приёмник наблюдений (opt-in).
 	LegacyIngestURL = "https://alooflibra.fun/z4r/googlevideo-observations"
+	// EnvIngestURL — переопределение адреса приёма наблюдений.
+	EnvIngestURL = "Z2R_GOOGLEVIDEO_INGEST_URL"
 	// DefaultUploadInterval — не чаще одной отправки за интервал (3 часа).
 	DefaultUploadInterval = 10800 * time.Second
 	// MaxUploadPairs — максимум пар host=ip в одной отправке.
@@ -37,6 +39,15 @@ const (
 	staleSendingAge = time.Hour
 	staleLockAge    = 10 * time.Minute
 )
+
+// IngestURLFromEnv возвращает совместимый с Bash endpoint с возможностью
+// явного переопределения для self-hosted инсталляций.
+func IngestURLFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv(EnvIngestURL)); v != "" {
+		return v
+	}
+	return LegacyIngestURL
+}
 
 // Статусы Uploader.Upload (GOOGLEVIDEO_UPLOAD_LAST_STATUS).
 const (
