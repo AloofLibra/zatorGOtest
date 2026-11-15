@@ -22,11 +22,15 @@ export const supersweepStart = (opts: {
   scope?: string
   domain?: string
   tls_pref?: string
+  quick_profile?: number
+  address?: string
 } = {}) => {
   const body: Record<string, string> = { setting: 'supersweep', value: 'start' }
   if (opts.scope) body.scope = opts.scope
   if (opts.domain?.trim()) body.domain = opts.domain.trim()
   if (opts.tls_pref) body.tls_pref = opts.tls_pref
+  if (opts.quick_profile) body.quick_profile = String(opts.quick_profile)
+  if (opts.address?.trim()) body.address = opts.address.trim()
   return api<{ ok: boolean; started?: boolean }>('/api/settings', formBody(body))
 }
 

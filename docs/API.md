@@ -16,6 +16,7 @@
 | GET/POST | `/api/backups` | бэкапы |
 | GET | `/api/scopes` | client scopes |
 | GET/POST | `/api/settings` | настройки (`setting=…`) |
+| POST | `/api/settings` (`setting=supersweep`) | full run/status/cancel; `quick_profile=1|2|3|4` с `address` запускает короткий перебор одной цели через тот же coordinator, `tls_pref=any|12|13|both` задаёт TLS preference, зелёный победитель применяется автоматически |
 | POST | `/api/blob-upload` | загрузка TLS/WG blob |
 | POST | `/api/login` | вход по паролю |
 | POST | `/api/logout` | выход (ротация session) |

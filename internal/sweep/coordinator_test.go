@@ -297,6 +297,30 @@ func TestCoordinator_PollDuringRun(t *testing.T) {
 	}
 }
 
+func TestCoordinator_QuickProfileAppliesOnlySelectedWinner(t *testing.T) {
+	e := newCoordEnv(t, true, fullScenario, nil)
+	e.setPrev()
+	address := "https://custom.youtube.com/watch"
+	e.chk.keyFor[address] = "1"
+	p := Params{QuickProfile: 1, QuickAddress: address, TLSPref: netcheck.PrefBoth}
+	rep, err := e.c.Run(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Total != 4 || len(rep.Workers) != 1 || rep.Workers[0].Name != WorkerYT || rep.Workers[0].Total != 4 {
+		t.Fatalf("quick report = %+v", rep)
+	}
+	if got := e.lock("1", "tls"); got != 3 {
+		t.Errorf("quick winner lock = %s, want 3", got)
+	}
+	if got := e.lock("4", "tls"); got != 11 {
+		t.Errorf("unselected profile lock changed: %s", got)
+	}
+	if starts := e.probe.startList(); len(starts) != 1 || starts[0] != 1 {
+		t.Errorf("quick probe phases = %v", starts)
+	}
+}
+
 func TestCoordinator_CancelRestoresPrev(t *testing.T) {
 	e := newCoordEnv(t, false, fullScenario, nil)
 	e.setPrev()
@@ -513,6 +537,12 @@ func TestCoordinator_DNSGate(t *testing.T) {
 
 func TestCoordinator_ParamValidation(t *testing.T) {
 	e := newCoordEnv(t, false, fullScenario, nil)
+	if _, err := e.c.Run(context.Background(), Params{QuickProfile: 5}); err == nil {
+		t.Error("invalid quick profile must be rejected")
+	}
+	if _, err := e.c.Run(context.Background(), Params{QuickProfile: 1, QuickAddress: "not a URL"}); err == nil {
+		t.Error("invalid quick address must be rejected")
+	}
 	p := fastParams()
 	p.Domains = []string{"bad", "1", ""}
 	if _, err := e.c.Run(context.Background(), p); !errors.Is(err, ErrNoDomains) {

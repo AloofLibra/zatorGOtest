@@ -68,6 +68,11 @@ type Config struct {
 
 // Params — параметры одного суперавтопрогона.
 type Params struct {
+	// QuickProfile selects one profile for a short strategy search (1, 2, 3, or 4).
+	// Zero keeps the full SuperSweep workflow.
+	QuickProfile int
+	// QuickAddress overrides the selected profile's default test URL.
+	QuickAddress string
 	// Scope — область локов ("" = default).
 	Scope string
 	// TLSPref — требование к версиям TLS: any|12|13|both.
@@ -324,11 +329,24 @@ func (c *Coordinator) logf(format string, args ...any) {
 
 func (c *Coordinator) prepare(ctx context.Context, p Params) (*run, error) {
 	p = p.Normalize()
-	targets, dropped := SanitizeDomains(p.Domains)
+	if p.QuickProfile != 0 && p.QuickProfile != 1 && p.QuickProfile != 2 && p.QuickProfile != 3 && p.QuickProfile != 4 {
+		return nil, fmt.Errorf("sweep: некорректный профиль быстрого подбора %d", p.QuickProfile)
+	}
+	domains := p.Domains
+	if p.QuickProfile != 0 {
+		domains = nil
+		if strings.TrimSpace(p.QuickAddress) != "" {
+			domains = []string{p.QuickAddress}
+		}
+	}
+	targets, dropped := SanitizeDomains(domains)
 	for _, d := range dropped {
 		c.logf("Отброшен некорректный домен: %s", d)
 	}
-	if len(targets) == 0 {
+	if p.QuickProfile != 0 && strings.TrimSpace(p.QuickAddress) != "" && len(targets) == 0 {
+		return nil, fmt.Errorf("sweep: некорректный адрес быстрого подбора")
+	}
+	if p.QuickProfile == 3 && len(targets) == 0 || p.QuickProfile == 0 && len(targets) == 0 {
 		return nil, ErrNoDomains
 	}
 	maxes := map[int]int{}
@@ -509,7 +527,7 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 	}()
 
 	gvURL := "https://" + netcheck.FallbackClusterDomain + "/"
-	if c.cfg.ResolveMedia != nil && ctx.Err() == nil {
+	if c.cfg.ResolveMedia != nil && (r.p.QuickProfile == 0 || r.p.QuickProfile == 2) && ctx.Err() == nil {
 		media, err := c.cfg.ResolveMedia(ctx)
 		if err != nil {
 			r.p.MediaStatus = err.Error()
@@ -526,6 +544,27 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 		}
 	}
 	specs := r.specs(gvURL)
+	phases := Phases
+	if r.p.QuickProfile != 0 {
+		if r.p.QuickProfile == 3 {
+			specs = nil
+			phases = []string{WorkerRKN}
+		} else {
+			name := profileWorkers[r.p.QuickProfile]
+			var selected []workerSpec
+			for _, spec := range specs {
+				if spec.name != name {
+					continue
+				}
+				if r.p.QuickAddress != "" && len(r.targets) > 0 {
+					spec.url = r.targets[0].URL
+				}
+				selected = append(selected, spec)
+			}
+			specs = selected
+			phases = []string{name}
+		}
+	}
 	r.writeRegistry(specs)
 	r.collectPrev()
 	if r.p.MediaStatus != "" {
@@ -533,14 +572,14 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 	}
 
 	if ctx.Err() == nil {
-		r.alive = strings.Join(Phases, ",")
+		r.alive = strings.Join(phases, ",")
 		if err := r.setState(StateRunning); err != nil {
 			return Report{}, err
 		}
 	}
 
 	cancelled := ctx.Err() != nil
-	for i, phase := range Phases {
+	for i, phase := range phases {
 		if ctx.Err() != nil {
 			cancelled = true
 			break
@@ -555,7 +594,7 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 			break
 		}
 		r.settleWorker(phase)
-		if phase != WorkerRKN && i < len(Phases)-1 {
+		if r.p.QuickProfile == 0 && phase != WorkerRKN && i < len(phases)-1 {
 			c.logf("Пауза между фазами: %s", r.p.PhasePause)
 			if err := r.sleep(ctx, r.p.PhasePause); err != nil {
 				cancelled = true
@@ -590,6 +629,10 @@ func (r *run) writeRegistry(specs []workerSpec) {
 	var b strings.Builder
 	for _, s := range specs {
 		fmt.Fprintf(&b, "%s\t%s\tprofile\t%d\t%s\t%d\n", s.name, s.label, s.profile, s.url, s.max)
+	}
+	if r.p.QuickProfile != 0 && r.p.QuickProfile != 3 {
+		_ = fsutil.AtomicWriteFile(r.path(fileWorkers), []byte(b.String()), 0o644)
+		return
 	}
 	var doms []string
 	for _, t := range r.targets {
@@ -911,6 +954,28 @@ func (r *run) settleWorker(name string) {
 // restoreOnCancel — откат при отмене: уже применённые профили сохраняются,
 // остальные возвращаются; доменные пробы откатываются.
 func (r *run) restoreOnCancel() {
+	if r.p.QuickProfile != 0 {
+		if r.p.QuickProfile == 3 {
+			r.restorePrev("domain", "")
+			applied, _ := readApplied(r.path(fileApplied))
+			has3 := false
+			for _, a := range applied {
+				if a.Kind == "profile" && a.Target == "3" {
+					has3 = true
+				}
+			}
+			if !has3 {
+				r.restorePrev("profile", "3")
+			}
+			return
+		}
+		name := profileWorkers[r.p.QuickProfile]
+		marker := readFirstLine(r.path(appliedDoneFile(name)))
+		if marker == "" || marker == "none" || marker == "error" {
+			r.restorePrev("profile", strconv.Itoa(r.p.QuickProfile))
+		}
+		return
+	}
 	for _, name := range []string{WorkerYT, WorkerGV, WorkerDS} {
 		marker := readFirstLine(r.path(appliedDoneFile(name)))
 		switch marker {
@@ -945,6 +1010,15 @@ func (r *run) restoreUnapplied() {
 		if !has[t.Domain] {
 			r.restorePrev("domain", t.Domain)
 		}
+	}
+	if r.p.QuickProfile != 0 {
+		if r.p.QuickProfile != 3 {
+			name := profileWorkers[r.p.QuickProfile]
+			if !fileExists(r.path(appliedDoneFile(name))) {
+				r.restorePrev("profile", strconv.Itoa(r.p.QuickProfile))
+			}
+		}
+		return
 	}
 	for _, name := range []string{WorkerYT, WorkerGV, WorkerDS} {
 		if !fileExists(r.path(appliedDoneFile(name))) {

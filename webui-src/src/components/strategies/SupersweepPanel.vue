@@ -23,6 +23,8 @@ const error = ref('')
 const runScope = ref(props.scope || 'default')
 const domainsText = ref('')
 const tlsPref = ref('any')
+const quickProfile = ref(1)
+const quickAddress = ref('')
 const states = {
   idle: 'Нет прогона', starting: 'Подготовка', running: 'Выполняется', applying: 'Применение результатов',
   done: 'Завершён', cancelled: 'Отменён', interrupted: 'Прерван',
@@ -124,6 +126,34 @@ async function startRun() {
   }
 }
 
+async function startQuickRun() {
+  if (!quickAddress.value.trim()) {
+    showToast('Укажите адрес для быстрого подбора', 'error')
+    return
+  }
+  const ok = await confirmDialog({
+    title: 'Запустить быстрый подбор?',
+    message: `Будут проверены стратегии профиля ${quickProfile.value} для ${quickAddress.value.trim()}; зелёный победитель будет применён автоматически.`,
+  })
+  if (!ok) return
+  try {
+    await withBusy('quick-start', async () => {
+      await supersweepStart({
+        scope: runScope.value || 'default',
+        tls_pref: tlsPref.value,
+        quick_profile: quickProfile.value,
+        address: quickAddress.value,
+      })
+      showToast('Быстрый подбор запущен')
+      emit('started')
+      wasActive = true
+      await refresh()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
 async function cancelRun() {
   const ok = await confirmDialog({
     title: 'Остановить суперсвип?',
@@ -171,6 +201,10 @@ defineExpose({ refresh })
           :class="{ 'is-busy': busyButton === 'ss-start' }" @click="startRun">
           Запустить
         </button>
+        <button type="button" :disabled="busyActive || active || !quickAddress.trim()"
+          :class="{ 'is-busy': busyButton === 'quick-start' }" @click="startQuickRun">
+          Быстрый подбор
+        </button>
         <button type="button" class="ghost danger" :disabled="busyActive || !active"
           :class="{ 'is-busy': busyButton === 'ss-cancel' }" @click="cancelRun">
           Остановить
@@ -200,6 +234,19 @@ defineExpose({ refresh })
         <span>Домены РКН (по одному в строке, необязательно)</span>
         <textarea v-model="domainsText" rows="3" :disabled="busyActive || active"
           placeholder="xhamster.com&#10;anidub.com&#10;amnezia.org"></textarea>
+      </label>
+      <label class="field">
+        <span>Быстрый подбор: профиль</span>
+        <select v-model.number="quickProfile" :disabled="busyActive || active">
+          <option :value="1">YouTube (1)</option>
+          <option :value="2">Googlevideo media (2)</option>
+          <option :value="3">Домен РКН (3)</option>
+          <option :value="4">Discord (4)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Адрес проверки</span>
+        <input v-model="quickAddress" :disabled="busyActive || active" placeholder="www.youtube.com" />
       </label>
     </div>
 

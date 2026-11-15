@@ -146,13 +146,15 @@ zator service status|warnings|start|stop|restart [unit]
 zator locks clear -y
 zator restore z2r_backup_YYYYMMDD_HHMMSS.tar
 zator rollback
+zator blockcheck2 -y <domain>
 zator webui [-port 17682]
 zator status
 zator version
 ```
 
 CLI также позволяет проверить/перезапустить службы, посмотреть сохранённые ошибки,
-сбросить фиксации стратегий с предварительным backup и восстановить настройки после неудачного обновления.
+сбросить фиксации стратегий с предварительным backup, восстановить настройки и запустить Blockcheck2.
+Blockcheck2 временно останавливает zapret2, поэтому команда требует `-y` и автоматически запускает службу после проверки.
 
 ---
 

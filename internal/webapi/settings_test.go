@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/provider"
 )
 
@@ -460,7 +461,13 @@ func TestSettingsWssizeFwtypeClientScope(t *testing.T) {
 
 func TestSupersweepEndpoints(t *testing.T) {
 	e := newEnv(t, envOpts{})
-	resp, out := e.post("/cgi-bin/settings.cgi", "setting", "supersweep", "value", "start", "domain", "example.com\nfoo.org")
+	resp, out := e.post("/cgi-bin/settings.cgi", "setting", "supersweep", "value", "start", "quick_profile", "4", "address", "discord.com", "tls_pref", "13")
+	wantOK(t, resp, out)
+	if !e.sweeper.started || e.sweeper.params.QuickProfile != 4 || e.sweeper.params.QuickAddress != "discord.com" || e.sweeper.params.TLSPref != netcheck.Pref13 {
+		t.Errorf("quick sweep params = %+v", e.sweeper.params)
+	}
+	_ = e.sweeper.Cancel()
+	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "supersweep", "value", "start", "domain", "example.com\nfoo.org")
 	wantOK(t, resp, out)
 	if !e.sweeper.started || len(e.sweeper.params.Domains) != 2 {
 		t.Errorf("sweeper = %+v", e.sweeper)

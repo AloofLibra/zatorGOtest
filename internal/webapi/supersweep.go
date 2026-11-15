@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/AloofLibra/zator/internal/firewall"
@@ -145,6 +146,14 @@ func (s *Server) postSupersweep(_ *http.Request, p params) (map[string]any, erro
 		}
 		sp := sweep.DefaultParams()
 		sp.Scope = scope
+		if raw := p.Get("quick_profile"); raw != "" {
+			profile, convErr := strconv.Atoi(raw)
+			if convErr != nil || (profile != 1 && profile != 2 && profile != 3 && profile != 4) {
+				return nil, errf(http.StatusBadRequest, "Некорректный профиль быстрого подбора")
+			}
+			sp.QuickProfile = profile
+			sp.QuickAddress = p.Raw("address")
+		}
 		if v := p.Get("tls_pref"); v != "" {
 			sp.TLSPref = netcheck.ParseTLSPref(v)
 		}

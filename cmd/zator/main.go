@@ -36,6 +36,7 @@ const usage = `zator — управление zapret2 через Web UI
   locks       аварийный сброс фиксаций стратегий (с backup)
   restore     smart-восстановление из backup
   rollback    восстановить последний pre-update backup
+  blockcheck2 перебор HTTPS TLS 1.2/1.3 списков zapret2
   install     установить zator (каталоги, Web UI, конфигурация)
   update      обновить ресурсы и бинарник с GitHub (-force — всегда скачать)
   uninstall   удалить runtime (-y); --purge сносит весь каталог
@@ -68,6 +69,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRestore(rest, stdout, stderr)
 	case "rollback":
 		return cmdRollback(rest, stdout, stderr)
+	case "blockcheck2":
+		return cmdBlockcheck(rest, stdout, stderr)
 	case "install":
 		return cmdInstall(rest, stdout, stderr)
 	case "update":

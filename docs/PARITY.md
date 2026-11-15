@@ -9,8 +9,8 @@
 | --- | --- | --- | --- |
 | Vue 3 WebUI и API | Полный интерфейс Zator | Основные экраны/API перенесены; check-контракт расширен для media | Продолжить контрактную проверку сценариев |
 | YouTube media | Innertube, подписанные audio/video URL, ограниченная загрузка | Профиль 2 автономно получает URL, проверяет аудио/видео Range и обновляет просроченные ссылки один раз | Успешный media-run на роутере пока не подтверждён |
-| Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | Списки и z4r loader встроены; установка раскладывает файлы в `$ZAPRET2_ROOT/blockcheck2.d/z4r` | Go CLI/WebUI пока не запускает blockcheck2 и не показывает его summary |
-| Быстрый подбор | Однопрофильный/доменный подбор, отмена, применение результата | Есть `AutoSweepProfile` как библиотечный механизм; отдельного API/UI для запуска нет | Реализовать короткий пользовательский сценарий без полного SuperSweep |
+| Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | Списки и z4r loader встроены; CLI `blockcheck2 -y <domain>` запускает upstream-скрипт и сохраняет SUMMARY | Проверить запуск на отдельном стенде: штатный тест временно останавливает zapret2 |
+| Быстрый подбор | Однопрофильный/доменный подбор, отмена, применение результата | WebUI запускает один профиль и адрес через существующий coordinator; TLS preference, прогресс, cancel, isolated probe и автоматическое применение зелёного победителя поддержаны | Проверить полный быстрый цикл на роутере |
 | WSSIZE Full/Lite | Full/Lite, SYN/ACK, window scale, nftables/iptables, Googlevideo set, toggles | Backend и contract tests покрывают оба режима, nftables/ipset и выключение без навязывания пользовательского значения | CPU и порядок реальных firewall правил требуют измерения на роутере |
 | Авторотация/детекторы | Lua `circular_quality`, success/failure detectors, SLM | Текущие Lua assets сохранены; Go seed пишет provenance, learned-only transfer; validator service доступен | Проверить ложноположительные срабатывания и client-scope на реальном трафике |
 | Пользовательские настройки | Профили, blob/SNI/clone, DNS/RST/reassembly/fallback/WG/QUIC/UDP, scopes, provider, telemetry, backup | Существующие WebUI/API/config backend и contract tests сохранены; требуется сквозное применение на платформах | Полный settings round-trip на роутере ещё не проверен |
@@ -45,7 +45,7 @@
 | service start/stop/restart | done |
 | check (TLS 1.2/1.3) | done |
 | Profile 2 YouTube media check | partial: Innertube resolves signed audio/video URLs, checks bounded ranges and refreshes stale HTTP URLs once; router media success remains unverified |
-| Blockcheck2 TLS 1.2/1.3 lists | partial: upstream z4r loader and test lists are embedded and installed into the zapret2 tree; CLI launch/summary is not wired |
+| Blockcheck2 TLS 1.2/1.3 lists | done in code: z4r assets installed, CLI calls upstream `blockcheck2.sh`, captures log and SUMMARY; router run pending |
 | domains (netrogat/custom/substring) | done |
 | backups create/list/download/delete/upload | done |
 | scopes | done |
