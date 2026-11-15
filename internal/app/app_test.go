@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -112,6 +113,28 @@ func TestInstallUpdateUninstall(t *testing.T) {
 	}
 	if _, err := os.Stat(a.Paths.ZatorRoot); !os.IsNotExist(err) {
 		t.Errorf("каталог должен быть удалён: %v", err)
+	}
+}
+
+func TestUninstallKeepsRuntimeWhenServiceCleanupFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("service cleanup is unavailable on Windows")
+	}
+	root := filepath.Join(t.TempDir(), "zator;invalid-service-path")
+	p := paths.New(root, filepath.Join(t.TempDir(), "zapret2"))
+	if err := os.MkdirAll(p.BinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtimeBin := filepath.Join(p.BinDir, "zator")
+	if err := os.WriteFile(runtimeBin, []byte("keep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := NewWith(p, platform.Platform{Kind: platform.KindVPS, InitSystem: platform.InitSystemd})
+	if err := a.Uninstall(UninstallOptions{}); err == nil {
+		t.Fatal("expected service cleanup error")
+	}
+	if got, err := os.ReadFile(runtimeBin); err != nil || string(got) != "keep" {
+		t.Fatalf("runtime was removed despite service cleanup failure: %q, %v", got, err)
 	}
 }
 

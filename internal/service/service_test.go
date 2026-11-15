@@ -377,6 +377,92 @@ func TestSystemdControlErrorIncludesOutput(t *testing.T) {
 	}
 }
 
+func TestUninstallPreservesServiceFilesWhenStopOrDisableFails(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform platform.Platform
+		unit     Unit
+		file     string
+		fails    func(string, []string) bool
+	}{
+		{
+			name:     "systemd disable-now",
+			platform: platSystemd, unit: UnitWebUI,
+			file: filepath.Join("etc", "systemd", "system", "zator-webui.service"),
+			fails: func(name string, args []string) bool {
+				return name == "systemctl" && len(args) > 0 && args[0] == "disable"
+			},
+		},
+		{
+			name:     "procd stop",
+			platform: platProcd, unit: UnitWebUI,
+			file: filepath.Join("etc", "init.d", "zator-webui"),
+			fails: func(name string, args []string) bool {
+				return name == "/etc/init.d/zator-webui" && len(args) > 0 && args[0] == "stop"
+			},
+		},
+		{
+			name:     "sysv stop",
+			platform: platSysV, unit: UnitWebUI,
+			file: filepath.Join("etc", "init.d", "zator-webui"),
+			fails: func(name string, args []string) bool {
+				return name == "/etc/init.d/zator-webui" && len(args) > 0 && args[0] == "stop"
+			},
+		},
+		{
+			name:     "entware stop",
+			platform: platKeen, unit: UnitWebUI,
+			file: filepath.Join("opt", "etc", "init.d", "S92zator-webui"),
+			fails: func(name string, args []string) bool {
+				return strings.HasSuffix(name, "S92zator-webui") && len(args) > 0 && args[0] == "stop"
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			ctx := context.Background()
+			c := e.ctl(t, tt.platform)
+			if err := c.Install(ctx, tt.unit); err != nil {
+				t.Fatal(err)
+			}
+			e.runner.resp = func(name string, args []string) ([]byte, error) {
+				if tt.fails(name, args) {
+					return []byte("stop/disable rejected"), errors.New("exit status 1")
+				}
+				return nil, nil
+			}
+			if err := c.Uninstall(ctx, tt.unit); err == nil {
+				t.Fatal("expected uninstall error")
+			}
+			if _, err := os.Stat(filepath.Join(e.root, tt.file)); err != nil {
+				t.Fatalf("service file removed despite failed stop/disable: %v", err)
+			}
+		})
+	}
+}
+
+func TestSysVUninstallPreservesScriptWhenDisableFails(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	c := e.ctl(t, platSysV)
+	if err := c.Install(ctx, UnitWebUI); err != nil {
+		t.Fatal(err)
+	}
+	e.runner.resp = func(name string, args []string) ([]byte, error) {
+		if name == "update-rc.d" || name == "chkconfig" {
+			return []byte("disable rejected"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}
+	if err := c.Uninstall(ctx, UnitWebUI); err == nil {
+		t.Fatal("expected disable failure")
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "etc", "init.d", "zator-webui")); err != nil {
+		t.Fatalf("init script removed despite failed disable: %v", err)
+	}
+}
+
 func TestProcdInstallControl(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()

@@ -65,11 +65,21 @@ func (b systemdBackend) install(ctx context.Context, u Unit) error {
 }
 
 func (b systemdBackend) uninstall(ctx context.Context, u Unit) error {
-	_ = b.m.run(ctx, "systemctl", "disable", "--now", string(u)+".service")
-	if err := os.Remove(b.unitFile(u)); err != nil && !os.IsNotExist(err) {
+	unitFile := b.unitFile(u)
+	if _, err := os.Stat(unitFile); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("service: чтение unit %s: %w", u, err)
+	}
+	if err := b.m.run(ctx, "systemctl", "disable", "--now", string(u)+".service"); err != nil {
+		return fmt.Errorf("service: disable/stop %s: %w", u, err)
+	}
+	if err := os.Remove(unitFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("service: %w", err)
 	}
-	_ = b.m.run(ctx, "systemctl", "daemon-reload")
+	if err := b.m.run(ctx, "systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("service: systemctl daemon-reload: %w", err)
+	}
 	return nil
 }
 
@@ -99,9 +109,19 @@ func (b procdBackend) install(ctx context.Context, u Unit) error {
 }
 
 func (b procdBackend) uninstall(ctx context.Context, u Unit) error {
-	_ = b.m.run(ctx, b.script(u), "stop")
-	_ = b.m.run(ctx, b.script(u), "disable")
-	if err := os.Remove(b.m.sys(b.script(u))); err != nil && !os.IsNotExist(err) {
+	script := b.m.sys(b.script(u))
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("service: чтение init %s: %w", u, err)
+	}
+	if err := b.m.run(ctx, b.script(u), "stop"); err != nil {
+		return fmt.Errorf("service: stop %s: %w", u, err)
+	}
+	if err := b.m.run(ctx, b.script(u), "disable"); err != nil {
+		return fmt.Errorf("service: disable %s: %w", u, err)
+	}
+	if err := os.Remove(script); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("service: %w", err)
 	}
 	return nil
@@ -138,11 +158,21 @@ func (b sysvBackend) install(ctx context.Context, u Unit) error {
 }
 
 func (b sysvBackend) uninstall(ctx context.Context, u Unit) error {
-	_ = b.m.run(ctx, b.script(u), "stop")
-	if err := b.m.run(ctx, "update-rc.d", "-f", string(u), "remove"); err != nil {
-		_ = b.m.run(ctx, "chkconfig", "--del", string(u))
+	script := b.m.sys(b.script(u))
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("service: чтение init %s: %w", u, err)
 	}
-	if err := os.Remove(b.m.sys(b.script(u))); err != nil && !os.IsNotExist(err) {
+	if err := b.m.run(ctx, b.script(u), "stop"); err != nil {
+		return fmt.Errorf("service: stop %s: %w", u, err)
+	}
+	if err := b.m.run(ctx, "update-rc.d", "-f", string(u), "remove"); err != nil {
+		if fallbackErr := b.m.run(ctx, "chkconfig", "--del", string(u)); fallbackErr != nil {
+			return fmt.Errorf("service: disable %s: update-rc.d: %v; chkconfig: %w", u, err, fallbackErr)
+		}
+	}
+	if err := os.Remove(script); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("service: %w", err)
 	}
 	return nil
@@ -276,7 +306,9 @@ func (b entwareBackend) removeHook() error {
 
 func (b entwareBackend) uninstall(ctx context.Context, u Unit) error {
 	script := b.m.initScriptFor(u)
-	_ = b.m.run(ctx, script, "stop")
+	if err := b.m.run(ctx, script, "stop"); err != nil {
+		return fmt.Errorf("service: stop %s: %w", u, err)
+	}
 	if u == UnitZapret2 {
 		// Не удаляем upstream init в /opt/zapret2 — только S90/хуки zator.
 		if err := os.Remove(b.s90Link()); err != nil && !os.IsNotExist(err) {

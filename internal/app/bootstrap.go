@@ -320,15 +320,10 @@ func (a *App) StopAndUninstallServices() error {
 		return err
 	}
 	a.StopNfqwsWatchdog()
-	var errs []string
 	for _, u := range service.Units() {
-		_ = mgr.Stop(ctx, u)
 		if err := mgr.Uninstall(ctx, u); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", u, err))
+			return fmt.Errorf("%s: %w", u, err)
 		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%s", joinErrors(errs))
 	}
 	return nil
 }

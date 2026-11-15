@@ -103,7 +103,9 @@ func (a *App) Uninstall(opts UninstallOptions) error {
 		return fmt.Errorf("небезопасный корневой каталог: %q", root)
 	}
 	if !opts.SkipService {
-		_ = a.StopAndUninstallServices()
+		if err := a.StopAndUninstallServices(); err != nil {
+			return fmt.Errorf("остановка и отключение служб: %w", err)
+		}
 	}
 	if opts.Purge {
 		return os.RemoveAll(root)
