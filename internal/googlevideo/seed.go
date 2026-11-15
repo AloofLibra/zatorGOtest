@@ -137,7 +137,14 @@ func (s *Seeder) loop(ctx context.Context) {
 func (s *Seeder) loadLocks() []AutoLock {
 	live, _ := ParseAutoLockedTSV(s.cfg.LivePath)
 	backup, _ := ParseAutoLockedTSV(s.cfg.StatePath)
-	return FilterAskey(MergeAutoLocked(live, backup), "2")
+	locks := FilterAskey(MergeAutoLocked(live, backup), "2")
+	defaultScope := make([]AutoLock, 0, len(locks))
+	for _, lock := range locks {
+		if lock.Scope == "" || lock.Scope == "default" {
+			defaultScope = append(defaultScope, lock)
+		}
+	}
+	return defaultScope
 }
 
 func (s *Seeder) tick(ctx context.Context) {
@@ -282,11 +289,13 @@ func (s *Seeder) commit(hostKey string, strategy int, source string) error {
 		Strategy: strategy,
 		Source:   source,
 	}
-	if err := UpsertAutoLock(s.cfg.LivePath, lock); err != nil {
-		return err
-	}
 	if s.cfg.StatePath != "" {
-		_ = UpsertAutoLock(s.cfg.StatePath, lock)
+		if err := UpsertAutoLock(s.cfg.StatePath, lock); err != nil {
+			return fmt.Errorf("persist auto-lock state: %w", err)
+		}
+	}
+	if err := UpsertAutoLock(s.cfg.LivePath, lock); err != nil {
+		return fmt.Errorf("persist live auto-lock: %w", err)
 	}
 	return nil
 }

@@ -94,6 +94,7 @@ func TestParseAutoLockedWithSource(t *testing.T) {
 func TestSeederTransferWithoutProbe(t *testing.T) {
 	dir := t.TempDir()
 	live := filepath.Join(dir, "live.tsv")
+	state := filepath.Join(dir, "state.tsv")
 	// majority 41
 	_ = UpsertAutoLock(live, AutoLock{Askey: "2", Host: "sn-old1", Strategy: 41, Source: SourceLearned})
 	_ = UpsertAutoLock(live, AutoLock{Askey: "2", Host: "sn-old2", Strategy: 41, Source: SourceLearned})
@@ -102,7 +103,8 @@ func TestSeederTransferWithoutProbe(t *testing.T) {
 	_ = os.WriteFile(hostsFile, []byte("rr1---sn-new.googlevideo.com\n"), 0o644)
 
 	s := NewSeeder(SeederConfig{
-		LivePath: live,
+		LivePath:  live,
+		StatePath: state,
 		ListHosts: func() ([]string, error) {
 			return []string{"rr1---sn-new.googlevideo.com"}, nil
 		},
@@ -120,6 +122,66 @@ func TestSeederTransferWithoutProbe(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected seed for sn-new: %+v", got)
+	}
+	backup, err := ParseAutoLockedTSV(state)
+	if err != nil || len(backup) != 1 || backup[0].Host != "sn-new" || backup[0].Source != SourceSeed {
+		t.Fatalf("seed was not persisted: locks=%+v err=%v", backup, err)
+	}
+}
+
+func TestSeederDoesNotTransferAcrossScopes(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.tsv")
+	for _, host := range []string{"sn-work-a", "sn-work-b"} {
+		if err := UpsertAutoLock(live, AutoLock{Askey: "2", Scope: "work", Host: host, Strategy: 41, Source: SourceLearned}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewSeeder(SeederConfig{LivePath: live, ListHosts: func() ([]string, error) {
+		return []string{"rr1---sn-new.googlevideo.com"}, nil
+	}})
+	s.tick(context.Background())
+	got, err := ParseAutoLockedTSV(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lock := range got {
+		if lock.Host == "sn-new" {
+			t.Fatalf("non-default scope produced a default seed: %+v", got)
+		}
+	}
+	if status := s.Status(); status.LastResult != "unknown" || status.LastError != "probe_unavailable" {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestSeederReportsStateWriteFailureBeforeLiveChange(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.tsv")
+	for _, host := range []string{"sn-a", "sn-b"} {
+		if err := UpsertAutoLock(live, AutoLock{Askey: "2", Host: host, Strategy: 41, Source: SourceLearned}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	notDirectory := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(notDirectory, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewSeeder(SeederConfig{LivePath: live, StatePath: filepath.Join(notDirectory, "state.tsv"), ListHosts: func() ([]string, error) {
+		return []string{"rr1---sn-new.googlevideo.com"}, nil
+	}})
+	s.tick(context.Background())
+	got, err := ParseAutoLockedTSV(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lock := range got {
+		if lock.Host == "sn-new" {
+			t.Fatalf("live seed was written after state persistence failed: %+v", got)
+		}
+	}
+	if status := s.Status(); status.LastResult != "error" || status.LastError == "" {
+		t.Fatalf("persistence error was hidden: %+v", status)
 	}
 }
 
