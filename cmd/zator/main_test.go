@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/AloofLibra/zator/internal/app"
+	"github.com/AloofLibra/zator/internal/orchestra"
 )
 
 func runCmd(t *testing.T, args ...string) (int, string, string) {
@@ -38,6 +39,57 @@ func TestUnknownCommand(t *testing.T) {
 	code, _, errOut := runCmd(t, "bogus")
 	if code != 2 || !strings.Contains(errOut, "неизвестная команда") {
 		t.Fatalf("code=%d err=%q", code, errOut)
+	}
+}
+
+func TestServiceWarningsAndValidation(t *testing.T) {
+	setupEnv(t)
+	if code, out, _ := runCmd(t, "service", "warnings"); code != 0 || !strings.Contains(out, "ошибок служб нет") {
+		t.Fatalf("warnings: code=%d out=%q", code, out)
+	}
+	if code, _, _ := runCmd(t, "service", "restart", "unknown"); code != 2 {
+		t.Fatalf("invalid service code=%d", code)
+	}
+	if code, _, _ := runCmd(t, "rollback"); code != 1 {
+		t.Fatalf("rollback without snapshot code=%d", code)
+	}
+}
+
+func TestLocksClearCreatesBackup(t *testing.T) {
+	setupEnv(t)
+	if code, _, errOut := runCmd(t, "install", "-zapret=false", "-skip-service", "-no-auth"); code != 0 {
+		t.Fatalf("install: code=%d err=%s", code, errOut)
+	}
+	a := app.New()
+	if err := os.MkdirAll(a.Paths.ZapretRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(a.Paths.ZapretConfig, []byte("NFQWS2_ENABLE=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := orchestra.NewStore(a.Paths.StateOrchestraDir())
+	if err := store.SetLock(orchestra.ScopeDefault, "1", "tls", 5); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := runCmd(t, "locks", "clear"); code != 1 {
+		t.Fatalf("clear without confirmation code=%d", code)
+	}
+	if !store.HasLocks() {
+		t.Fatal("missing -y unexpectedly cleared locks")
+	}
+	if code, out, errOut := runCmd(t, "locks", "clear", "-y"); code != 0 || !strings.Contains(out, "backup:") {
+		t.Fatalf("clear: code=%d out=%q err=%q", code, out, errOut)
+	} else {
+		if store.HasLocks() {
+			t.Fatal("locks remain after clear")
+		}
+		name := strings.TrimSpace(strings.SplitN(out, "backup:", 2)[1])
+		if code, restoreOut, restoreErr := runCmd(t, "restore", name); code != 0 {
+			t.Fatalf("restore %s: code=%d out=%q err=%q", name, code, restoreOut, restoreErr)
+		}
+	}
+	if !store.HasLocks() {
+		t.Fatal("smart restore did not restore strategy locks")
 	}
 }
 

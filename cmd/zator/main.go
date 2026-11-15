@@ -17,7 +17,10 @@ import (
 
 	"github.com/AloofLibra/zator"
 	"github.com/AloofLibra/zator/internal/app"
+	"github.com/AloofLibra/zator/internal/backup"
 	"github.com/AloofLibra/zator/internal/deploy"
+	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/service"
 	"github.com/AloofLibra/zator/internal/webapi"
 )
 
@@ -29,6 +32,10 @@ const usage = `zator — управление zapret2 через Web UI
 Команды:
   version     показать версию
   status      показать состояние установки и платформу
+  service     аварийный контроль служб: status|start|stop|restart <unit>
+  locks       аварийный сброс фиксаций стратегий (с backup)
+  restore     smart-восстановление из backup
+  rollback    восстановить последний pre-update backup
   install     установить zator (каталоги, Web UI, конфигурация)
   update      обновить ресурсы и бинарник с GitHub (-force — всегда скачать)
   uninstall   удалить runtime (-y); --purge сносит весь каталог
@@ -53,6 +60,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "status":
 		return cmdStatus(stdout, stderr)
+	case "service":
+		return cmdService(rest, stdout, stderr)
+	case "locks":
+		return cmdLocks(rest, stdout, stderr)
+	case "restore":
+		return cmdRestore(rest, stdout, stderr)
+	case "rollback":
+		return cmdRollback(rest, stdout, stderr)
 	case "install":
 		return cmdInstall(rest, stdout, stderr)
 	case "update":
@@ -70,6 +85,197 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "неизвестная команда %q\n\n%s", cmd, usage)
 		return 2
 	}
+}
+
+func cmdRestore(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || !backup.ValidName(args[0]) {
+		fmt.Fprintln(stderr, "использование: zator restore z2r_backup_YYYYMMDD_HHMMSS.tar")
+		return 2
+	}
+	a, err := app.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "ошибка конфигурации: %v\n", err)
+		return 1
+	}
+	result, err := backup.NewIn(a.Paths, a.Paths.BackupDir).Restore(args[0], backup.RestoreOptions{Mode: backup.ModeSmart})
+	if err != nil {
+		fmt.Fprintf(stderr, "восстановление не выполнено: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "восстановлено файлов: %d (режим smart)\n", len(result.Files))
+	return 0
+}
+
+func cmdLocks(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "clear" {
+		fmt.Fprintln(stderr, "использование: zator locks clear -y")
+		return 2
+	}
+	fs := flag.NewFlagSet("locks clear", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	yes := fs.Bool("y", false, "подтвердить сброс фиксаций")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if !*yes {
+		fmt.Fprintln(stderr, "фиксации стратегий будут удалены; повторите с -y")
+		return 1
+	}
+	a, err := app.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "ошибка конфигурации: %v\n", err)
+		return 1
+	}
+	store := orchestra.NewStore(a.Paths.StateOrchestraDir())
+	locks, err := store.ListAllLocks()
+	if err != nil {
+		fmt.Fprintf(stderr, "не удалось прочитать фиксации: %v\n", err)
+		return 1
+	}
+	if len(locks) == 0 {
+		fmt.Fprintln(stdout, "фиксаций нет")
+		return 0
+	}
+	info, err := backup.NewIn(a.Paths, a.Paths.BackupDir).Create(backup.CreateOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "сброс остановлен: backup не создан: %v\n", err)
+		return 1
+	}
+	for _, lock := range locks {
+		if err := store.ClearLock(lock.Scope, lock.Profile, string(lock.Proto)); err != nil {
+			fmt.Fprintf(stderr, "частичный сброс остановлен на %s: %v (backup %s)\n", lock, err, info.Name)
+			return 1
+		}
+	}
+	fmt.Fprintf(stdout, "сброшено фиксаций: %d; backup: %s\n", len(locks), info.Name)
+	return 0
+}
+
+func cmdRollback(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "использование: zator rollback")
+		return 2
+	}
+	a, err := app.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "ошибка конфигурации: %v\n", err)
+		return 1
+	}
+	if err := a.RollbackPreUpdateBackup(); err != nil {
+		fmt.Fprintf(stderr, "откат не выполнен: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "выполнен smart-откат из последнего pre-update backup")
+	return 0
+}
+
+func cmdService(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "использование: zator service status|warnings|start|stop|restart [zapret2|zator-strategy-validator|zator-webui]")
+		return 2
+	}
+	a, err := app.Load()
+	if err != nil {
+		fmt.Fprintf(stderr, "ошибка конфигурации: %v\n", err)
+		return 1
+	}
+	action := args[0]
+	if action == "warnings" {
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "использование: zator service warnings")
+			return 2
+		}
+		warnings := a.ServiceWarnings()
+		if len(warnings) == 0 {
+			fmt.Fprintln(stdout, "ошибок служб нет")
+			return 0
+		}
+		for _, warning := range warnings {
+			fmt.Fprintln(stdout, warning)
+		}
+		return 0
+	}
+	var units []service.Unit
+	if action == "status" {
+		if len(args) > 2 {
+			fmt.Fprintln(stderr, "использование: zator service status [unit]")
+			return 2
+		}
+		units, err = serviceUnits(args[1:])
+	} else {
+		if action != "start" && action != "stop" && action != "restart" || len(args) != 2 {
+			fmt.Fprintln(stderr, "использование: zator service start|stop|restart <unit>")
+			return 2
+		}
+		units, err = serviceUnits(args[1:])
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	ctl, err := service.New(service.Config{Platform: a.Platform, Paths: a.Paths})
+	if err != nil {
+		fmt.Fprintf(stderr, "управление службами недоступно: %v\n", err)
+		return 1
+	}
+	if action == "status" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		failed := false
+		for _, unit := range units {
+			st, err := ctl.Status(ctx, unit)
+			if err != nil {
+				fmt.Fprintf(stderr, "%s: %v\n", unit, err)
+				failed = true
+				continue
+			}
+			fmt.Fprintf(stdout, "%s: running=%t pids=%v backend=%s\n", unit, st.Running, st.PIDs, st.Backend)
+		}
+		if failed {
+			return 1
+		}
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	failed := false
+	for _, unit := range units {
+		switch action {
+		case "start":
+			err = ctl.Start(ctx, unit)
+		case "stop":
+			err = ctl.Stop(ctx, unit)
+		case "restart":
+			err = ctl.Restart(ctx, unit)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "%s %s: %v\n", action, unit, err)
+			failed = true
+		} else {
+			fmt.Fprintf(stdout, "%s: %s ok\n", unit, action)
+		}
+	}
+	if failed {
+		return 1
+	}
+	return 0
+}
+
+func serviceUnits(args []string) ([]service.Unit, error) {
+	if len(args) == 0 {
+		return service.Units(), nil
+	}
+	if len(args) != 1 {
+		return nil, fmt.Errorf("укажите одну службу")
+	}
+	if args[0] == "all" {
+		return service.Units(), nil
+	}
+	unit := service.Unit(args[0])
+	if !unit.Valid() {
+		return nil, fmt.Errorf("неизвестная служба %q", args[0])
+	}
+	return []service.Unit{unit}, nil
 }
 
 func cmdDefault(stdout io.Writer) int {

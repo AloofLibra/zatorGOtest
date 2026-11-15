@@ -142,12 +142,17 @@ zator install [-port 17682] [-password …] [-no-auth] [-source fork|official] [
 zator update
 zator uninstall -y [--purge]
 zator auth status|set-password|enable|disable
+zator service status|warnings|start|stop|restart [unit]
+zator locks clear -y
+zator restore z2r_backup_YYYYMMDD_HHMMSS.tar
+zator rollback
 zator webui [-port 17682]
 zator status
 zator version
 ```
 
-Повседневная работа — через Web UI; CLI — install / update / uninstall / auth и аварийный запуск UI.
+CLI также позволяет проверить/перезапустить службы, посмотреть сохранённые ошибки,
+сбросить фиксации стратегий с предварительным backup и восстановить настройки после неудачного обновления.
 
 ---
 
