@@ -8,6 +8,9 @@ ZATOR_RELEASE="${ZATOR_RELEASE:-latest}"
 ZATOR_ROOT="${ZATOR_ROOT:-/opt/zator}"
 ZATOR_BIN_DIR="${ZATOR_BIN_DIR:-$ZATOR_ROOT/bin}"
 ZATOR_MIRROR="${ZATOR_MIRROR:-}"
+ZATOR_BUNDLE_DIR="${ZATOR_BUNDLE_DIR:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}"
+ZATOR_VENDOR="${ZATOR_VENDOR:-$ZATOR_BUNDLE_DIR/vendor}"
+export ZATOR_BUNDLE_DIR ZATOR_VENDOR
 
 umask 022
 
@@ -85,8 +88,19 @@ trap 'rm -f "$tmp"' EXIT INT HUP
 url=$(asset_url "$asset")
 
 echo "zator-launcher: arch=${arch}"
-echo "zator-launcher: download ${url}"
-download "$url" "$tmp" || die "не удалось скачать ${url}"
+local_binary="$ZATOR_VENDOR/$asset"
+if [ -f "$local_binary" ]; then
+  sums="$local_binary.sha256"
+  [ -f "$sums" ] || die "нет checksum для offline бинарника $asset"
+  expected=$(awk -v want="$asset" '{ name=$2; sub(/^\*/, "", name); sub(/^.*\//, "", name); if (name == want) { print $1; exit } }' "$sums")
+  actual=$(sha256sum "$local_binary" | awk '{print $1}')
+  [ -n "$expected" ] && [ "$actual" = "$expected" ] || die "checksum offline бинарника $asset не совпал"
+  cp "$local_binary" "$tmp" || die "не удалось скопировать offline бинарник $asset"
+  echo "zator-launcher: local vendor ${local_binary}"
+else
+  echo "zator-launcher: download ${url}"
+  download "$url" "$tmp" || die "не удалось скачать ${url}"
+fi
 chmod 755 "$tmp"
 mv -f "$tmp" "$install_dir/zator"
 trap - EXIT INT HUP

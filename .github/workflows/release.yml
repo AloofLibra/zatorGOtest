@@ -69,8 +69,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
           GOMIPS: ${{ matrix.gomips }}
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
         run: |
-          ver="${GITHUB_REF_NAME:-dev}"
+          ver="${RELEASE_TAG:-${GITHUB_REF_NAME:-dev}}"
           mkdir -p dist
           go build -trimpath -ldflags "-s -w -X github.com/AloofLibra/zator.versionOverride=${ver}" \
             -o "dist/zator-linux-${{ matrix.name }}" ./cmd/zator
@@ -82,7 +83,7 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -91,14 +92,19 @@ jobs:
           path: artifacts
           merge-multiple: true
       - name: Pack release files
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
         run: |
           mkdir -p out
           find artifacts -type f -name 'zator-linux-*' -exec cp {} out/ \;
+          VER="${RELEASE_TAG:-$GITHUB_REF_NAME}" COMMIT="$GITHUB_SHA" bash scripts/pack-release.sh out
           cp scripts/zator-launcher.sh out/
-          (cd out && sha256sum zator-linux-* zator-launcher.sh > SHA256SUMS)
+          (cd out && sha256sum zator-linux-* zator-full.tar.gz latest.json zator-launcher.sh > SHA256SUMS)
           ls -la out
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           make_latest: true

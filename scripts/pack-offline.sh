@@ -1,61 +1,48 @@
 #!/usr/bin/env bash
-# Собирает офлайн-бандл: vendor/ (zapret2 архивы) + zator-full.tar.gz + launcher.
+# Собирает офлайн-бандл для TARGET_ARCH (по умолчанию архитектура сборочного хоста).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/dist/offline}"
 VER="${VER:-$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)}"
-mkdir -p "$OUT/vendor"
-
-if [[ ! -d "$ROOT/dist" ]] || ! ls "$ROOT/dist"/zator-linux-* >/dev/null 2>&1; then
+TARGET_ARCH="${TARGET_ARCH:-$(uname -m)}"
+case "$TARGET_ARCH" in
+  aarch64|arm64) TARGET_ARCH=arm64 ;;
+  armv7*|armv6*|arm) TARGET_ARCH=arm ;;
+  x86_64|amd64) TARGET_ARCH=x86_64 ;;
+  i386|i686|x86) TARGET_ARCH=x86 ;;
+  mips64el|mips64le|mipsel64) TARGET_ARCH=mipsel64 ;;
+  mips64) TARGET_ARCH=mips64 ;;
+  mipsel|mipsle) TARGET_ARCH=mipsel ;;
+  lexra|rlx) TARGET_ARCH=mipsel ;;
+  mips) TARGET_ARCH=mips ;;
+  ppc|ppc32|ppc64|ppc64le) TARGET_ARCH=ppc ;;
+  riscv64) TARGET_ARCH=riscv64 ;;
+  *) echo "unknown TARGET_ARCH: $TARGET_ARCH" >&2; exit 1 ;;
+esac
+TARGET_BINARY="$ROOT/dist/zator-linux-$TARGET_ARCH"
+if [[ ! -s "$TARGET_BINARY" ]]; then
   OUT="$ROOT/dist" bash "$ROOT/scripts/crossbuild.sh"
 fi
+[[ -s "$TARGET_BINARY" ]] || { echo "missing target binary: $TARGET_BINARY" >&2; exit 1; }
+mkdir -p "$OUT/vendor"
 
-# Минимальный full-архив из assets + бинарник хост-arch (для применения deploy.Apply).
-STAGE=$(mktemp -d)
-trap 'rm -rf "$STAGE"' EXIT
-mkdir -p "$STAGE/extra_strats/cache/deploy" "$STAGE/webui" "$STAGE/lua" "$STAGE/lists" "$STAGE/bin"
-cp -a "$ROOT/assets/webui/." "$STAGE/webui/"
-cp -a "$ROOT/assets/lua/." "$STAGE/lua/" 2>/dev/null || true
-cp -a "$ROOT/assets/lists/." "$STAGE/lists/" 2>/dev/null || true
-cp "$ROOT/assets/config.default" "$STAGE/config.default"
-cp "$ROOT/dist/zator-linux-x86_64" "$STAGE/bin/zator" 2>/dev/null || true
-
-# Манифест: path|dest|class|sha256|size|exec
-MAN="$STAGE/extra_strats/cache/deploy/manifest.tsv"
-: > "$MAN"
-while IFS= read -r -d '' f; do
-  rel=${f#"$STAGE/"}
-  [[ "$rel" == extra_strats/cache/deploy/* ]] && continue
-  sum=$(sha256sum "$f" | awk '{print $1}')
-  size=$(wc -c <"$f" | tr -d ' ')
-  exec=0
-  [[ -x "$f" ]] && exec=1
-  class=auto
-  case "$rel" in
-    lists/*|extra_strats/*) class=keep-if-exists ;;
-  esac
-  printf '%s|/opt/zator/%s|%s|%s|%s|%s\n' "$rel" "$rel" "$class" "$sum" "$size" "$exec" >>"$MAN"
-done < <(find "$STAGE" -type f -print0)
-
-cat >"$STAGE/extra_strats/cache/deploy/version.env" <<EOF
-ZATOR_VERSION="$VER"
-ZATOR_DATE="$(date -u +%Y-%m-%d)"
-ZATOR_COMMIT=""
-ZATOR_SHA="$(sha256sum "$MAN" | awk '{print $1}')"
-WEBUI_VERSION="$VER"
-WEBUI_DATE="$(date -u +%Y-%m-%d)"
-WEBUI_SHA=""
-TRACKING="offline"
-EOF
-
-tar -C "$STAGE" -czf "$OUT/zator-full.tar.gz" .
+COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse HEAD)}"
+VER="$VER" COMMIT="$COMMIT" BINARY_PATH="$TARGET_BINARY" bash "$ROOT/scripts/pack-release.sh" "$OUT"
 cp "$ROOT/scripts/zator-launcher.sh" "$OUT/zator-launcher.sh"
+chmod 755 "$OUT/zator-launcher.sh"
+for f in "$ROOT"/dist/zator-linux-*; do
+  [[ -f "$f" && "$f" != *.sha256 ]] || continue
+  (cd "$ROOT/dist" && sha256sum "$(basename "$f")") >"$f.sha256"
+done
 cp "$ROOT/dist"/zator-linux-* "$OUT/vendor/" 2>/dev/null || true
 
 # zapret2 в vendor/ — установка без GitHub (ZATOR_VENDOR / LocalArchive).
 ZAPRET_VER="${ZAPRET2_VERSION:-1.0.7-reasm-fix}"
 ZAPRET_ASSET="zapret2-v${ZAPRET_VER}.tar.gz"
 ZAPRET_URL="${ZAPRET2_ARCHIVE_URL:-https://github.com/MarkinAlexander/zapret2/releases/download/v${ZAPRET_VER}/${ZAPRET_ASSET}}"
+if [[ -f "$ROOT/vendor/$ZAPRET_ASSET" && ! -f "$OUT/vendor/$ZAPRET_ASSET" ]]; then
+  cp "$ROOT/vendor/$ZAPRET_ASSET" "$OUT/vendor/$ZAPRET_ASSET"
+fi
 if [[ ! -f "$OUT/vendor/$ZAPRET_ASSET" ]]; then
   echo "скачивание $ZAPRET_URL → vendor/"
   curl -fsSL -o "$OUT/vendor/$ZAPRET_ASSET" "$ZAPRET_URL" || {

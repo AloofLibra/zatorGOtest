@@ -162,6 +162,18 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		}
 		out["pre_update_backup"] = info.Name
 	}
+	rollbackFailure := func(status int, message string, cause error) (map[string]any, error) {
+		detail := message + cause.Error()
+		if s.app != nil {
+			if rerr := s.app.RollbackPreUpdateBackup(); rerr != nil {
+				detail += "; rollback: " + rerr.Error()
+				s.app.WriteServiceWarnings([]string{cause.Error(), "rollback: " + rerr.Error()})
+			} else {
+				detail += "; откат из pre-update backup выполнен"
+			}
+		}
+		return nil, errf(status, detail)
+	}
 	u := deploy.New(s.paths)
 	off := deploy.ResolveOfflineBundle(os.Getenv)
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
@@ -177,10 +189,14 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		out["offline_reason"] = off.Reason
 		ar, aerr := u.ApplyBundle(*off.Bundle, "")
 		if aerr != nil {
-			return nil, errf(http.StatusBadGateway, "Офлайн-обновление не удалось: "+aerr.Error())
+			return rollbackFailure(http.StatusBadGateway, "Офлайн-обновление не удалось: ", aerr)
+		}
+		binary, berr := u.ApplyBundleBinary(ctx, *off.Bundle)
+		if berr != nil {
+			return rollbackFailure(http.StatusBadGateway, "Офлайн-бинарник не применён: ", berr)
 		}
 		if ar != nil {
-			installed = ar.Installed
+			installed = ar.Installed + binary.Installed
 			out["installed"] = installed
 		}
 		out["up_to_date"] = false
@@ -191,7 +207,7 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		rep, rerr := u.Run(ctx, deploy.RunOptions{Variant: deploy.VariantFull})
 		err = rerr
 		if err != nil {
-			return nil, errf(http.StatusBadGateway, "Обновление не удалось: "+err.Error())
+			return rollbackFailure(http.StatusBadGateway, "Обновление не удалось: ", err)
 		}
 		if rep != nil {
 			upToDate = rep.UpToDate

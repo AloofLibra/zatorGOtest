@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ func TestLatestJSONURLUsesKoviand(t *testing.T) {
 	t.Setenv(EnvRepo, "")
 	t.Setenv(EnvLatestURL, "")
 	got := LatestJSONURL()
-	want := "https://github.com/Koviand/zatorGO/releases/download/latest/latest.json"
+	want := "https://github.com/Koviand/zatorGO/releases/latest/download/latest.json"
 	if got != want {
 		t.Fatalf("LatestJSONURL() = %q, want %q", got, want)
 	}
@@ -32,7 +33,7 @@ func TestLatestJSONURLEnvOverride(t *testing.T) {
 	t.Setenv(EnvRepo, "zator")
 	t.Setenv(EnvLatestURL, "")
 	got := LatestJSONURL()
-	want := "https://github.com/Acme/zator/releases/download/latest/latest.json"
+	want := "https://github.com/Acme/zator/releases/latest/download/latest.json"
 	if got != want {
 		t.Fatalf("LatestJSONURL() = %q, want %q", got, want)
 	}
@@ -141,5 +142,37 @@ func TestApplyGitHubBinaryRejectsBadSHA(t *testing.T) {
 	}
 	if !errors.Is(err, fetch.ErrChecksum) {
 		t.Fatalf("err = %v, want ErrChecksum (tag=%s)", err, tag)
+	}
+}
+
+func TestApplyBundleBinaryRejectsBadSHAWithoutReplacingCurrentBinary(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	current := filepath.Join(p.BinDir, "zator")
+	if err := os.WriteFile(current, []byte("working-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	vendor := filepath.Join(root, "vendor")
+	if err := os.MkdirAll(vendor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := binaryAssetName()
+	if err := os.WriteFile(filepath.Join(vendor, name), []byte("wrong-binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vendor, name+".sha256"), []byte(strings.Repeat("0", 64)+"  "+name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	u := New(p)
+	if _, err := u.ApplyBundleBinary(context.Background(), Bundle{VendorDir: vendor}); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("expected checksum failure, got %v", err)
+	}
+	got, err := os.ReadFile(current)
+	if err != nil || string(got) != "working-binary" {
+		t.Fatalf("current binary changed: %q, %v", got, err)
 	}
 }

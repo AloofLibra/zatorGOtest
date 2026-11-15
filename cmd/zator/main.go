@@ -466,9 +466,17 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintf(stdout, "pre-update backup: %s\n", info.Name)
 	}
+	rollback := func() {
+		if rerr := a.RollbackPreUpdateBackup(); rerr != nil {
+			fmt.Fprintf(stderr, "rollback: %v\n", rerr)
+		} else {
+			fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
+		}
+	}
 	// Сначала локальные встроенные ресурсы, затем (если онлайн) релизный tar/бинарник.
 	if err := a.Update(); err != nil {
 		fmt.Fprintf(stderr, "обновление ресурсов не удалось: %v\n", err)
+		rollback()
 		return 1
 	}
 	fmt.Fprintf(stdout, "zator %s: встроенные ресурсы обновлены\n", zator.Version())
@@ -484,18 +492,22 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		ar, err := u.ApplyBundle(*off.Bundle, "")
 		if err != nil {
 			fmt.Fprintf(stderr, "офлайн ApplyBundle: %v\n", err)
+			rollback()
+			return 1
+		}
+		binary, err := u.ApplyBundleBinary(context.Background(), *off.Bundle)
+		if err != nil {
+			fmt.Fprintf(stderr, "офлайн бинарник: %v\n", err)
+			rollback()
 			return 1
 		}
 		if ar != nil {
+			ar.Installed += binary.Installed
 			fmt.Fprintf(stdout, "офлайн: установлено файлов %d\n", ar.Installed)
 		}
 		if err := a.VerifyAfterUpdate(); err != nil {
 			fmt.Fprintf(stderr, "post-update verify: %v\n", err)
-			if rerr := a.RollbackPreUpdateBackup(); rerr != nil {
-				fmt.Fprintf(stderr, "rollback: %v\n", rerr)
-			} else {
-				fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
-			}
+			rollback()
 			return 1
 		}
 		return 0
@@ -506,6 +518,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "проверка/применение релиза: %v\n", err)
+		rollback()
 		return 1
 	}
 	if rep != nil && rep.UpToDate {
@@ -520,11 +533,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout)
 		if err := a.VerifyAfterUpdate(); err != nil {
 			fmt.Fprintf(stderr, "post-update verify: %v\n", err)
-			if rerr := a.RollbackPreUpdateBackup(); rerr != nil {
-				fmt.Fprintf(stderr, "rollback: %v\n", rerr)
-			} else {
-				fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
-			}
+			rollback()
 			return 1
 		}
 		fmt.Fprintln(stdout, "post-update verify: ok")

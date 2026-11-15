@@ -71,7 +71,7 @@ const (
 )
 
 // DefaultLatestURL — адрес latest.json по умолчанию (репозиторий Koviand/zatorGO).
-var DefaultLatestURL = fetch.GitHubReleaseURL(DefaultOwner, DefaultRepo, "latest", "latest.json")
+var DefaultLatestURL = "https://github.com/" + DefaultOwner + "/" + DefaultRepo + "/releases/latest/download/latest.json"
 
 // ReleaseOwner / ReleaseRepo возвращают owner/repo релизов с учётом env.
 func ReleaseOwner() string {
@@ -93,7 +93,10 @@ func LatestJSONURL() string {
 	if v := strings.TrimSpace(os.Getenv(EnvLatestURL)); v != "" {
 		return v
 	}
-	return fetch.GitHubReleaseURL(ReleaseOwner(), ReleaseRepo(), "latest", "latest.json")
+	if ReleaseOwner() == DefaultOwner && ReleaseRepo() == DefaultRepo {
+		return DefaultLatestURL
+	}
+	return "https://github.com/" + ReleaseOwner() + "/" + ReleaseRepo() + "/releases/latest/download/latest.json"
 }
 
 // Ошибки пакета.
@@ -218,6 +221,8 @@ type Updater struct {
 	WebUIInstalled func() bool
 	// Now — источник времени (по умолчанию time.Now).
 	Now func() time.Time
+	// applyBinary is a test seam; production always fetches the matching release binary.
+	applyBinary func(context.Context) (*ApplyResult, string, error)
 }
 
 // New создаёт обновлятор для раскладки p. Адрес latest.json берётся из
@@ -871,5 +876,21 @@ func (u *Updater) Run(ctx context.Context, opts RunOptions) (*Report, error) {
 		return rep, err
 	}
 	rep.Apply = res
+	if variant != VariantWebUI {
+		applyBinary := u.applyBinary
+		if applyBinary == nil {
+			applyBinary = u.ApplyGitHubBinary
+		}
+		bin, tag, err := applyBinary(ctx)
+		if err != nil {
+			return rep, fmt.Errorf("deploy: архив применён, бинарник не обновлён: %w", err)
+		}
+		if check.Latest != nil && tag != "" && CompareVersions(tag, check.Latest.Release) != 0 {
+			return rep, fmt.Errorf("deploy: бинарник %s не совпадает с архивным релизом %s", tag, check.Latest.Release)
+		}
+		if bin != nil {
+			res.Installed += bin.Installed
+		}
+	}
 	return rep, nil
 }

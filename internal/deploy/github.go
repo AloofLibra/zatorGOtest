@@ -245,26 +245,65 @@ func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, 
 	if err := os.Chmod(dest, 0o755); err != nil {
 		return nil, tag, err
 	}
-	binDir := u.Paths.BinDir
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return nil, tag, err
-	}
-	final := filepath.Join(binDir, "zator")
-	tmp := final + ".new"
 	data, err := os.ReadFile(dest)
 	if err != nil {
 		return nil, tag, err
 	}
-	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+	os.Remove(dest)
+	if err := u.installBinary(ctx, data, tag, "latest"); err != nil {
 		return nil, tag, err
 	}
-	os.Remove(dest)
+	return &ApplyResult{Installed: 1}, tag, nil
+}
+
+// ApplyBundleBinary устанавливает только бинарник, соответствующий архитектуре
+// устройства, из vendor/ офлайн-бандла. SHA-256 берётся из соседнего .sha256.
+func (u *Updater) ApplyBundleBinary(ctx context.Context, b Bundle) (*ApplyResult, error) {
+	name := binaryAssetName()
+	source := filepath.Join(b.VendorDir, name)
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return nil, fmt.Errorf("deploy: в offline vendor нет %s: %w", name, err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("deploy: пустой offline бинарник %s", name)
+	}
+	sums, err := os.ReadFile(source + ".sha256")
+	if err != nil {
+		return nil, fmt.Errorf("deploy: нет checksum для offline бинарника %s: %w", name, err)
+	}
+	want := parseSHA256SUMS(sums, name)
+	if !sha256Re.MatchString(want) {
+		return nil, fmt.Errorf("deploy: checksum offline бинарника %s некорректен", name)
+	}
+	got, err := fetch.SHA256File(source)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(got, want) {
+		return nil, fmt.Errorf("deploy: offline binary checksum mismatch: %s", name)
+	}
+	if err := u.installBinary(ctx, data, "", "offline"); err != nil {
+		return nil, err
+	}
+	return &ApplyResult{Installed: 1}, nil
+}
+
+func (u *Updater) installBinary(ctx context.Context, data []byte, tag, tracking string) error {
+	binDir := u.Paths.BinDir
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+	final := filepath.Join(binDir, "zator")
+	tmp := final + ".new"
+	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+		return err
+	}
 	if err := os.Rename(tmp, final); err != nil {
-		// ETXTBSY / занятый inode: перезапись поверх (Linux обычно допускает rename
-		// запущенного бинарника; fallback — WriteFile).
+		// ETXTBSY / занятый inode: Linux обычно допускает rename запущенного бинарника.
 		if werr := os.WriteFile(final, data, 0o755); werr != nil {
 			_ = os.Remove(tmp)
-			return nil, tag, fmt.Errorf("deploy: замена бинарника: %v; fallback: %w", err, werr)
+			return fmt.Errorf("deploy: замена бинарника: %v; fallback: %w", err, werr)
 		}
 		_ = os.Remove(tmp)
 	}
@@ -274,16 +313,23 @@ func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, 
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, tag, fmt.Errorf("deploy: %s install: %w (%s)", final, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("deploy: %s install: %w (%s)", final, err, strings.TrimSpace(string(out)))
 	}
-	ver := strings.TrimPrefix(tag, "v")
-	now := time.Now().UTC().Format("2006-01-02 15:04")
-	_ = WriteVersion(u.Paths, Version{
-		ZatorVersion: ver,
-		ZatorDate:    now,
-		WebUIVersion: ver,
-		WebUIDate:    now,
-		Tracking:     "latest",
-	})
-	return &ApplyResult{Installed: 1}, tag, nil
+	if strings.TrimSpace(tag) != "" {
+		ver := strings.TrimPrefix(tag, "v")
+		now := time.Now().UTC().Format("2006-01-02 15:04")
+		_ = WriteVersion(u.Paths, Version{
+			ZatorVersion: ver,
+			ZatorDate:    now,
+			WebUIVersion: ver,
+			WebUIDate:    now,
+			Tracking:     tracking,
+		})
+	} else if tracking != "" {
+		if current, err := ReadVersion(u.Paths); err == nil {
+			current.Tracking = tracking
+			_ = WriteVersion(u.Paths, current)
+		}
+	}
+	return nil
 }

@@ -97,6 +97,11 @@ func TestParseLatestAndRun(t *testing.T) {
 	u := New(p)
 	u.LatestURL = srv.URL + "/latest.json"
 	u.Offline = false
+	binaryApplied := false
+	u.applyBinary = func(context.Context) (*ApplyResult, string, error) {
+		binaryApplied = true
+		return &ApplyResult{Installed: 1}, "v1.2.3", nil
+	}
 
 	ctx := context.Background()
 	check, err := u.CheckLatest(ctx)
@@ -113,6 +118,9 @@ func TestParseLatestAndRun(t *testing.T) {
 	}
 	if rep.Apply == nil || rep.Apply.Installed < 1 {
 		t.Fatalf("apply: %+v", rep.Apply)
+	}
+	if !binaryApplied || rep.Apply.Installed != 2 {
+		t.Fatalf("full release must also install its binary: called=%t apply=%+v", binaryApplied, rep.Apply)
 	}
 	got, err := os.ReadFile(filepath.Join(p.ZatorRoot, filepath.FromSlash(rel)))
 	if err != nil {
@@ -218,6 +226,56 @@ func TestApplyRollsBackEarlierFilesOnFailure(t *testing.T) {
 	got, err := os.ReadFile(target)
 	if err != nil || string(got) != "old" {
 		t.Fatalf("earlier file not restored: got=%q err=%v", got, err)
+	}
+}
+
+func TestApplyBundleSkipsLegacyHostBinary(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(p.BinDir, "zator")
+	if err := os.WriteFile(bin, []byte("router-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("host-binary")
+	sum := sha256.Sum256(payload)
+	manifest := fmt.Sprintf("bin/zator|/opt/zator/bin/zator|auto|%s|%d|1\n", hex.EncodeToString(sum[:]), len(payload))
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	writeTarEntry := func(name string, data []byte) {
+		t.Helper()
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(data))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTarEntry("bin/zator", payload)
+	writeTarEntry(ManifestRel, []byte(manifest))
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(root, "zator-full.tar.gz")
+	if err := os.WriteFile(archive, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := New(p).ApplyBundle(Bundle{Tarball: archive}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(bin)
+	if err != nil || string(got) != "router-binary" {
+		t.Fatalf("legacy archive replaced router binary: %q, %v", got, err)
+	}
+	if rep.Skipped != 1 {
+		t.Fatalf("skipped=%d, want 1", rep.Skipped)
 	}
 }
 

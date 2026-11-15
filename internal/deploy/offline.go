@@ -99,7 +99,20 @@ func (u *Updater) ApplyBundle(b Bundle, tag string) (*ApplyResult, error) {
 	if tag = strings.TrimSpace(tag); tag != "" {
 		tracking = "offline-" + tag
 	}
-	return u.ApplyArchive(b.Tarball, ApplyOptions{Tracking: tracking})
+	// Старые bundles могли содержать x86_64 bin/zator. Runtime-бинарник
+	// выбирается отдельно из vendor по архитектуре устройства.
+	bundleUpdater := *u
+	priorRemap := bundleUpdater.Remap
+	bundleUpdater.Remap = func(rel string) string {
+		if filepath.ToSlash(filepath.Clean(rel)) == "bin/zator" {
+			return ""
+		}
+		if priorRemap != nil {
+			return priorRemap(rel)
+		}
+		return rel
+	}
+	return bundleUpdater.ApplyArchive(b.Tarball, ApplyOptions{Tracking: tracking})
 }
 
 // ResolveOfflineBundle ищет бандл в ZATOR_BUNDLE_DIR, cwd и рядом с бинарником.

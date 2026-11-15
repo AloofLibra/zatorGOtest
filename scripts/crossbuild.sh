@@ -29,6 +29,18 @@ for spec in "${targets[@]}"; do
 done
 
 cp "$ROOT/scripts/zator-launcher.sh" "$OUT/zator-launcher.sh"
-chmod +x "$OUT/zator-launcher.sh" "$OUT"/zator-linux-*
-(cd "$OUT" && sha256sum zator-linux-* zator-launcher.sh > SHA256SUMS)
+chmod +x "$OUT/zator-launcher.sh"
+for f in "$OUT"/zator-linux-*; do
+  [[ "$f" == *.sha256 ]] && continue
+  chmod +x "$f"
+  (cd "$OUT" && sha256sum "$(basename "$f")") >"$f.sha256"
+done
+(
+  cd "$OUT"
+  for f in zator-linux-*; do
+    [[ "$f" == *.sha256 ]] && continue
+    sha256sum "$f"
+  done
+  sha256sum zator-launcher.sh
+) >"$OUT/SHA256SUMS"
 ls -lh "$OUT"
