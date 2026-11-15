@@ -76,6 +76,63 @@ func TestPreUpdateBackupFailsWithoutBinarySnapshot(t *testing.T) {
 	}
 }
 
+func TestRollbackPreUpdateBackupRestoresConfigListsAndBinary(t *testing.T) {
+	root := t.TempDir()
+	p := paths.Paths{
+		ZatorRoot: root, StateDir: filepath.Join(root, "state"),
+		BackupDir: filepath.Join(root, "backup"), ZapretRoot: filepath.Join(root, "zapret2"),
+		BinDir: filepath.Join(root, "bin"), ListsDir: filepath.Join(root, "lists"), ConfigDir: filepath.Join(root, "config"),
+	}
+	p.ZapretConfig = filepath.Join(p.ZapretRoot, "config")
+	for _, dir := range []string{p.ZapretRoot, p.BinDir, p.ListsDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(p.ZapretConfig, []byte("FWTYPE=nftables\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.BinDir, "zator"), []byte("BIN-V1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	list := filepath.Join(p.ListsDir, "netrogat.txt")
+	if err := os.WriteFile(list, []byte("old.example\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := NewWith(p, platform.Platform{})
+	if _, err := a.CreatePreUpdateBackup(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(p.ZapretConfig, []byte("FWTYPE=iptables\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.BinDir, "zator"), []byte("BIN-V2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(list, []byte("new.example\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RollbackPreUpdateBackup(); err != nil {
+		t.Fatal(err)
+	}
+
+	for path, want := range map[string]string{
+		filepath.Join(p.BinDir, "zator"): "BIN-V1",
+		p.ZapretConfig:                   "FWTYPE=nftables\n",
+		list:                             "old.example\n",
+	} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Errorf("%s: got=%q err=%v, want %q", path, got, err, want)
+		}
+	}
+	status, _ := a.PostUpdateVerifyStatus()
+	if status != "warn" {
+		t.Fatalf("expected soft verify warning for absent nfqws2.args, got %q", status)
+	}
+}
+
 func TestPreUpdateBinarySnapshotRestore(t *testing.T) {
 	root := t.TempDir()
 	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
