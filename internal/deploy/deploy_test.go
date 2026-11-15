@@ -181,6 +181,46 @@ func TestKeepIfExists(t *testing.T) {
 	}
 }
 
+func TestApplyRollsBackEarlierFilesOnFailure(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+	_ = p.EnsureDirs()
+	target := filepath.Join(p.ZatorRoot, "bin", "first")
+	_ = os.MkdirAll(filepath.Dir(target), 0o755)
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blockedTarget := filepath.Join(p.ZatorRoot, "bin", "blocked")
+	if err := os.Mkdir(blockedTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	staging := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(staging, "bin"), 0o755)
+	_ = os.MkdirAll(filepath.Join(staging, filepath.FromSlash(filepath.Dir(ManifestRel))), 0o755)
+	first, blocked := []byte("new"), []byte("payload")
+	if err := os.WriteFile(filepath.Join(staging, "bin", "first"), first, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "bin", "blocked"), blocked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	firstHash, blockedHash := sha256.Sum256(first), sha256.Sum256(blocked)
+	manifest := fmt.Sprintf("bin/first|/opt/zator/bin/first|auto|%s|%d|0\nbin/blocked|/opt/zator/bin/blocked|auto|%s|%d|0\n",
+		hex.EncodeToString(firstHash[:]), len(first), hex.EncodeToString(blockedHash[:]), len(blocked))
+	if err := os.WriteFile(filepath.Join(staging, filepath.FromSlash(ManifestRel)), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := New(p).Apply(staging, ApplyOptions{}); err == nil {
+		t.Fatal("expected apply failure on directory target")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "old" {
+		t.Fatalf("earlier file not restored: got=%q err=%v", got, err)
+	}
+}
+
 func TestSafeAssetURL(t *testing.T) {
 	u := &Updater{LatestURL: "https://example.com/releases/latest.json"}
 	link, err := u.AssetURL(Asset{Name: "zator-core.tar.gz"})

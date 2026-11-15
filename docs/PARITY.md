@@ -83,6 +83,7 @@
 | Watchdog / strategy-validator daemon | partial (validator templates; Entware nfqws2 respawn — `zator-nfqws-watchdog`) |
 | Pre-update backup + post-update verify | done (`CreatePreUpdateBackup` fails closed unless both product archive and `bin/zator` snapshot succeed; CLI and WebUI abort before applying an update) |
 | Config inter-process write-lock | done (`fsutil.WithDirLock` in `Config.SaveTo`) |
+| Transactional deploy apply | done (preflight hash verification, per-file undo, rollback errors surfaced; rollback-on-mid-apply failure covered) |
 | Transactional backup restore | done (snapshot undo in `RestoreFile`) |
 | VPS panels 3x-ui/marzban/wg/3proxy | out of scope для ядра; можно добавить later |
 | Интерактивное ANSI-меню | removed (breaking) |

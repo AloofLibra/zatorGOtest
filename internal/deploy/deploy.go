@@ -672,17 +672,29 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 	defer os.RemoveAll(backupDir)
 
 	var undo []undoOp
-	rollback := func() {
+	rollback := func() error {
+		var rollbackErrs []error
 		for i := len(undo) - 1; i >= 0; i-- {
 			op := undo[i]
 			if op.backup == "" {
-				os.Remove(op.target)
+				if err := os.Remove(op.target); err != nil && !errors.Is(err, os.ErrNotExist) {
+					rollbackErrs = append(rollbackErrs, fmt.Errorf("удаление %s: %w", op.target, err))
+				}
 				continue
 			}
-			if data, err := os.ReadFile(op.backup); err == nil {
-				_ = fsutil.AtomicWriteFile(op.target, data, 0)
+			data, err := os.ReadFile(op.backup)
+			if err != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("чтение снимка %s: %w", op.target, err))
+				continue
+			}
+			if err := fsutil.AtomicWriteFile(op.target, data, 0); err != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("восстановление %s: %w", op.target, err))
 			}
 		}
+		return errors.Join(rollbackErrs...)
+	}
+	withRollback := func(cause error) error {
+		return errors.Join(cause, rollback())
 	}
 
 	for i, pl := range plan {
@@ -690,8 +702,7 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 		st, statErr := os.Lstat(target)
 		exists := statErr == nil
 		if exists && st.Mode()&os.ModeSymlink != 0 {
-			rollback()
-			return nil, fmt.Errorf("deploy: %s — символическая ссылка, замена отклонена", target)
+			return nil, withRollback(fmt.Errorf("deploy: %s — символическая ссылка, замена отклонена", target))
 		}
 		if exists && e.Class == ClassKeepIfExists {
 			res.Kept++
@@ -704,25 +715,21 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 			}
 		}
 		if exists && !st.Mode().IsRegular() {
-			rollback()
-			return nil, fmt.Errorf("deploy: %s не является обычным файлом", target)
+			return nil, withRollback(fmt.Errorf("deploy: %s не является обычным файлом", target))
 		}
 		data, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(e.Path)))
 		if err != nil {
-			rollback()
-			return nil, err
+			return nil, withRollback(err)
 		}
 		op := undoOp{target: target}
 		if exists {
 			op.backup = filepath.Join(backupDir, fmt.Sprintf("%d", i))
 			old, err := os.ReadFile(target)
 			if err != nil {
-				rollback()
-				return nil, err
+				return nil, withRollback(err)
 			}
 			if err := os.WriteFile(op.backup, old, 0o600); err != nil {
-				rollback()
-				return nil, err
+				return nil, withRollback(err)
 			}
 		}
 		perm := os.FileMode(0o644)
@@ -731,12 +738,10 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 		}
 		undo = append(undo, op)
 		if err := fsutil.AtomicWriteFile(target, data, perm); err != nil {
-			rollback()
-			return nil, fmt.Errorf("deploy: установка %s: %w", target, err)
+			return nil, withRollback(fmt.Errorf("deploy: установка %s: %w", target, err))
 		}
 		if err := os.Chmod(target, perm); err != nil && perm == 0o755 {
-			rollback()
-			return nil, err
+			return nil, withRollback(err)
 		}
 		res.Installed++
 		res.Files = append(res.Files, target)
@@ -747,13 +752,11 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 
 	ver, err := u.mergeVersion(staging, res, opts)
 	if err != nil {
-		rollback()
-		return nil, err
+		return nil, withRollback(err)
 	}
 	res.Version = ver
 	if err := WriteVersion(u.Paths, ver); err != nil {
-		rollback()
-		return nil, err
+		return nil, withRollback(err)
 	}
 	return res, nil
 }
