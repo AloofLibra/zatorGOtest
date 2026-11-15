@@ -47,6 +47,32 @@ Z2R_WSSIZE_RAMP_SKIP=
 	}
 }
 
+func TestEnsureWssizeRampProfileForLegacyConfig(t *testing.T) {
+	c := Parse(`NFQWS2_OPT="
+#Z2R_AUTO_STANDARD_BEGIN
+#Z2R_AUTO_STANDARD_3_BEGIN
+--filter-tcp=443 --hostlist=/opt/zator/lists/rkn.txt
+"`)
+	changed, err := c.EnsureWssizeRampProfile("/opt/zator")
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	opt, _ := c.NFQWS2Opt()
+	for _, want := range []string{
+		"${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WSSIZE_MARK}/${Z2R_WSSIZE_MARK}",
+		"--lua-desync=wssize_ramp${Z2R_WSSIZE_RAMP_ARGS}",
+		"exclude_substrings=/opt/zator/lists/netrogat_substrings.txt",
+		"--import=z2r_tcp_tls_common\n--new\n#Z2R_AUTO_STANDARD_3_BEGIN",
+	} {
+		if !strings.Contains(opt, want) {
+			t.Fatalf("missing %q in migrated profile:\n%s", want, opt)
+		}
+	}
+	if changed, err := c.EnsureWssizeRampProfile("/opt/zator"); err != nil || changed {
+		t.Fatalf("second call changed=%v err=%v", changed, err)
+	}
+}
+
 func TestStripWssizeShellIf(t *testing.T) {
 	c := Parse(`Z2R_WSSIZE_RAMP_ENABLE=1
 Z2R_WSSIZE_RAMP_ARGS=

@@ -3,6 +3,7 @@ package netcheck
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func okV(code int) VersionDetail {
@@ -141,5 +142,15 @@ func TestDownloadTexts(t *testing.T) {
 	}
 	if got := describeDownload(Download{State: DLOK, Size: 1, Time: "1", Code: 200}, opts); strings.Contains(got, manualHint) {
 		t.Errorf("при успехе подсказки быть не должно: %q", got)
+	}
+}
+
+func TestDefaultTLSProbeTimeoutForWssize(t *testing.T) {
+	opts := Options{}.withDefaults()
+	if opts.MaxTime != 10*time.Second {
+		t.Fatalf("MaxTime = %s, want 10s", opts.MaxTime)
+	}
+	if opts.ConnectTimeout != DefaultConnectTimeout {
+		t.Fatalf("ConnectTimeout = %s, want %s", opts.ConnectTimeout, DefaultConnectTimeout)
 	}
 }

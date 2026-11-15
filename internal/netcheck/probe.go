@@ -29,7 +29,7 @@ var errTooManyRedirects = errors.New("netcheck: too many redirects")
 type Options struct {
 	// ConnectTimeout — таймаут установления TCP (по умолчанию 3 с).
 	ConnectTimeout time.Duration
-	// MaxTime — полный таймаут пробы версии TLS (по умолчанию 5 с).
+	// MaxTime — полный таймаут пробы версии TLS (по умолчанию 10 с для WSSIZE).
 	MaxTime time.Duration
 	// DownloadMaxTime — полный таймаут докачки (по умолчанию 10 с).
 	DownloadMaxTime time.Duration

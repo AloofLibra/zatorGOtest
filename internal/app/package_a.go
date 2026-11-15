@@ -97,6 +97,17 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 	if a.migratePackageA(cfg) {
 		dirty = true
 	}
+	if changed, e := cfg.EnsureWssizeRampProfile(a.Paths.ZatorRoot); e != nil {
+		return "", fmt.Errorf("WSSIZE profile: %w", e)
+	} else if changed {
+		dirty = true
+	}
+	wssizeLua := filepath.ToSlash(filepath.Join(a.Paths.LuaDir, "wssize-ramp.lua"))
+	if changed, e := cfg.EnsureLuaInit(wssizeLua); e != nil {
+		return "", fmt.Errorf("WSSIZE Lua: %w", e)
+	} else if changed {
+		dirty = true
+	}
 	gvLua := filepath.ToSlash(filepath.Join(a.Paths.LuaDir, "googlevideo-collect.lua"))
 	if ok, e := cfg.EnsureLuaInit(gvLua); e == nil && ok {
 		dirty = true

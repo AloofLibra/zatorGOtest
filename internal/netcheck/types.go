@@ -15,7 +15,7 @@ import (
 // Значения по умолчанию (Z2R_TLS_* из netcheck.sh).
 const (
 	DefaultConnectTimeout  = 3 * time.Second
-	DefaultMaxTime         = 5 * time.Second
+	DefaultMaxTime         = 10 * time.Second
 	DefaultDownloadMaxTime = 10 * time.Second
 	DefaultDownloadStall   = 1 * time.Second
 	DefaultDownloadRange   = 65536

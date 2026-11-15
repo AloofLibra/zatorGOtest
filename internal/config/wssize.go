@@ -2,9 +2,68 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
+
+// EnsureWssizeRampProfile adds the standard Googlevideo WSSIZE profile if an
+// older zapret config has the migration variables but no matching NFQWS rule.
+// The existing ENABLE/SKIP setting still controls whether the profile runs.
+func (c *Config) EnsureWssizeRampProfile(zatorRoot string) (bool, error) {
+	if c == nil {
+		return false, nil
+	}
+	opt, ok := c.NFQWS2Opt()
+	if !ok {
+		return false, fmt.Errorf("%w: %s", ErrNotFound, OptVar)
+	}
+	if strings.Contains(opt, "--lua-desync=wssize_ramp") {
+		return false, nil
+	}
+	exclude := filepath.ToSlash(filepath.Join(zatorRoot, "lists", "netrogat_substrings.txt"))
+	block := []string{
+		"# Z2R WSSIZE Googlevideo late-packet profile",
+		"${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WSSIZE_MARK}/${Z2R_WSSIZE_MARK}",
+		"--payload=tls_client_hello,http_req,http_reply,unknown,tls_server_hello",
+		"--out-range=-s34228",
+		"--out-range=a",
+		"--in-range=a",
+		"--payload=all,empty",
+		"--lua-desync=wssize_ramp${Z2R_WSSIZE_RAMP_ARGS}",
+		"--in-range=-s32768 --lua-desync=rst_guard_locked:key=2:exclude_substrings=" + exclude + ":payload=tls_client_hello",
+		"--import=z2r_tcp_tls_common",
+	}
+	lines := strings.Split(opt, "\n")
+	insertAt := 0
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "#Z2R_AUTO_STANDARD_BEGIN" {
+			insertAt = i + 1
+			break
+		}
+	}
+	// A standard profile must end before the next --new/profile marker.
+	needsNew := true
+	for i := insertAt; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		needsNew = t != "--new"
+		break
+	}
+	if needsNew {
+		block = append(block, "--new")
+	}
+	updated := make([]string, 0, len(lines)+len(block))
+	updated = append(updated, lines[:insertAt]...)
+	updated = append(updated, block...)
+	updated = append(updated, lines[insertAt:]...)
+	if err := c.SetNFQWS2Opt(strings.Join(updated, "\n")); err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 var (
 	wssizeShellIfRe     = regexp.MustCompile(`(?i)^\s*if\s+\[\s*"\$Z2R_WSSIZE_RAMP_ENABLE"`)
@@ -37,6 +96,12 @@ func (c *Config) SyncWssizeRampVars() (bool, error) {
 	}
 
 	changed := false
+	if _, ok := c.Get("Z2R_WSSIZE_MARK"); !ok {
+		if err := c.Set("Z2R_WSSIZE_MARK", "0x04000000"); err != nil {
+			return false, err
+		}
+		changed = true
+	}
 	if cur, ok := c.Get("Z2R_WSSIZE_RAMP_MODE"); !ok || strings.ToLower(cur) != mode {
 		if err := c.Set("Z2R_WSSIZE_RAMP_MODE", mode); err != nil {
 			return false, err

@@ -96,11 +96,9 @@ Z2R_WSSIZE_RAMP_SCALE=1
 Z2R_WSSIZE_RAMP_OPEN=1
 Z2R_WSSIZE_RAMP_ARGS=
 Z2R_WSSIZE_RAMP_SKIP=--skip
-QNUM=300
 NFQWS2_OPT="
-${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WSSIZE_MARK}/${Z2R_WSSIZE_MARK}
---lua-desync=wssize_ramp${Z2R_WSSIZE_RAMP_ARGS}
---new
+#Z2R_AUTO_STANDARD_BEGIN
+#Z2R_AUTO_STANDARD_3_BEGIN
 --filter-tcp=443
 "
 `)
@@ -122,6 +120,9 @@ ${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WS
 	}
 	if !strings.Contains(got, "wssize_ramp:mode=lite") {
 		t.Fatalf("missing wssize args:\n%s", got)
+	}
+	if !strings.Contains(got, filepath.ToSlash(filepath.Join(p.LuaDir, "wssize-ramp.lua"))) {
+		t.Fatalf("missing WSSIZE Lua module:\n%s", got)
 	}
 	live, err := config.Load(p.ZapretConfig)
 	if err != nil {
