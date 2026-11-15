@@ -127,6 +127,7 @@ func DefaultWssizeConfig(zatorRoot string) WssizeConfig {
 		SetName:      WssizeSetName,
 		PktOut:       20,
 		PktIn:        10,
+		QNum:         300,
 		Postnat:      true,
 	}
 }

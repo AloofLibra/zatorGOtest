@@ -274,6 +274,30 @@ func (c *Config) Set(name, value string) error {
 	return nil
 }
 
+// SetBeforeNFQWS2Opt keeps shell variables used inside the double-quoted
+// NFQWS2_OPT assignment defined before that assignment is evaluated by zapret.
+func (c *Config) SetBeforeNFQWS2Opt(name, value string) error {
+	if !varNameRe.MatchString(name) {
+		return fmt.Errorf("%w: variable name %q", ErrInvalid, name)
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return fmt.Errorf("%w: value of %s must be single-line", ErrInvalid, name)
+	}
+	opt, ok := c.find(OptVar)
+	if !ok {
+		return c.Set(name, value)
+	}
+	if existing, ok := c.find(name); ok {
+		if existing.start < opt.start {
+			return c.Set(name, value)
+		}
+		c.spliceLines(existing.start, existing.end+1, nil)
+		opt, _ = c.find(OptVar)
+	}
+	c.spliceLines(opt.start, opt.start, []string{name + "=" + value})
+	return nil
+}
+
 // SetQuoted записывает переменную, при необходимости обрамляя значение
 // двойными кавычками (пустые значения и значения с пробелами/спецсимволами).
 func (c *Config) SetQuoted(name, value string) error {

@@ -12,6 +12,7 @@ import (
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/fsutil"
+	"github.com/AloofLibra/zator/internal/platform"
 	"github.com/AloofLibra/zator/internal/service"
 )
 
@@ -219,7 +220,16 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 	zapretUnits := []service.Unit{service.UnitZapret2, service.UnitValidator}
 	if prepErr == nil {
 		for _, u := range zapretUnits {
-			if err := mgr.Install(ctx, u); err != nil {
+			// На OpenWrt upstream procd init владеет nft queue rules и custom.d.
+			// Оставляем его на месте и используем Go только для подготовки config/hooks.
+			preserveOpenWrtInit := u == service.UnitZapret2 && a.Platform.Kind == platform.KindOpenWRT && a.Platform.InitSystem == platform.InitProcd
+			if preserveOpenWrtInit {
+				initPath := filepath.Join(a.Paths.ZapretRoot, "init.d", "openwrt", "zapret2")
+				if _, err := os.Stat(initPath); err != nil {
+					soft = append(soft, "upstream OpenWrt zapret2 init missing: "+err.Error())
+					continue
+				}
+			} else if err := mgr.Install(ctx, u); err != nil {
 				soft = append(soft, fmt.Sprintf("install %s: %v", u, err))
 				continue
 			}
@@ -233,6 +243,9 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 		} else {
 			if err := a.EnsureFirewallApplied(ctx); err != nil {
 				soft = append(soft, "fw ensure: "+err.Error())
+			}
+			if err := a.ApplyWssizeFirewall(ctx); err != nil {
+				soft = append(soft, "WSSIZE firewall: "+err.Error())
 			}
 			a.SyncAutoLockedPersist()
 			a.StartNfqwsWatchdog()

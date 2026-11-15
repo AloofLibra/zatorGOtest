@@ -97,25 +97,25 @@ func (c *Config) SyncWssizeRampVars() (bool, error) {
 
 	changed := false
 	if _, ok := c.Get("Z2R_WSSIZE_MARK"); !ok {
-		if err := c.Set("Z2R_WSSIZE_MARK", "0x04000000"); err != nil {
+		if err := c.SetBeforeNFQWS2Opt("Z2R_WSSIZE_MARK", "0x04000000"); err != nil {
 			return false, err
 		}
 		changed = true
 	}
 	if cur, ok := c.Get("Z2R_WSSIZE_RAMP_MODE"); !ok || strings.ToLower(cur) != mode {
-		if err := c.Set("Z2R_WSSIZE_RAMP_MODE", mode); err != nil {
+		if err := c.SetBeforeNFQWS2Opt("Z2R_WSSIZE_RAMP_MODE", mode); err != nil {
 			return false, err
 		}
 		changed = true
 	}
 	if cur, ok := c.Get("Z2R_WSSIZE_RAMP_ARGS"); !ok || cur != wantArgs {
-		if err := c.Set("Z2R_WSSIZE_RAMP_ARGS", wantArgs); err != nil {
+		if err := c.SetBeforeNFQWS2Opt("Z2R_WSSIZE_RAMP_ARGS", wantArgs); err != nil {
 			return false, err
 		}
 		changed = true
 	}
 	if cur, ok := c.Get("Z2R_WSSIZE_RAMP_SKIP"); !ok || cur != wantSkip {
-		if err := c.Set("Z2R_WSSIZE_RAMP_SKIP", wantSkip); err != nil {
+		if err := c.SetBeforeNFQWS2Opt("Z2R_WSSIZE_RAMP_SKIP", wantSkip); err != nil {
 			return false, err
 		}
 		changed = true

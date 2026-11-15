@@ -12,7 +12,7 @@ const QueueHookName = "zator-nfqueue.sh"
 
 // QueueHookConfig — параметры хука межсетевого экрана для nfqws2.
 type QueueHookConfig struct {
-	QNum     string // номер очереди (по умолчанию 200)
+	QNum     string // номер очереди (по умолчанию 300, upstream OpenWrt zapret2)
 	PortsTCP string // multiport TCP
 	PortsUDP string // multiport UDP (без диапазонов вида a-b для простоты — режем)
 	Mark     string // DESYNC_MARK, по умолчанию 0x40000000
@@ -21,7 +21,7 @@ type QueueHookConfig struct {
 // DefaultQueueHook заполняет поля по умолчанию.
 func DefaultQueueHook() QueueHookConfig {
 	return QueueHookConfig{
-		QNum:     "200",
+		QNum:     "300",
 		PortsTCP: "80,443,2053,2083,2087,2096,8443",
 		PortsUDP: "443,2408,2053,2083,2087,2096,8443",
 		Mark:     "0x40000000",
@@ -31,7 +31,7 @@ func DefaultQueueHook() QueueHookConfig {
 // RenderQueueHook возвращает POSIX sh-скрипт start|stop|restart для iptables NFQUEUE.
 func RenderQueueHook(cfg QueueHookConfig) string {
 	if cfg.QNum == "" {
-		cfg.QNum = "200"
+		cfg.QNum = "300"
 	}
 	if cfg.Mark == "" {
 		cfg.Mark = "0x40000000"
@@ -149,7 +149,7 @@ func QueueHookFromGetter(get func(key string) string) QueueHookConfig {
 		cfg.Mark = v
 	}
 	if cfg.QNum == "" {
-		cfg.QNum = "200"
+		cfg.QNum = "300"
 	}
 	return cfg
 }

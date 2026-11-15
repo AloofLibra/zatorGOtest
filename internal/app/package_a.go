@@ -16,8 +16,6 @@ import (
 	"github.com/AloofLibra/zator/internal/uiembed"
 )
 
-const packageAMarker = "package_a.v1"
-
 // NfqwsWantRunningPath — флаг «пользователь хочет nfqws2 запущенным» для Entware-watchdog.
 func (a *App) NfqwsWantRunningPath() string {
 	return filepath.Join(a.Paths.StateDir, "nfqws2.want_running")
@@ -25,11 +23,11 @@ func (a *App) NfqwsWantRunningPath() string {
 
 // migratePackageA приводит live-конфиг к пакету A (Keenetic-hardened):
 //   - снимает legacy shell-if у WSSIZE;
-//   - один раз (маркер) включает WSSIZE lite, если ещё не мигрировали;
+//   - включает WSSIZE lite только если у legacy config ещё нет пользовательского значения;
 //   - синхронизирует ARGS/SKIP;
 //   - гарантирует soft_success_in=0 для circular_quality:key=2.
 //
-// Повторный вызов не форсит ENABLE обратно, если пользователь выключил WSSIZE.
+// Явное ENABLE=0 и режим пользователя сохраняются при каждом вызове.
 func (a *App) migratePackageA(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
@@ -39,20 +37,15 @@ func (a *App) migratePackageA(cfg *config.Config) bool {
 		changed = true
 	}
 
-	marker := filepath.Join(a.Paths.StateDir, packageAMarker)
-	first := true
-	if _, err := os.Stat(marker); err == nil {
-		first = false
-	}
-	if first {
-		_ = os.MkdirAll(a.Paths.StateDir, 0o755)
+	if _, ok := cfg.Get("Z2R_WSSIZE_RAMP_ENABLE"); !ok {
 		if err := cfg.Set("Z2R_WSSIZE_RAMP_ENABLE", "1"); err == nil {
 			changed = true
 		}
+	}
+	if _, ok := cfg.Get("Z2R_WSSIZE_RAMP_MODE"); !ok {
 		if err := cfg.Set("Z2R_WSSIZE_RAMP_MODE", "lite"); err == nil {
 			changed = true
 		}
-		_ = fsutil.AtomicWriteFile(marker, []byte("1\n"), 0o644)
 	}
 
 	if ok, err := cfg.SyncWssizeRampVars(); err == nil && ok {
@@ -124,7 +117,8 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 	}
 
 	argsFile := filepath.Join(a.Paths.ZapretRoot, "nfqws2.args")
-	if err := cfg.WriteNfqws2Args(argsFile); err != nil {
+	zapretLuaDir := filepath.ToSlash(filepath.Join(a.Paths.ZapretRoot, "lua"))
+	if err := cfg.WriteNfqws2RuntimeArgs(argsFile, zapretLuaDir, ""); err != nil {
 		return "", fmt.Errorf("nfqws2.args: %w (config не затёрт — исправьте NFQWS2_OPT вручную)", err)
 	}
 

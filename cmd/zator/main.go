@@ -63,6 +63,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(stdout, stderr)
 	case "service":
 		return cmdService(rest, stdout, stderr)
+	case "wssize-hook":
+		return cmdWssizeHook(rest, stdout, stderr)
 	case "locks":
 		return cmdLocks(rest, stdout, stderr)
 	case "restore":

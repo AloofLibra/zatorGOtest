@@ -30,6 +30,9 @@ type TemplateData struct {
 	LogFile     string   // лог stdout/stderr для SysV/Entware
 	InitScript  string   // путь init-скрипта (для restart-fw)
 	FWHook      string   // необязательный скрипт межсетевого экрана
+	WssizeBin   string   // zator binary for WSSIZE lifecycle hooks
+	ZatorRoot   string   // runtime root passed to managed processes
+	ZapretRoot  string   // zapret2 root passed to managed processes
 	Path        string   // значение PATH
 	Start       int      // порядок запуска (procd START=)
 }
@@ -69,9 +72,15 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=PATH={{.Path}}
+Environment=ZATOR_ROOT={{.ZatorRoot}}
+Environment=ZAPRET2_ROOT={{.ZapretRoot}}
 {{- if .FWHook}}
 ExecStartPre=-{{.FWHook}} start
 ExecStopPost=-{{.FWHook}} stop
+{{- end}}
+{{- if .WssizeBin}}
+ExecStartPre=-{{.WssizeBin}} wssize-hook start
+ExecStopPost=-{{.WssizeBin}} wssize-hook stop
 {{- end}}
 ExecStart={{.ExecStart}}
 Restart=on-failure
@@ -88,10 +97,16 @@ STOP=10
 USE_PROCD=1
 PATH={{.Path}}
 export PATH
+ZATOR_ROOT={{shq .ZatorRoot}}
+ZAPRET2_ROOT={{shq .ZapretRoot}}
+export ZATOR_ROOT ZAPRET2_ROOT
 
 start_service() {
 {{- if .FWHook}}
 	[ -x {{shq .FWHook}} ] && {{shq .FWHook}} start
+{{- end}}
+{{- if .WssizeBin}}
+	{{shq .WssizeBin}} wssize-hook start || logger -t zator-wssize 'failed to apply WSSIZE rules'
 {{- end}}
 	procd_open_instance
 	procd_set_param command {{.ShellCommand}}
@@ -105,12 +120,18 @@ stop_service() {
 {{- if .FWHook}}
 	[ -x {{shq .FWHook}} ] && {{shq .FWHook}} stop
 {{- end}}
+{{- if .WssizeBin}}
+	{{shq .WssizeBin}} wssize-hook stop || logger -t zator-wssize 'failed to remove WSSIZE rules'
+{{- end}}
 	return 0
 }
 {{- if .FWHook}}
 
 restart_fw() {
 	[ -x {{shq .FWHook}} ] && {{shq .FWHook}} restart
+{{- if .WssizeBin}}
+	{{shq .WssizeBin}} wssize-hook restart || logger -t zator-wssize 'failed to apply WSSIZE rules'
+{{- end}}
 }
 EXTRA_COMMANDS="restart_fw"
 {{- end}}
@@ -120,6 +141,9 @@ const sysvTemplate = `#!/bin/sh
 # {{.Description}} (создано zator)
 PATH={{.Path}}
 export PATH
+ZATOR_ROOT={{shq .ZatorRoot}}
+ZAPRET2_ROOT={{shq .ZapretRoot}}
+export ZATOR_ROOT ZAPRET2_ROOT
 NAME={{shq .Name}}
 PIDFILE={{shq .PIDFile}}
 LOGFILE={{shq .LogFile}}
@@ -136,6 +160,9 @@ is_running() {
 fw() {
 {{- if .FWHook}}
 	[ -x "$FWHOOK" ] && "$FWHOOK" "$1"
+{{- end}}
+{{- if .WssizeBin}}
+	{{shq .WssizeBin}} wssize-hook "$1" || echo "WSSIZE firewall hook failed" >&2
 {{- end}}
 	return 0
 }
@@ -278,15 +305,20 @@ func RemoveHookLine(content, line string) string {
 // templateData собирает данные шаблона для службы.
 func (m *manager) templateData(u Unit) TemplateData {
 	d := TemplateData{
-		Name:   string(u),
-		Path:   defaultPath,
-		FWHook: slash(m.cfg.FWHook),
+		Name:       string(u),
+		Path:       defaultPath,
+		FWHook:     slash(m.cfg.FWHook),
+		ZatorRoot:  slash(m.cfg.Paths.ZatorRoot),
+		ZapretRoot: slash(m.cfg.Paths.ZapretRoot),
 	}
 	switch u {
 	case UnitZapret2:
 		d.Description = "zapret2 (nfqws2)"
 		d.Command = []string{slash(filepath.Join(m.cfg.Paths.ZapretRoot, "nfq2", "nfqws2")), "@" + slash(m.cfg.ArgsFile)}
 		d.Start = 90
+		if m.cfg.FWHook != "" {
+			d.WssizeBin = slash(m.cfg.ZatorBin)
+		}
 	case UnitValidator:
 		d.Description = "zator strategy-validator (circular_quality watchdog)"
 		script := slash(filepath.Join(m.cfg.Paths.LuaDir, "strategy-validator.sh"))

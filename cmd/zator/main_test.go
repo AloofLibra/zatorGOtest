@@ -50,6 +50,9 @@ func TestServiceWarningsAndValidation(t *testing.T) {
 	if code, _, _ := runCmd(t, "service", "restart", "unknown"); code != 2 {
 		t.Fatalf("invalid service code=%d", code)
 	}
+	if code, _, _ := runCmd(t, "wssize-hook", "bogus"); code != 2 {
+		t.Fatalf("invalid WSSIZE hook code=%d", code)
+	}
 	if code, _, _ := runCmd(t, "rollback"); code != 1 {
 		t.Fatalf("rollback without snapshot code=%d", code)
 	}

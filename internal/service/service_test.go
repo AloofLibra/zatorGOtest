@@ -170,9 +170,13 @@ func TestRenderSystemd(t *testing.T) {
 	args := filepath.ToSlash(filepath.Join(e.p.ZapretRoot, "nfqws2.args"))
 	for _, want := range []string{
 		"[Unit]", "Description=zapret2 (nfqws2)", "[Service]", "Type=simple",
+		"Environment=ZATOR_ROOT=" + filepath.ToSlash(e.p.ZatorRoot),
+		"Environment=ZAPRET2_ROOT=" + filepath.ToSlash(e.p.ZapretRoot),
 		"ExecStart=" + nfq + " @" + args,
 		"ExecStartPre=-/opt/zapret2/fw.sh start",
 		"ExecStopPost=-/opt/zapret2/fw.sh stop",
+		"ExecStartPre=-" + filepath.ToSlash(filepath.Join(e.p.BinDir, "zator")) + " wssize-hook start",
+		"ExecStopPost=-" + filepath.ToSlash(filepath.Join(e.p.BinDir, "zator")) + " wssize-hook stop",
 		"Restart=on-failure", "WantedBy=multi-user.target",
 	} {
 		if !strings.Contains(got, want) {
@@ -188,7 +192,7 @@ func TestRenderSystemd(t *testing.T) {
 		t.Fatal(err)
 	}
 	zbin := filepath.ToSlash(filepath.Join(e.p.BinDir, "zator"))
-	if !strings.Contains(web, "ExecStart="+zbin+" webui") || strings.Contains(web, "ExecStartPre") {
+	if !strings.Contains(web, "ExecStart="+zbin+" webui") || strings.Contains(web, "ExecStartPre") || strings.Contains(web, "wssize-hook") {
 		t.Errorf("unit webui:\n%s", web)
 	}
 
@@ -222,21 +226,22 @@ func TestRenderProcd(t *testing.T) {
 	for _, want := range []string{
 		"#!/bin/sh /etc/rc.common", "START=90", "USE_PROCD=1", "procd_open_instance",
 		"procd_set_param command", "nfqws2", "procd_set_param respawn", "procd_close_instance",
-		"/opt/zapret2/fw.sh start", "EXTRA_COMMANDS=\"restart_fw\"",
+		"/opt/zapret2/fw.sh start", "wssize-hook start", "wssize-hook stop", "EXTRA_COMMANDS=\"restart_fw\"",
+		"export ZATOR_ROOT ZAPRET2_ROOT",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("в procd-скрипте нет %q:\n%s", want, got)
 		}
 	}
 	web, _ := RenderProcd(c.templateData(UnitWebUI))
-	if !strings.Contains(web, "START=95") || strings.Contains(web, "fw.sh") || !strings.Contains(web, "webui") {
+	if !strings.Contains(web, "START=95") || strings.Contains(web, "fw.sh") || strings.Contains(web, "wssize-hook") || !strings.Contains(web, "webui") {
 		t.Errorf("procd webui:\n%s", web)
 	}
 }
 
 func TestRenderSysV(t *testing.T) {
 	e := newEnv(t)
-	c := e.ctl(t, platEntware).(*manager)
+	c := e.ctl(t, platEntware, func(c *Config) { c.FWHook = "/opt/zapret2/fw.sh" }).(*manager)
 	d := c.templateData(UnitZapret2)
 	got, err := RenderSysV(d)
 	if err != nil {
@@ -245,6 +250,7 @@ func TestRenderSysV(t *testing.T) {
 	for _, want := range []string{
 		"#!/bin/sh", "NAME=zapret2", "PIDFILE=/opt/var/run/zapret2.pid", "LOGFILE=", "nohup", "nfqws2",
 		"LOG_MAX_BYTES", "не запустился", "restart-fw) fw restart", "status)",
+		"wssize-hook \"$1\"", "ZATOR_ROOT=",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("в sysv-скрипте нет %q:\n%s", want, got)

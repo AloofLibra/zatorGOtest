@@ -15,7 +15,7 @@ var (
 )
 
 // DefaultQNum — номер NFQUEUE, если в конфиге нет QNUM.
-const DefaultQNum = "200"
+const DefaultQNum = "300"
 
 // argsShellMeta — символы, недопустимые в argv nfqws2 @file (ломают shell-quoting config).
 const argsShellMeta = "\n\r\"'`$;\\|&<>()"
@@ -106,9 +106,66 @@ func (c *Config) BuildNfqws2Args() []string {
 	return out
 }
 
+// BuildNfqws2RuntimeArgs adds the standard NFQWS2_OPT_BASE arguments supplied
+// by zapret2 init.d when it launches nfqws2 directly.
+func (c *Config) BuildNfqws2RuntimeArgs(zapretLuaDir, userName, qnum string) []string {
+	if c == nil {
+		return nil
+	}
+	base := c.BuildNfqws2Args()
+	if len(base) == 0 {
+		return nil
+	}
+	if userName == "" {
+		userName = c.GetDefault("WS_USER", "daemon")
+	}
+	if qnum == "" {
+		qnum = "--qnum=" + c.GetDefault("QNUM", DefaultQNum)
+		if qnum == "--qnum=" {
+			qnum = "--qnum=" + DefaultQNum
+		}
+	}
+	mark := c.GetDefault("DESYNC_MARK", "0x40000000")
+	luaDir := strings.TrimRight(strings.ReplaceAll(zapretLuaDir, "\\", "/"), "/")
+	out := []string{
+		"--user=" + userName,
+		"--fwmark=" + mark,
+		"--lua-init=@" + luaDir + "/zapret-lib.lua",
+		"--lua-init=@" + luaDir + "/zapret-antidpi.lua",
+		"--lua-init=@" + luaDir + "/zapret-auto.lua",
+		qnum,
+	}
+	for _, arg := range base {
+		switch {
+		case arg == "--qnum" || strings.HasPrefix(arg, "--qnum="):
+			continue
+		case arg == "--user" || strings.HasPrefix(arg, "--user="):
+			continue
+		case arg == "--fwmark" || strings.HasPrefix(arg, "--fwmark="):
+			continue
+		case strings.HasPrefix(arg, "--lua-init=@"):
+			name := arg[strings.LastIndex(arg, "/")+1:]
+			if name == "zapret-lib.lua" || name == "zapret-antidpi.lua" || name == "zapret-auto.lua" {
+				continue
+			}
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
 // WriteNfqws2Args записывает файл аргументов для `nfqws2 @file`.
 func (c *Config) WriteNfqws2Args(path string) error {
-	args := c.BuildNfqws2Args()
+	return c.writeNfqws2Args(path, c.BuildNfqws2Args())
+}
+
+// WriteNfqws2RuntimeArgs writes the complete argument file for the Go-managed
+// zapret2 service, including its normal init.d Lua and mark defaults.
+func (c *Config) WriteNfqws2RuntimeArgs(path, zapretLuaDir, userName string) error {
+	return c.writeNfqws2Args(path, c.BuildNfqws2RuntimeArgs(zapretLuaDir, userName, ""))
+}
+
+func (c *Config) writeNfqws2Args(path string, args []string) error {
 	if err := ValidateNfqws2Args(args); err != nil {
 		return fmt.Errorf("%w (нечего писать в %s)", err, path)
 	}

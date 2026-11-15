@@ -47,6 +47,46 @@ NFQWS2_OPT="
 	}
 }
 
+func TestBuildNfqws2RuntimeArgsAddsInitDefaults(t *testing.T) {
+	c := Parse(`QNUM=210
+DESYNC_MARK=0x40000001
+NFQWS2_OPT="
+--qnum=210
+--user=obsolete
+--fwmark=obsolete
+--lua-init=@/custom/zapret-lib.lua
+--lua-init=@/opt/zator/lua/fake-adapt.lua
+--filter-tcp=443
+"
+`)
+	args := c.BuildNfqws2RuntimeArgs("/opt/zapret2/lua", "nobody", "")
+	for _, want := range []string{
+		"--user=nobody",
+		"--fwmark=0x40000001",
+		"--lua-init=@/opt/zapret2/lua/zapret-lib.lua",
+		"--lua-init=@/opt/zapret2/lua/zapret-antidpi.lua",
+		"--lua-init=@/opt/zapret2/lua/zapret-auto.lua",
+		"--qnum=210",
+		"--lua-init=@/opt/zator/lua/fake-adapt.lua",
+	} {
+		found := false
+		for _, arg := range args {
+			if arg == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing %q: %v", want, args)
+		}
+	}
+	for _, arg := range args {
+		if arg == "--user=obsolete" || arg == "--fwmark=obsolete" || arg == "--lua-init=@/custom/zapret-lib.lua" {
+			t.Fatalf("duplicate base setting: %v", args)
+		}
+	}
+}
+
 func TestWriteNfqws2Args(t *testing.T) {
 	c := Parse(`NFQWS2_OPT="
 --new
@@ -62,7 +102,7 @@ func TestWriteNfqws2Args(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(b)
-	if !strings.HasPrefix(got, "--qnum=200\n") || !strings.Contains(got, "--filter-tcp=80\n") {
+	if !strings.HasPrefix(got, "--qnum=300\n") || !strings.Contains(got, "--filter-tcp=80\n") {
 		t.Fatalf("%q", got)
 	}
 }

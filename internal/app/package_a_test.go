@@ -42,13 +42,13 @@ NFQWS2_OPT="
 	if !a.migratePackageA(cfg) {
 		t.Fatal("expected migration changes")
 	}
-	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_ENABLE"); v != "1" {
+	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_ENABLE"); v != "0" {
 		t.Fatalf("ENABLE=%q", v)
 	}
-	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_MODE"); v != "lite" {
+	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_MODE"); v != "full" {
 		t.Fatalf("MODE=%q", v)
 	}
-	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_SKIP"); v != "" {
+	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_SKIP"); v != "--skip" {
 		t.Fatalf("SKIP=%q", v)
 	}
 	if strings.Contains(cfg.String(), "if [") {
@@ -58,10 +58,6 @@ NFQWS2_OPT="
 	if !strings.Contains(opt, "soft_success_in=0") {
 		t.Fatalf("soft_success missing: %s", opt)
 	}
-	marker := filepath.Join(p.StateDir, packageAMarker)
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("marker: %v", err)
-	}
 	// Second pass: user disabled WSSIZE — do not force back on.
 	_ = cfg.Set("Z2R_WSSIZE_RAMP_ENABLE", "0")
 	_, _ = cfg.SyncWssizeRampVars()
@@ -70,6 +66,29 @@ NFQWS2_OPT="
 	}
 	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_ENABLE"); v != "0" {
 		t.Fatalf("user disable overwritten: %q", v)
+	}
+}
+
+func TestMigratePackageAEnablesUnconfiguredWssize(t *testing.T) {
+	root := t.TempDir()
+	p := paths.Paths{ZatorRoot: root, StateDir: filepath.Join(root, "state")}
+	a := NewWith(p, platform.Platform{})
+	cfg := config.Parse(`NFQWS2_OPT="
+--new
+--filter-tcp=443
+"
+`)
+	if !a.migratePackageA(cfg) {
+		t.Fatal("expected WSSIZE defaults to be added")
+	}
+	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_ENABLE"); v != "1" {
+		t.Fatalf("ENABLE=%q", v)
+	}
+	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_MODE"); v != "lite" {
+		t.Fatalf("MODE=%q", v)
+	}
+	if v, _ := cfg.Get("Z2R_WSSIZE_RAMP_SKIP"); v != "" {
+		t.Fatalf("SKIP=%q", v)
 	}
 }
 
@@ -120,6 +139,9 @@ NFQWS2_OPT="
 	}
 	if !strings.Contains(got, "wssize_ramp:mode=lite") {
 		t.Fatalf("missing wssize args:\n%s", got)
+	}
+	if !strings.Contains(got, "--lua-init=@"+filepath.ToSlash(filepath.Join(p.ZapretRoot, "lua", "zapret-lib.lua"))) {
+		t.Fatalf("missing zapret-lib init:\n%s", got)
 	}
 	if !strings.Contains(got, filepath.ToSlash(filepath.Join(p.LuaDir, "wssize-ramp.lua"))) {
 		t.Fatalf("missing WSSIZE Lua module:\n%s", got)

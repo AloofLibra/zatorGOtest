@@ -363,53 +363,22 @@ func (p *NfqwsProbe) writeProbeLua(luaDir string) error {
 }
 
 func (p *NfqwsProbe) buildArgs(luaDir string) ([]string, error) {
-	base := p.cfg.Config.BuildNfqws2Args()
-	if len(base) == 0 {
-		return nil, fmt.Errorf("%w: пустой NFQWS2_OPT", ErrProbe)
-	}
-	qnum := fmt.Sprintf("--qnum=%d", firewall.SuperSweepQueue)
 	userName := p.cfg.User
 	if userName == "" {
 		userName = fmt.Sprintf("%d", p.cfg.UID)
 	}
-	userArg := "--user=" + userName
-
-	// Как NFQWS2_OPT_BASE в zapret2 init.d: user + fwmark + zapret-lib/*.
-	// Без zapret-lib.lua падает fake-adapt.lua (tls_dissect = nil).
-	desyncMark := p.cfg.Config.GetDefault("DESYNC_MARK", "0x40000000")
 	zapretLua := filepath.ToSlash(filepath.Join(p.cfg.Paths.ZapretRoot, "lua"))
-	prefix := []string{
-		userArg,
-		"--fwmark=" + desyncMark,
-		"--lua-init=@" + zapretLua + "/zapret-lib.lua",
-		"--lua-init=@" + zapretLua + "/zapret-antidpi.lua",
-		"--lua-init=@" + zapretLua + "/zapret-auto.lua",
-		qnum,
+	out := p.cfg.Config.BuildNfqws2RuntimeArgs(zapretLua, userName, fmt.Sprintf("--qnum=%d", firewall.SuperSweepQueue))
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%w: пустой NFQWS2_OPT", ErrProbe)
 	}
-
-	out := make([]string, 0, len(base)+len(prefix))
-	out = append(out, prefix...)
-	for _, a := range base {
-		switch {
-		case strings.HasPrefix(a, "--qnum=") || a == "--qnum":
-			continue // уже в prefix
-		case strings.HasPrefix(a, "--user=") || a == "--user":
+	for i, arg := range out {
+		if !strings.HasPrefix(arg, "--lua-init=@") {
 			continue
-		case strings.HasPrefix(a, "--fwmark=") || a == "--fwmark":
-			continue
-		case strings.HasPrefix(a, "--lua-init=@"):
-			path := strings.TrimPrefix(a, "--lua-init=@")
-			baseName := filepath.Base(path)
-			switch baseName {
-			case "zapret-lib.lua", "zapret-antidpi.lua", "zapret-auto.lua":
-				continue // уже в prefix
-			case "locked.lua", "strategy-lock-manager.lua":
-				out = append(out, "--lua-init=@"+filepath.ToSlash(filepath.Join(luaDir, baseName)))
-			default:
-				out = append(out, a)
-			}
-		default:
-			out = append(out, a)
+		}
+		baseName := filepath.Base(strings.TrimPrefix(arg, "--lua-init=@"))
+		if baseName == "locked.lua" || baseName == "strategy-lock-manager.lua" {
+			out[i] = "--lua-init=@" + filepath.ToSlash(filepath.Join(luaDir, baseName))
 		}
 	}
 	return out, nil
