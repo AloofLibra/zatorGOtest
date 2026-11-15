@@ -322,6 +322,9 @@ func (a *App) StopAndUninstallServices() error {
 	a.StopNfqwsWatchdog()
 	for _, u := range service.Units() {
 		if err := mgr.Uninstall(ctx, u); err != nil {
+			if u == service.UnitZapret2 {
+				a.StartNfqwsWatchdog()
+			}
 			return fmt.Errorf("%s: %w", u, err)
 		}
 	}
