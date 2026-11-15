@@ -30,7 +30,11 @@ while IFS= read -r -d '' f; do
   size=$(wc -c <"$f" | tr -d ' ')
   exec=0
   [[ -x "$f" ]] && exec=1
-  printf '%s|/opt/zator/%s|auto|%s|%s|%s\n' "$rel" "$rel" "$sum" "$size" "$exec" >>"$MAN"
+  class=auto
+  case "$rel" in
+    lists/*|extra_strats/*) class=keep-if-exists ;;
+  esac
+  printf '%s|/opt/zator/%s|%s|%s|%s|%s\n' "$rel" "$rel" "$class" "$sum" "$size" "$exec" >>"$MAN"
 done < <(find "$STAGE" -type f -print0)
 
 cat >"$STAGE/extra_strats/cache/deploy/version.env" <<EOF
