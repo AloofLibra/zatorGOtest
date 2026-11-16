@@ -81,27 +81,46 @@ func (a *App) InstallSelfBinary() error {
 	return a.EnsureZatorCommand()
 }
 
-// EnsureZatorCommand exposes the installed CLI through the standard system PATH.
+// EnsureZatorCommand exposes the installed CLI through a system executable directory.
 func (a *App) EnsureZatorCommand() error {
-	if runtime.GOOS == "windows" || !a.isRouterHost() {
+	if runtime.GOOS != "linux" {
 		return nil
 	}
-	link := "/usr/bin/zator"
 	target := filepath.Join(a.Paths.BinDir, "zator")
-	if resolved, err := filepath.EvalSymlinks(link); err == nil {
-		if resolved == target {
-			return nil
+	dirs := []string{"/usr/bin"}
+	if info, err := os.Stat("/usr/local/bin"); err == nil && info.IsDir() {
+		dirs = append([]string{"/usr/local/bin"}, dirs...)
+	}
+	if info, err := os.Stat("/opt/bin"); err == nil && info.IsDir() {
+		dirs = append([]string{"/opt/bin"}, dirs...)
+	}
+	var lastErr error
+	for _, dir := range dirs {
+		link := filepath.Join(dir, "zator")
+		if resolved, err := filepath.EvalSymlinks(link); err == nil {
+			if resolved == target {
+				return nil
+			}
+			lastErr = fmt.Errorf("%s уже указывает на %s", link, resolved)
+			continue
 		}
-		return fmt.Errorf("команда %s уже занята: %s", link, resolved)
-	} else if _, err := os.Lstat(link); err == nil {
-		return fmt.Errorf("команда %s уже существует", link)
-	} else if !os.IsNotExist(err) {
-		return err
+		if _, err := os.Lstat(link); err == nil {
+			lastErr = fmt.Errorf("%s уже существует", link)
+			continue
+		} else if !os.IsNotExist(err) {
+			lastErr = err
+			continue
+		}
+		if err := os.Symlink(target, link); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
 	}
-	if err := os.Symlink(target, link); err != nil {
-		return fmt.Errorf("добавить zator в PATH через %s: %w", link, err)
+	if lastErr == nil {
+		return fmt.Errorf("не найдена подходящая системная папка для команды zator")
 	}
-	return nil
+	return fmt.Errorf("не удалось добавить zator в PATH (/opt/bin, /usr/local/bin, /usr/bin): %w", lastErr)
 }
 
 func sameFile(a, b string) bool {
