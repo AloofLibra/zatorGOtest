@@ -144,6 +144,7 @@ const configPath = ref('')
 const configLoaded = ref(false)
 const errors = ref({ available: false, content: '', path: '', lines: 0 })
 const updateInfo = ref<{ update_available?: boolean; release?: string; checked_at?: string; error?: string } | null>(null)
+const updateMode = ref<'app' | 'config' | 'full'>('full')
 
 const wssizeOn = ref(false)
 const wssizeMode = ref<WssizeRampSettings['mode']>('full')
@@ -436,8 +437,8 @@ async function checkUpdates() {
 
 async function applyUpdates() {
   try {
-  const pre = await api<{ preflight?: { ram_available: number; tmp_available: number; tmp_required: number; tmp_base_required: number; flash_available: number; flash_required: number; can_rollback: boolean; can_proceed_without_backup: boolean; can_update: boolean } }>(
-    '/api/settings', { ...formBody({ setting: 'update_preflight', mode: 'full' }) },
+  const pre = await api<{ preflight?: { ram_available: number; tmp_available: number; tmp_required: number; tmp_base_required: number; flash_available: number; flash_required: number; zapret_flash_available: number; zapret_flash_required: number; can_rollback: boolean; can_proceed_without_backup: boolean; can_update: boolean } }>(
+    '/api/settings', { ...formBody({ setting: 'update_preflight', mode: updateMode.value }) },
   )
   if (!pre.preflight?.can_update) {
     showToast('Недостаточно свободной flash памяти для обновления', 'error')
@@ -449,10 +450,10 @@ async function applyUpdates() {
   }
   const noBackup = !pre.preflight.can_rollback
   const ok = await confirmDialog({
-    title: 'Установить обновление ZatorGO?',
+    title: updateMode.value === 'app' ? 'Обновить Zator?' : updateMode.value === 'config' ? 'Обновить конфигурационные ресурсы?' : 'Обновить всё?',
     message: noBackup
-      ? [`Доступно RAM: ${pre.preflight.ram_available}; /tmp: ${pre.preflight.tmp_available}; flash: ${pre.preflight.flash_available} байт. Для полного отката в /tmp нужно около ${pre.preflight.tmp_required}. Продолжить без резервной копии на свой риск?`]
-      : [`Будут скачаны файлы релиза. RAM: ${pre.preflight.ram_available}; /tmp: ${pre.preflight.tmp_available}; flash: ${pre.preflight.flash_available} байт.`],
+      ? [`RAM: ${pre.preflight.ram_available}; /tmp: ${pre.preflight.tmp_available}; flash Zator: ${pre.preflight.flash_available}; flash zapret2: ${pre.preflight.zapret_flash_available} байт. Для полного отката нужно около ${pre.preflight.tmp_required} байт в /tmp. Продолжить без резервной копии на свой риск?`]
+      : [`Будут скачаны файлы релиза. RAM: ${pre.preflight.ram_available}; /tmp: ${pre.preflight.tmp_available}; flash Zator: ${pre.preflight.flash_available}; flash zapret2: ${pre.preflight.zapret_flash_available} байт.`],
   })
   if (!ok) return
     await withBusy('upd-apply', async () => {
@@ -465,7 +466,7 @@ async function applyUpdates() {
         restart_required?: boolean
       }>(
         '/api/settings',
-        { ...formBody({ setting: 'update_apply', mode: 'full', continue_without_backup: noBackup ? '1' : '0' }), timeoutMs: 200_000 },
+        { ...formBody({ setting: 'update_apply', mode: updateMode.value, continue_without_backup: noBackup ? '1' : '0' }), timeoutMs: 200_000 },
       )
       if ('needs_confirmation' in res && res.needs_confirmation) {
         showToast(res.warning || 'Свободного места в /tmp стало недостаточно; обновление не начато', 'warning')
@@ -736,15 +737,16 @@ onMounted(async () => {
 
       <section id="sec-updates" class="panel">
         <div class="panel-h"><h2>Обновления</h2></div>
-        <p class="panel-d">Проверка и установка релизов ZatorGO.</p>
+        <p class="panel-d">Выберите, какие части обновить. Конфигурация включает Lua, стратегии, списки и blob-файлы.</p>
         <p v-if="updateInfo" class="panel-d">
           {{ updateInfo.update_available ? 'Есть обновление' : 'Актуально' }}
           <template v-if="updateInfo.release"> · {{ updateInfo.release }}</template>
           <template v-if="updateInfo.checked_at"> · {{ updateInfo.checked_at }}</template>
         </p>
         <div class="actions">
+          <label class="field"><span>Режим</span><select v-model="updateMode" :disabled="busyActive"><option value="app">Только Zator</option><option value="config">Только конфиги и стратегии</option><option value="full">Всё</option></select></label>
           <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'upd-check' }" @click="checkUpdates">Проверить</button>
-          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'upd-apply' }" @click="applyUpdates">Установить</button>
+          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'upd-apply' }" @click="applyUpdates">Обновить</button>
         </div>
       </section>
 

@@ -34,13 +34,15 @@ func VersionPath(p paths.Paths) string { return filepath.Join(Dir(p), VersionFil
 
 // Version — содержимое version.env (формат KEY="value", как у shell-версии).
 type Version struct {
-	ZatorVersion string
-	ZatorDate    string
-	ZatorCommit  string
-	ZatorSHA     string
-	WebUIVersion string
-	WebUIDate    string
-	WebUISHA     string
+	ZatorVersion  string
+	ZatorDate     string
+	ZatorCommit   string
+	ZatorSHA      string
+	WebUIVersion  string
+	WebUIDate     string
+	WebUISHA      string
+	ConfigVersion string
+	ConfigSHA     string
 	// Tracking — "latest" или закреплённый тег релиза.
 	Tracking string
 }
@@ -82,6 +84,10 @@ func ParseVersionEnv(text string) Version {
 			v.WebUIDate = val
 		case "WEBUI_SHA":
 			v.WebUISHA = val
+		case "CONFIG_VERSION":
+			v.ConfigVersion = val
+		case "CONFIG_SHA":
+			v.ConfigSHA = val
 		case "TRACKING":
 			v.Tracking = val
 		}
@@ -107,6 +113,8 @@ func (v Version) String() string {
 	w("WEBUI_VERSION", or(v.WebUIVersion, "unknown"))
 	w("WEBUI_DATE", v.WebUIDate)
 	w("WEBUI_SHA", v.WebUISHA)
+	w("CONFIG_VERSION", v.ConfigVersion)
+	w("CONFIG_SHA", v.ConfigSHA)
 	w("TRACKING", or(v.Tracking, TrackingLatest))
 	return b.String()
 }

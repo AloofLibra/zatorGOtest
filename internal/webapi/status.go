@@ -262,6 +262,8 @@ func (s *Server) versionPayload() map[string]any {
 		"webui_date":            date,
 		"tracking":              "latest",
 		"update_available":      false,
+		"update_zator":          false,
+		"update_config":         false,
 		"latest_release":        "",
 		"latest_zator_date":     "",
 		"latest_webui_date":     "",
@@ -289,6 +291,8 @@ func (s *Server) versionPayload() map[string]any {
 		if l, err := deploy.ReadCachedLatest(s.paths); err == nil && l != nil {
 			res := deploy.CompareLatest(cur, l, true)
 			out["update_available"] = res.UpdateAvailable()
+			out["update_zator"] = res.UpdateZator || res.UpdateWebUI
+			out["update_config"] = res.UpdateConfig
 			out["latest_release"] = l.Release
 			out["latest_zator_date"] = l.ZatorDate
 			out["latest_webui_date"] = l.WebUIDate

@@ -233,7 +233,7 @@ func (u *Updater) applyGitHubBinary(ctx context.Context, expectedVersion string)
 	if link == "" {
 		return nil, tag, fmt.Errorf("deploy: бинарник для этой arch не найден в релизе %s", tag)
 	}
-	dir := Dir(u.Paths)
+	dir := TempDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, tag, err
 	}

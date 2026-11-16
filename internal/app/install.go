@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -32,15 +31,9 @@ func (a *App) Install() error {
 	if err := a.syncAssets(); err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format("2006-01-02 15:04")
-	ver := zator.Version()
-	_ = deploy.WriteVersion(a.Paths, deploy.Version{
-		ZatorVersion: ver,
-		ZatorDate:    now,
-		WebUIVersion: ver,
-		WebUIDate:    now,
-		Tracking:     "latest",
-	})
+	if err := a.recordInstalledVersion(); err != nil {
+		return err
+	}
 	if err := a.Save(); err != nil {
 		return err
 	}
@@ -69,15 +62,9 @@ func (a *App) Update() error {
 	if err := a.syncAssets(); err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format("2006-01-02 15:04")
-	ver := zator.Version()
-	_ = deploy.WriteVersion(a.Paths, deploy.Version{
-		ZatorVersion: ver,
-		ZatorDate:    now,
-		WebUIVersion: ver,
-		WebUIDate:    now,
-		Tracking:     "latest",
-	})
+	if err := a.recordInstalledVersion(); err != nil {
+		return err
+	}
 	if err := a.Save(); err != nil {
 		return err
 	}
@@ -88,6 +75,34 @@ func (a *App) Update() error {
 		_, _, _ = a.ApplyDetectedIfaces()
 	}
 	return nil
+}
+
+func (a *App) recordInstalledVersion() error {
+	v, err := deploy.ReadVersion(a.Paths)
+	if err != nil {
+		return err
+	}
+	version := zator.Version()
+	now := time.Now().UTC().Format("2006-01-02 15:04")
+	if v.ZatorVersion == "" {
+		v.ZatorVersion = version
+	}
+	if v.ZatorDate == "" {
+		v.ZatorDate = now
+	}
+	if v.WebUIVersion == "" {
+		v.WebUIVersion = version
+	}
+	if v.WebUIDate == "" {
+		v.WebUIDate = now
+	}
+	if v.ConfigVersion == "" {
+		v.ConfigVersion = version
+	}
+	if v.Tracking == "" {
+		v.Tracking = deploy.TrackingLatest
+	}
+	return deploy.WriteVersion(a.Paths, v)
 }
 
 // UninstallOptions — поведение удаления.
@@ -137,56 +152,18 @@ func (a *App) removeRuntime() error {
 }
 
 func (a *App) syncAssets() error {
-	if runtime.GOOS == "linux" {
-		if err := installGooglevideoSniffer(a.Paths.ZatorRoot, uiembed.Tools(), runtime.GOARCH); err != nil {
-			return fmt.Errorf("распаковка Googlevideo DNS sniffer: %w", err)
-		}
-	}
-	if err := copyFS(uiembed.WebUI(), a.Paths.WebUIDir); err != nil {
-		return fmt.Errorf("распаковка Web UI: %w", err)
-	}
-	if err := copyFS(uiembed.Lua(), a.Paths.LuaDir); err != nil {
-		return fmt.Errorf("распаковка lua: %w", err)
-	}
-	// strategy-validator.sh должен быть исполняемым (служба zator-strategy-validator).
-	_ = os.Chmod(filepath.Join(a.Paths.LuaDir, "strategy-validator.sh"), 0o755)
-	if err := copyFS(uiembed.Orchestra(), filepath.Join(a.Paths.ExtraStratsDir, "cache", "orchestra")); err != nil {
-		return fmt.Errorf("распаковка orchestra: %w", err)
-	}
-	// locked.lua должен лежать в /opt/zator/lua (пути в config.default).
-	if err := copyFSKeepExisting(uiembed.Orchestra(), a.Paths.LuaDir); err != nil {
-		return fmt.Errorf("locked.lua → lua: %w", err)
-	}
-	if err := a.migrateOrchestraCacheToState(); err != nil {
+	if err := a.Paths.EnsureDirs(); err != nil {
 		return err
 	}
-	if err := copyFSKeepExisting(uiembed.Lists(), a.Paths.ListsDir); err != nil {
-		return fmt.Errorf("распаковка lists: %w", err)
-	}
-	if err := copyFS(uiembed.Data(), a.Paths.DataDir); err != nil {
-		return fmt.Errorf("распаковка data: %w", err)
-	}
-	if err := a.EnsureStockFakes(); err != nil {
-		return err
-	}
-	if err := copyFSKeepExisting(uiembed.ExtraStrats(), a.Paths.ExtraStratsDir); err != nil {
-		return fmt.Errorf("распаковка extra_strats: %w", err)
-	}
-	blockcheckRoot := filepath.Join(a.Paths.ZapretRoot, "blockcheck2.d")
-	blockcheckDir := filepath.Join(blockcheckRoot, "z4r")
-	if st, err := os.Stat(a.Paths.ZapretRoot); err == nil && st.IsDir() {
-		if err := copyFS(uiembed.Blockcheck2(), blockcheckRoot); err != nil {
-			return fmt.Errorf("распаковка Blockcheck2: %w", err)
-		}
-		if err := os.Chmod(filepath.Join(blockcheckDir, "10-list.sh"), 0o755); err != nil {
-			return fmt.Errorf("права Blockcheck2: %w", err)
+	if _, err := os.Stat(filepath.Join(a.Paths.WebUIDir, "index.html")); err != nil {
+		if err := a.copyDevelopmentAssets(); err != nil {
+			return fmt.Errorf("WebUI-ресурсы отсутствуют; сначала установите app archive: %w", err)
 		}
 	}
-	if data, err := uiembed.ConfigDefault(); err == nil {
-		dst := filepath.Join(a.Paths.ConfigDir, "config.default")
-		if err := os.WriteFile(dst, data, 0o644); err != nil {
-			return fmt.Errorf("запись config.default: %w", err)
-		}
+	if _, err := os.Stat(filepath.Join(a.Paths.LuaDir, "wssize-ramp.lua")); err != nil {
+		return fmt.Errorf("config-ресурсы отсутствуют; сначала установите config archive")
+	}
+	if data, err := uiembed.ConfigDefaultAt(a.Paths); err == nil {
 		if err := a.seedZapretConfig(data); err != nil {
 			return err
 		}
@@ -195,6 +172,43 @@ func (a *App) syncAssets() error {
 		return err
 	}
 	return a.ensureOrchestraState()
+}
+
+// copyDevelopmentAssets supports local builds from a source checkout. Release
+// binaries do not contain these files and are supplied separate resource archives.
+func (a *App) copyDevelopmentAssets() error {
+	root := uiembed.SourceAssetsRoot()
+	if _, err := os.Stat(filepath.Join(root, "webui", "index.html")); err != nil {
+		return err
+	}
+	copyTree := func(src, dst string) error { return copyFS(os.DirFS(filepath.Join(root, src)), dst) }
+	for _, item := range [][2]string{
+		{"webui", a.Paths.WebUIDir}, {"lua", a.Paths.LuaDir},
+		{"orchestra", filepath.Join(a.Paths.ExtraStratsDir, "cache", "orchestra")},
+		{"data", a.Paths.DataDir}, {"files", filepath.Join(a.Paths.ZatorRoot, "files")},
+		{"init", filepath.Join(a.Paths.ZatorRoot, "init")}, {"tools", filepath.Join(a.Paths.ZatorRoot, "tools")},
+	} {
+		if err := copyTree(item[0], item[1]); err != nil {
+			return err
+		}
+	}
+	if err := copyFSKeepExisting(os.DirFS(filepath.Join(root, "lists")), a.Paths.ListsDir); err != nil {
+		return err
+	}
+	if err := copyFSKeepExisting(os.DirFS(filepath.Join(root, "extra_strats")), a.Paths.ExtraStratsDir); err != nil {
+		return err
+	}
+	if err := copyFSKeepCustomTLS(os.DirFS(filepath.Join(root, "files", "fake")), a.Paths.FakeDir); err != nil {
+		return err
+	}
+	if err := copyTree("blockcheck2", filepath.Join(a.Paths.ZapretRoot, "blockcheck2.d")); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(root, "config.default"))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(a.Paths.ConfigDir, "config.default"), data, 0o644)
 }
 
 func (a *App) migrateLegacyTelemetry() error {
@@ -392,13 +406,7 @@ func copyDirKeepExisting(src, dst string) error {
 // EnsureStockFakes распаковывает встроенные blob в FakeDir. Пользовательский
 // custom_tls.bin сохраняется при обновлении, как в Bash-версии.
 func (a *App) EnsureStockFakes() error {
-	if err := os.MkdirAll(a.Paths.FakeDir, 0o755); err != nil {
-		return fmt.Errorf("создание FakeDir: %w", err)
-	}
-	if err := copyFSKeepCustomTLS(uiembed.Fake(), a.Paths.FakeDir); err != nil {
-		return fmt.Errorf("распаковка files/fake: %w", err)
-	}
-	return nil
+	return os.MkdirAll(a.Paths.FakeDir, 0o755)
 }
 
 func copyFSKeepCustomTLS(src fs.FS, dst string) error {

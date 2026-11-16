@@ -26,8 +26,26 @@ fi
 [[ -s "$TARGET_BINARY" ]] || { echo "missing target binary: $TARGET_BINARY" >&2; exit 1; }
 mkdir -p "$OUT/vendor"
 
+case "$TARGET_ARCH" in
+  arm) SNIFFER_ARCH=arm; SNIFFER_TARGET=arm-linux-musleabihf ;;
+  arm64) SNIFFER_ARCH=arm64; SNIFFER_TARGET=aarch64-linux-musl ;;
+  mips) SNIFFER_ARCH=mips; SNIFFER_TARGET=mips-linux-musl ;;
+  mips64) SNIFFER_ARCH=mips64; SNIFFER_TARGET=mips64-linux-musl ;;
+  mipsel) SNIFFER_ARCH=mipsle; SNIFFER_TARGET=mipsel-linux-musl ;;
+  mipsel64) SNIFFER_ARCH=mips64le; SNIFFER_TARGET=mips64el-linux-musl ;;
+  ppc) SNIFFER_ARCH=ppc64; SNIFFER_TARGET=powerpc64-linux-musl ;;
+  x86) SNIFFER_ARCH=386; SNIFFER_TARGET=x86-linux-musl ;;
+  x86_64) SNIFFER_ARCH=amd64; SNIFFER_TARGET=x86_64-linux-musl ;;
+  riscv64) SNIFFER_ARCH=riscv64; SNIFFER_TARGET=riscv64-linux-musl ;;
+esac
+SNIFFER_DIR="$(mktemp -d)"
+trap 'rm -rf "$SNIFFER_DIR"' EXIT
+Z2R_GV_SNIFFER_TARGET="$SNIFFER_TARGET" \
+  bash "$ROOT/scripts/build-googlevideo-dns-sniffer.sh" "$SNIFFER_DIR/googlevideo-dns-sniffer-$SNIFFER_ARCH"
+
 COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse HEAD)}"
-VER="$VER" COMMIT="$COMMIT" BINARY_PATH="$TARGET_BINARY" bash "$ROOT/scripts/pack-release.sh" "$OUT"
+VER="$VER" COMMIT="$COMMIT" BINARY_PATH="$TARGET_BINARY" SNIFFER_DIR="$SNIFFER_DIR" \
+  bash "$ROOT/scripts/pack-release.sh" "$OUT"
 cp "$ROOT/scripts/zator-launcher.sh" "$OUT/zator-launcher.sh"
 chmod 755 "$OUT/zator-launcher.sh"
 for f in "$ROOT"/dist/zator-linux-*; do

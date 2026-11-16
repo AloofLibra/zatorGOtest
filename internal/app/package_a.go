@@ -70,7 +70,7 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 		return "", err
 	}
 	if _, err := os.Stat(cfgPath); err != nil {
-		data, e := uiembed.ConfigDefault()
+		data, e := uiembed.ConfigDefaultAt(a.Paths)
 		if e != nil {
 			return "", fmt.Errorf("нет %s и нет встроенного шаблона", cfgPath)
 		}
@@ -170,7 +170,7 @@ func (a *App) deployNfqwsWatchdog() error {
 	if a.Platform.InitSystem != platform.InitEntware && a.Platform.Kind != platform.KindEntware {
 		return nil
 	}
-	data, err := fs.ReadFile(uiembed.Init(), "entware/nfqws-watchdog")
+	data, err := fs.ReadFile(uiembed.InitAt(a.Paths), "entware/nfqws-watchdog")
 	if err != nil || len(data) == 0 {
 		return err
 	}
@@ -234,7 +234,7 @@ func (a *App) deployWebUIWatchdog() error {
 	if a.Platform.InitSystem != platform.InitEntware && a.Platform.Kind != platform.KindEntware {
 		return nil
 	}
-	data, err := fs.ReadFile(uiembed.Init(), "entware/webui-watchdog")
+	data, err := fs.ReadFile(uiembed.InitAt(a.Paths), "entware/webui-watchdog")
 	if err != nil || len(data) == 0 {
 		return err
 	}

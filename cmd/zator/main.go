@@ -383,6 +383,24 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	resourceUpdater := deploy.New(a.Paths)
+	resourceCtx, resourceCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	offlineResources := deploy.ResolveOfflineBundle(os.Getenv)
+	if offlineResources.Offline {
+		if offlineResources.Bundle == nil {
+			resourceCancel()
+			fmt.Fprintln(stderr, "офлайн-установка: пакет zator-app/config отсутствует в bundle")
+			return 1
+		}
+		_, err = resourceUpdater.ApplyBundleResources(*offlineResources.Bundle, deploy.ModeFull)
+	} else {
+		_, err = resourceUpdater.ApplyRemoteResources(resourceCtx, deploy.ModeFull)
+	}
+	resourceCancel()
+	if err != nil {
+		fmt.Fprintf(stderr, "загрузка ресурсов Zator: %v\n", err)
+		return 1
+	}
 	if err := a.Install(); err != nil {
 		fmt.Fprintf(stderr, "установка не удалась: %v\n", err)
 		return 1
@@ -452,7 +470,12 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	force := fs.Bool("force", false, "скачать релиз даже если версия совпадает")
 	noBackup := fs.Bool("continue-without-backup", false, "продолжить без резервной копии при нехватке /tmp")
+	mode := fs.String("mode", deploy.ModeFull, "режим: app (Zator), config (ресурсы стратегий), full (всё)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *mode != deploy.ModeApp && *mode != deploy.ModeConfig && *mode != deploy.ModeFull {
+		fmt.Fprintln(stderr, "-mode: допустимы app, config, full")
 		return 2
 	}
 
@@ -480,15 +503,15 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	if check != nil {
 		latest = check.Latest
 	}
-	preflight, err := deploy.CheckPreflight(a.Paths, latest, "full")
+	preflight, err := deploy.CheckPreflight(a.Paths, latest, *mode)
 	if err != nil {
 		fmt.Fprintf(stderr, "проверка места: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "Память: доступно RAM %d, /tmp %d, flash %d байт; оценка /tmp %d, flash %d байт\n",
-		preflight.RAMAvailable, preflight.TmpAvailable, preflight.FlashAvailable, preflight.TmpRequired, preflight.FlashRequired)
+	fmt.Fprintf(stdout, "Память: RAM %d, /tmp %d, flash Zator %d, flash zapret2 %d байт; потребность /tmp %d, flash Zator %d, flash zapret2 %d байт\n",
+		preflight.RAMAvailable, preflight.TmpAvailable, preflight.FlashAvailable, preflight.ZapretFlashAvailable, preflight.TmpRequired, preflight.FlashRequired, preflight.ZapretFlashRequired)
 	if !preflight.CanUpdate {
-		fmt.Fprintf(stderr, "обновление отменено: недостаточно flash (свободно %d, нужно около %d байт)\n", preflight.FlashAvailable, preflight.FlashRequired)
+		fmt.Fprintf(stderr, "обновление отменено: недостаточно flash (Zator %d/%d, zapret2 %d/%d байт свободно/нужно)\n", preflight.FlashAvailable, preflight.FlashRequired, preflight.ZapretFlashAvailable, preflight.ZapretFlashRequired)
 		return 1
 	}
 	if !preflight.CanProceedWithoutBackup {
@@ -520,46 +543,33 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stdout, "выполнен откат из pre-update backup")
 		}
 	}
-	// Сначала локальные встроенные ресурсы, затем (если онлайн) релизный tar/бинарник.
-	if err := a.Update(); err != nil {
-		fmt.Fprintf(stderr, "обновление ресурсов не удалось: %v\n", err)
-		rollback()
-		return 1
-	}
-	fmt.Fprintf(stdout, "zator %s: встроенные ресурсы обновлены\n", zator.Version())
-
 	if off.Offline {
 		if off.Bundle == nil {
 			fmt.Fprintln(stdout, "офлайн-режим: бандл не найден (ZATOR_BUNDLE_DIR / vendor+zator-*.tar.gz)")
 			return 0
 		}
 		fmt.Fprintf(stdout, "офлайн-бандл: %s\n", off.Bundle.Tarball)
-		ar, err := u.ApplyBundle(*off.Bundle, "")
+		ar, err := u.ApplyBundleMode(context.Background(), *off.Bundle, *mode)
 		if err != nil {
-			fmt.Fprintf(stderr, "офлайн ApplyBundle: %v\n", err)
-			rollback()
-			return 1
-		}
-		binary, err := u.ApplyBundleBinary(context.Background(), *off.Bundle)
-		if err != nil {
-			fmt.Fprintf(stderr, "офлайн бинарник: %v\n", err)
+			fmt.Fprintf(stderr, "офлайн обновление (%s): %v\n", *mode, err)
 			rollback()
 			return 1
 		}
 		if ar != nil {
-			ar.Installed += binary.Installed
 			fmt.Fprintf(stdout, "офлайн: установлено файлов %d\n", ar.Installed)
 		}
-		if err := a.VerifyAfterUpdate(); err != nil {
-			fmt.Fprintf(stderr, "post-update verify: %v\n", err)
-			rollback()
-			return 1
+		if *mode != deploy.ModeConfig {
+			if err := a.VerifyAfterUpdate(); err != nil {
+				fmt.Fprintf(stderr, "post-update verify: %v\n", err)
+				rollback()
+				return 1
+			}
 		}
 		return 0
 	}
 	rep, err := u.Run(context.Background(), deploy.RunOptions{
-		Variant: deploy.VariantFull,
-		Force:   *force,
+		Mode:  *mode,
+		Force: *force,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "проверка/применение релиза: %v\n", err)
@@ -576,12 +586,14 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, " (%s)", rep.Archive)
 		}
 		fmt.Fprintln(stdout)
-		if err := a.VerifyAfterUpdate(); err != nil {
-			fmt.Fprintf(stderr, "post-update verify: %v\n", err)
-			rollback()
-			return 1
+		if *mode != deploy.ModeConfig {
+			if err := a.VerifyAfterUpdate(); err != nil {
+				fmt.Fprintf(stderr, "post-update verify: %v\n", err)
+				rollback()
+				return 1
+			}
+			fmt.Fprintln(stdout, "post-update verify: ok")
 		}
-		fmt.Fprintln(stdout, "post-update verify: ok")
 	}
 	return 0
 }

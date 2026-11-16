@@ -65,8 +65,10 @@ chmod +x zator-launcher.sh
 
 ### Обновление
 
-- Web UI → **Настройки → Обновления → Проверить / Установить**
-- CLI: `zator update`
+- Web UI → **Настройки → Обновления** → выберите режим и нажмите «Обновить»
+- CLI: `zator update -mode app|config|full` (по умолчанию `full`)
+
+`app` обновляет бинарник Zator и WebUI/служебные ресурсы; `config` обновляет Lua, стратегии, списки, blobs и Blockcheck2 без замены бинарника; `full` применяет оба архива. Если под откат не хватает места в `/tmp`, интерфейс предупредит и предложит продолжить без резервной копии; CLI требует явный флаг `-continue-without-backup`.
 
 ```sh
 export ZATOR_OWNER=Koviand
@@ -159,7 +161,7 @@ Blockcheck2 временно останавливает zapret2, поэтому 
 
 ### Установка и обновление без GitHub
 
-Соберите bundle под архитектуру целевого роутера (например, `TARGET_ARCH=arm64 bash scripts/pack-offline.sh`). Bundle содержит соответствующий бинарник в `vendor/`; для старых версий он также вложен в `zator-full.tar.gz`. Запустите `sh zator-launcher.sh` из каталога bundle, чтобы проверить checksum и выполнить установку без GitHub. Для обновления уже установленной системы используйте `Z2R_OFFLINE=1 ZATOR_BUNDLE_DIR=/путь/к/bundle zator update`. Необходимые системные пакеты и модули ядра должны быть доступны локально или уже установлены; bundle их не упаковывает.
+Соберите bundle под архитектуру целевого роутера (например, `TARGET_ARCH=arm64 bash scripts/pack-offline.sh`). Bundle содержит отдельные `zator-app.tar.gz` и `zator-config.tar.gz`, а также бинарники и checksums в `vendor/`. Запустите `sh zator-launcher.sh` из каталога bundle, чтобы выполнить установку без GitHub. Для обновления используйте `Z2R_OFFLINE=1 ZATOR_BUNDLE_DIR=/путь/к/bundle zator update -mode full`. Необходимые системные пакеты и модули ядра должны быть доступны локально или уже установлены; bundle их не упаковывает.
 
 ---
 
@@ -192,14 +194,14 @@ internal/
   netcheck/          # TLS 1.2/1.3
   service/           # start/stop/restart
   domains/           # списки доменов
-assets/              # config.default, fake, lua, lists, extra_strats, asn
+assets/              # исходники ресурсов для app/config архивов
 webui-src/           # Vue 3 + Vite
-assets/webui/        # собранная статика (вшивается в бинарник)
+assets/webui/        # собранная статика (в zator-app.tar.gz)
 vendor/              # опционально: локальные архивы zapret2
 docs/                # API.md, PARITY.md
 ```
 
-Списки, стратегии, Lua и ASN живут в `assets/` и вшиваются в бинарник — **без чужих репозиториев на runtime**. Удалённые feed’ы выключены по умолчанию (`Z2R_GOOGLEVIDEO_IPS_URL`, `Z2R_RECS_URL`, …). Установка zapret2 сначала ищет архив в `vendor/` / `$ZATOR_VENDOR`.
+Списки, стратегии, Lua, ASN и WebUI живут в `assets/` и поставляются двумя архивами отдельно от бинарника. На роутере загрузки, staging и rollback snapshots хранятся в `/tmp`; неизменившиеся файлы не переписываются, а изменённые пользователем списки сохраняются. Удалённые feed’ы выключены по умолчанию (`Z2R_GOOGLEVIDEO_IPS_URL`, `Z2R_RECS_URL`, …). Установка zapret2 сначала ищет архив в `vendor/` / `$ZATOR_VENDOR`.
 
 Паритет с bash-zator: [`docs/PARITY.md`](docs/PARITY.md).
 

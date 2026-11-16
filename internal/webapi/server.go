@@ -174,7 +174,7 @@ func (s *Server) defaultStatic() fs.FS {
 	if st, err := os.Stat(filepath.Join(s.paths.WebUIDir, "index.html")); err == nil && !st.IsDir() {
 		return os.DirFS(s.paths.WebUIDir)
 	}
-	return uiembed.WebUI()
+	return uiembed.WebUIAt(s.paths)
 }
 
 // endpoint — обработчик одного CGI-эндпоинта.
@@ -365,7 +365,7 @@ func (s *Server) readConfig() (c *config.Config, installed bool) {
 	if c, err := config.Load(s.defaultConfigPath()); err == nil {
 		return c, false
 	}
-	if data, err := uiembed.ConfigDefault(); err == nil {
+	if data, err := uiembed.ConfigDefaultAt(s.paths); err == nil {
 		return config.Parse(string(data)), false
 	}
 	return config.Parse(""), false

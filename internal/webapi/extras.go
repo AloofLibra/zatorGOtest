@@ -156,7 +156,7 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 	out := map[string]any{"ok": true, "up_to_date": false, "installed": 0, "restart_required": false}
 	mode := strings.TrimSpace(r.FormValue("mode"))
 	if mode == "" {
-		mode = "full"
+		mode = deploy.ModeFull
 	}
 	preCtx, preCancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer preCancel()
@@ -180,7 +180,7 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 	}
 	out["preflight"] = preflight
 	if !preflight.CanUpdate {
-		return nil, errf(http.StatusInsufficientStorage, fmt.Sprintf("Недостаточно flash: свободно %d байт, ориентировочно нужно %d", preflight.FlashAvailable, preflight.FlashRequired))
+		return nil, errf(http.StatusInsufficientStorage, fmt.Sprintf("Недостаточно flash (Zator %d/%d, zapret2 %d/%d байт свободно/нужно)", preflight.FlashAvailable, preflight.FlashRequired, preflight.ZapretFlashAvailable, preflight.ZapretFlashRequired))
 	}
 	if !preflight.CanProceedWithoutBackup {
 		return nil, errf(http.StatusInsufficientStorage, fmt.Sprintf("Недостаточно /tmp даже для загрузки и распаковки обновления: свободно %d байт, ориентировочно нужно %d", preflight.TmpAvailable, preflight.TmpBaseRequired))
@@ -223,16 +223,12 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 	if off.Offline && off.Bundle != nil {
 		out["offline"] = true
 		out["offline_reason"] = off.Reason
-		ar, aerr := u.ApplyBundle(*off.Bundle, "")
+		ar, aerr := u.ApplyBundleMode(ctx, *off.Bundle, mode)
 		if aerr != nil {
 			return rollbackFailure(http.StatusBadGateway, "Офлайн-обновление не удалось: ", aerr)
 		}
-		binary, berr := u.ApplyBundleBinary(ctx, *off.Bundle)
-		if berr != nil {
-			return rollbackFailure(http.StatusBadGateway, "Офлайн-бинарник не применён: ", berr)
-		}
 		if ar != nil {
-			installed = ar.Installed + binary.Installed
+			installed = ar.Installed
 			out["installed"] = installed
 		}
 		out["up_to_date"] = false
@@ -240,7 +236,7 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		if off.Offline {
 			u.Offline = true
 		}
-		rep, rerr := u.Run(ctx, deploy.RunOptions{Variant: deploy.VariantFull})
+		rep, rerr := u.Run(ctx, deploy.RunOptions{Mode: mode})
 		if rerr != nil {
 			return rollbackFailure(http.StatusBadGateway, "Обновление не удалось: ", rerr)
 		}
@@ -258,7 +254,7 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 	}
 	if installed > 0 && !upToDate {
 		verifyOK := true
-		if s.app != nil {
+		if s.app != nil && mode != deploy.ModeConfig {
 			if err := s.app.VerifyAfterUpdate(); err != nil {
 				verifyOK = false
 				out["post_update_verify"] = "fail"
@@ -282,8 +278,8 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		}
 		if verifyOK {
 			out["restart_required"] = true
-			s.schedulePostUpdateRestarts()
-			out["webui_restart_scheduled"] = true
+			s.schedulePostUpdateRestarts(mode != deploy.ModeConfig)
+			out["webui_restart_scheduled"] = mode != deploy.ModeConfig
 			out["zapret2_restart_scheduled"] = true
 		} else {
 			out["restart_required"] = false
@@ -322,7 +318,7 @@ func (s *Server) postUpdatePreflight(r *http.Request, p params) (map[string]any,
 }
 
 // schedulePostUpdateRestarts — отложенный рестарт webui + zapret2 (новый Lua в nfqws2).
-func (s *Server) schedulePostUpdateRestarts() {
+func (s *Server) schedulePostUpdateRestarts(restartWebUI bool) {
 	if s.svc == nil {
 		return
 	}
@@ -353,8 +349,10 @@ func (s *Server) schedulePostUpdateRestarts() {
 			_ = s.svc.Restart(ctx, service.UnitZapret2)
 		}
 		_ = s.svc.Restart(ctx, service.UnitValidator)
-		_ = s.svc.Restart(ctx, service.UnitWebUI)
-		if s.app != nil {
+		if restartWebUI {
+			_ = s.svc.Restart(ctx, service.UnitWebUI)
+		}
+		if restartWebUI && s.app != nil {
 			s.app.StartWebUIWatchdog()
 		}
 	}()

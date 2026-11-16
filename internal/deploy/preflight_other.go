@@ -11,10 +11,12 @@ type PreflightReport struct {
 	RAMAvailable            int64 `json:"ram_available"`
 	TmpAvailable            int64 `json:"tmp_available"`
 	FlashAvailable          int64 `json:"flash_available"`
+	ZapretFlashAvailable    int64 `json:"zapret_flash_available"`
 	TmpRequired             int64 `json:"tmp_required"`
 	TmpBaseRequired         int64 `json:"tmp_base_required"`
 	BackupRequired          int64 `json:"backup_required"`
 	FlashRequired           int64 `json:"flash_required"`
+	ZapretFlashRequired     int64 `json:"zapret_flash_required"`
 	CanRollback             bool  `json:"can_rollback"`
 	CanProceedWithoutBackup bool  `json:"can_proceed_without_backup"`
 	CanUpdate               bool  `json:"can_update"`

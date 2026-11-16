@@ -75,7 +75,7 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 	if err != nil {
 		return res, err
 	}
-	if data, err := uiembed.ConfigDefault(); err == nil {
+	if data, err := uiembed.ConfigDefaultAt(a.Paths); err == nil {
 		_ = os.WriteFile(filepath.Join(a.Paths.ZapretRoot, "config.default"), data, 0o644)
 		if err := a.seedZapretConfig(data); err != nil {
 			return res, err
@@ -117,7 +117,7 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 // (если он встроен в бинарник). Апстримный init.d остаётся в каталоге;
 // оверрайд использует те же functions из EXEDIR.
 func (a *App) deployEntwareInit() error {
-	src := uiembed.Init()
+	src := uiembed.InitAt(a.Paths)
 	data, err := fs.ReadFile(src, "entware/zapret")
 	if err != nil {
 		return nil

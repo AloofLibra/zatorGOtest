@@ -138,6 +138,10 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: googlevideo-sniffers
+          path: release-sniffers
       - name: Pack release files
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag }}
@@ -146,7 +150,7 @@ jobs:
           find artifacts -type f -name 'zator-linux-*' -exec cp {} out/ \;
           VER="${RELEASE_TAG:-$GITHUB_REF_NAME}" COMMIT="$GITHUB_SHA" bash scripts/pack-release.sh out
           cp scripts/zator-launcher.sh out/
-          (cd out && sha256sum zator-linux-* zator-full.tar.gz latest.json zator-launcher.sh > SHA256SUMS)
+          (cd out && sha256sum zator-linux-* zator-app.tar.gz zator-config.tar.gz latest.json zator-launcher.sh > SHA256SUMS)
           ls -la out
       - uses: softprops/action-gh-release@v2
         with:

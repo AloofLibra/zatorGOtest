@@ -37,6 +37,7 @@ import (
 	"github.com/AloofLibra/zator/internal/fetch"
 	"github.com/AloofLibra/zator/internal/fsutil"
 	"github.com/AloofLibra/zator/internal/paths"
+	"github.com/AloofLibra/zator/internal/platform"
 )
 
 // Источники и настройки по умолчанию.
@@ -55,14 +56,20 @@ const (
 	VersionEnvRel = "extra_strats/cache/deploy/version.env"
 
 	// Классы файлов манифеста.
-	ClassAuto         = "auto"
-	ClassKeepIfExists = "keep-if-exists"
-	ClassPayload      = "payload"
+	ClassAuto               = "auto"
+	ClassKeepIfExists       = "keep-if-exists"
+	ClassPayload            = "payload"
+	ClassUpdateIfUnmodified = "update-if-unmodified"
 
 	// Варианты архива.
-	VariantCore  = "core"
-	VariantWebUI = "webui"
-	VariantFull  = "full"
+	VariantCore   = "core"
+	VariantWebUI  = "webui"
+	VariantFull   = "full"
+	VariantApp    = "app"
+	VariantConfig = "config"
+	ModeApp       = "app"
+	ModeConfig    = "config"
+	ModeFull      = "full"
 
 	// SchemaVersion — поддерживаемая версия формата latest.json.
 	SchemaVersion = 1
@@ -119,7 +126,7 @@ var (
 
 // ValidVariant сообщает, что variant — core, webui или full.
 func ValidVariant(v string) bool {
-	return v == VariantCore || v == VariantWebUI || v == VariantFull
+	return v == VariantCore || v == VariantWebUI || v == VariantFull || v == VariantApp || v == VariantConfig
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +149,7 @@ type Latest struct {
 	Commit        string           `json:"commit"`
 	ZatorSHA      string           `json:"zatorSha"`
 	WebUISHA      string           `json:"webuiSha"`
+	ConfigSHA     string           `json:"configSha"`
 	ZatorDate     string           `json:"zatorDate"`
 	WebUIDate     string           `json:"webuiDate"`
 	Assets        map[string]Asset `json:"assets"`
@@ -230,11 +238,38 @@ type Updater struct {
 // New создаёт обновлятор для раскладки p. Адрес latest.json берётся из
 // ZATOR_LATEST_URL / ZATOR_OWNER+ZATOR_REPO, офлайн-флаг — из Z2R_OFFLINE.
 func New(p paths.Paths) *Updater {
+	arch := platform.ReleaseArch(platform.Detect().Arch)
+	if arch == platform.ArchUnknown {
+		arch = platform.ReleaseArch(platform.SelfArch())
+	}
+	snifferArch := string(arch)
+	switch arch {
+	case platform.ArchX86_64:
+		snifferArch = "amd64"
+	case platform.ArchX86:
+		snifferArch = "386"
+	case platform.ArchMIPSEL:
+		snifferArch = "mipsle"
+	case platform.ArchMIPSEL64:
+		snifferArch = "mips64le"
+	case platform.ArchPPC:
+		snifferArch = "ppc64"
+	}
 	return &Updater{
 		Paths:     p,
 		Fetch:     fetch.NewClient(),
 		LatestURL: LatestJSONURL(),
 		Offline:   DetectOffline(os.Getenv, "").Offline,
+		Remap: func(rel string) string {
+			const prefix = "tools/bin/googlevideo-dns-sniffer-"
+			if strings.HasPrefix(rel, prefix) {
+				if strings.TrimPrefix(rel, prefix) != snifferArch {
+					return ""
+				}
+				return "tools/bin/googlevideo-dns-sniffer"
+			}
+			return rel
+		},
 	}
 }
 
@@ -281,15 +316,18 @@ type CheckResult struct {
 	Current Version
 	// UpdateZator — ядро устарело; UpdateWebUI — устарела веб-панель
 	// (учитывается только при установленной панели).
-	UpdateZator bool
-	UpdateWebUI bool
+	UpdateZator  bool
+	UpdateWebUI  bool
+	UpdateConfig bool
 	// VersionNewer — тег релиза новее установленной версии (справочно).
 	VersionNewer bool
 	CheckedAt    time.Time
 }
 
 // UpdateAvailable сообщает, что есть что обновлять.
-func (r *CheckResult) UpdateAvailable() bool { return r != nil && (r.UpdateZator || r.UpdateWebUI) }
+func (r *CheckResult) UpdateAvailable() bool {
+	return r != nil && (r.UpdateZator || r.UpdateWebUI || r.UpdateConfig)
+}
 
 // CompareLatest сравнивает установленную версию с latest. Основной признак —
 // несовпадение SHA содержимого (как в shell-версии); при неизвестном SHA ядра
@@ -321,6 +359,9 @@ func CompareLatest(cur Version, l *Latest, webUIInstalled bool) CheckResult {
 		default:
 			r.UpdateWebUI = knownVersion(l.Release)
 		}
+	}
+	if l.ConfigSHA != "" {
+		r.UpdateConfig = !strings.EqualFold(cur.ConfigSHA, l.ConfigSHA)
 	}
 	r.VersionNewer = knownVersion(cur.ZatorVersion) && IsNewer(cur.ZatorVersion, l.Release)
 	return r
@@ -496,7 +537,7 @@ func ParseManifest(data []byte) ([]ManifestEntry, error) {
 			return nil, fmt.Errorf("%w: строка %d: путь %q", ErrBadManifest, i+1, f[0])
 		}
 		switch f[2] {
-		case ClassAuto, ClassKeepIfExists, ClassPayload:
+		case ClassAuto, ClassKeepIfExists, ClassPayload, ClassUpdateIfUnmodified:
 		default:
 			return nil, fmt.Errorf("%w: строка %d: класс %q", ErrBadManifest, i+1, f[2])
 		}
@@ -525,6 +566,7 @@ func ParseManifest(data []byte) ([]ManifestEntry, error) {
 const ScriptManifestDest = "/opt/z2r.sh"
 
 const zatorManifestPrefix = "/opt/zator/"
+const zapretManifestPrefix = "/opt/zapret2/"
 
 // resolveDest преобразует dest манифеста в путь на диске. skip=true — запись
 // не применяется (нет ScriptDest или Remap вернул пусто).
@@ -543,6 +585,17 @@ func (u *Updater) resolveDest(dest string) (target string, skip bool, err error)
 			return "", true, nil
 		}
 		return u.ScriptDest, false, nil
+	case strings.HasPrefix(dest, zapretManifestPrefix):
+		rel := path.Clean(strings.TrimPrefix(dest, zapretManifestPrefix))
+		if rel == "." || rel == "" || strings.HasPrefix(rel, "/") || rel == ".." || strings.HasPrefix(rel, "../") {
+			return "", false, fmt.Errorf("%w: dest %q", ErrBadManifest, dest)
+		}
+		root := u.Paths.ZapretRoot
+		target := filepath.Join(root, filepath.FromSlash(rel))
+		if r, err := filepath.Rel(root, target); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return "", false, fmt.Errorf("%w: dest %q", ErrBadManifest, dest)
+		}
+		return target, false, nil
 	case strings.HasPrefix(dest, zatorManifestPrefix):
 		rel := path.Clean(strings.TrimPrefix(dest, zatorManifestPrefix))
 		if rel == "." || rel == "" || strings.HasPrefix(rel, "/") {
@@ -606,6 +659,7 @@ func VerifyStaging(staging string, entries []ManifestEntry) error {
 
 // ApplyOptions настраивает Apply.
 type ApplyOptions struct {
+	Component string
 	// Tracking — значение TRACKING в version.env ("latest" или тег; пусто —
 	// сохраняется прежнее, иначе latest).
 	Tracking string
@@ -658,6 +712,11 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 	if err := VerifyStaging(staging, entries); err != nil {
 		return nil, err
 	}
+	managed, err := readManagedHashes(u.Paths)
+	if err != nil {
+		return nil, err
+	}
+	managedChanged := false
 	type planned struct {
 		e      ManifestEntry
 		target string
@@ -734,6 +793,26 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 			res.Kept++
 			continue
 		}
+		if e.Class == ClassUpdateIfUnmodified && exists {
+			currentSHA, hashErr := fetch.SHA256File(target)
+			if hashErr != nil {
+				return nil, withRollback(hashErr)
+			}
+			if currentSHA == e.SHA256 {
+				res.Unchanged++
+				if managed[e.Path] != e.SHA256 {
+					managed[e.Path] = e.SHA256
+					managedChanged = true
+				}
+				continue
+			}
+			baseline, tracked := managed[e.Path]
+			if !tracked || !strings.EqualFold(currentSHA, baseline) {
+				// No trustworthy baseline or local edits: preserve this file.
+				res.Kept++
+				continue
+			}
+		}
 		if exists && st.Mode().IsRegular() {
 			if sum, err := fetch.SHA256File(target); err == nil && sum == e.SHA256 {
 				res.Unchanged++
@@ -771,8 +850,28 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 		}
 		res.Installed++
 		res.Files = append(res.Files, target)
+		if e.Class == ClassUpdateIfUnmodified {
+			managed[e.Path] = e.SHA256
+			managedChanged = true
+		}
 		if u.ScriptDest != "" && target == u.ScriptDest {
 			res.ScriptUpdated = true
+		}
+	}
+	if managedChanged {
+		ledger := managedHashesPath(u.Paths)
+		op := undoOp{target: ledger}
+		if old, err := os.ReadFile(ledger); err == nil {
+			op.backup = filepath.Join(backupDir, "managed-resources.tsv")
+			if err := os.WriteFile(op.backup, old, 0o600); err != nil {
+				return nil, withRollback(err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, withRollback(err)
+		}
+		undo = append(undo, op)
+		if err := writeManagedHashes(u.Paths, managed); err != nil {
+			return nil, withRollback(err)
 		}
 	}
 
@@ -832,10 +931,23 @@ func (u *Updater) mergeVersion(staging string, res *ApplyResult, opts ApplyOptio
 		}
 	}
 	out := old
-	if res.HasCore {
+	if opts.Component == ModeConfig {
+		if nv.ConfigVersion != "" {
+			out.ConfigVersion = nv.ConfigVersion
+		}
+		if nv.ConfigSHA != "" {
+			out.ConfigSHA = nv.ConfigSHA
+		}
+		if opts.Meta != nil {
+			out.ConfigVersion = opts.Meta.Release
+			if opts.Meta.ConfigSHA != "" {
+				out.ConfigSHA = opts.Meta.ConfigSHA
+			}
+		}
+	} else if res.HasCore {
 		out.ZatorVersion, out.ZatorDate, out.ZatorCommit, out.ZatorSHA = nv.ZatorVersion, nv.ZatorDate, nv.ZatorCommit, nv.ZatorSHA
 	}
-	if res.HasWebUI {
+	if opts.Component != ModeConfig && res.HasWebUI {
 		out.WebUIVersion, out.WebUIDate, out.WebUISHA = nv.WebUIVersion, nv.WebUIDate, nv.WebUISHA
 	}
 	switch {
@@ -859,6 +971,9 @@ func (u *Updater) ApplyArchive(archive string, opts ApplyOptions) (*ApplyResult,
 
 // RunOptions настраивает Run.
 type RunOptions struct {
+	// Mode selects app (binary+app resources), config (config resources only),
+	// or full. Empty preserves the legacy Variant behavior.
+	Mode string
 	// Variant — core | webui | full (по умолчанию full).
 	Variant string
 	// Force применяет архив даже при отсутствии обновления.
@@ -878,10 +993,212 @@ type Report struct {
 	Apply    *ApplyResult
 }
 
+// RunMode applies one of the user-facing update modes using independent release
+// archives. The app archive and binary are changed together; config-only never
+// fetches or replaces the binary.
+func (u *Updater) RunMode(ctx context.Context, opts RunOptions) (*Report, error) {
+	mode := opts.Mode
+	if mode == "" {
+		mode = ModeFull
+	}
+	if mode != ModeApp && mode != ModeConfig && mode != ModeFull {
+		return nil, fmt.Errorf("%w: mode %q", ErrUnknownVariant, mode)
+	}
+	if u.Offline {
+		return nil, ErrOffline
+	}
+	check, err := u.CheckLatest(ctx)
+	if err != nil && check == nil {
+		return nil, err
+	}
+	rep := &Report{Check: check, Variant: mode}
+	if check == nil || check.Latest == nil {
+		return rep, fmt.Errorf("%w: latest.json не содержит release metadata", ErrInvalidLatest)
+	}
+	doApp := mode == ModeApp || mode == ModeFull && (check.UpdateZator || check.UpdateWebUI)
+	doConfig := mode == ModeConfig || mode == ModeFull && check.UpdateConfig
+	if opts.Force {
+		doApp = mode != ModeConfig
+		doConfig = mode != ModeApp
+	}
+	if !doApp && !doConfig {
+		rep.UpToDate = true
+		return rep, nil
+	}
+	if doApp {
+		if _, err := check.Latest.Asset(VariantApp); err != nil {
+			return rep, err
+		}
+	}
+	if doConfig {
+		if _, err := check.Latest.Asset(VariantConfig); err != nil {
+			return rep, err
+		}
+	}
+	var transactions []*ApplyResult
+	rollback := func() error {
+		var errs []error
+		for i := len(transactions) - 1; i >= 0; i-- {
+			errs = append(errs, transactions[i].finishTransaction(false))
+		}
+		return errors.Join(errs...)
+	}
+	applyPackage := func(name, component string) error {
+		archive, err := u.DownloadAsset(ctx, check.Latest, name)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(archive)
+		res, err := u.ApplyArchive(archive, ApplyOptions{Tracking: opts.Tracking, Meta: check.Latest, Component: component, deferCommit: true})
+		if err != nil {
+			return err
+		}
+		transactions = append(transactions, res)
+		if rep.Apply == nil {
+			rep.Apply = res
+		} else {
+			rep.Apply.Installed += res.Installed
+			rep.Apply.Unchanged += res.Unchanged
+			rep.Apply.Kept += res.Kept
+			rep.Apply.Skipped += res.Skipped
+			rep.Apply.HasCore = rep.Apply.HasCore || res.HasCore
+			rep.Apply.HasWebUI = rep.Apply.HasWebUI || res.HasWebUI
+			rep.Apply.Files = append(rep.Apply.Files, res.Files...)
+		}
+		rep.Archive = name
+		return nil
+	}
+	if doApp {
+		if err := applyPackage(VariantApp, ModeApp); err != nil {
+			return rep, errors.Join(err, rollback())
+		}
+	}
+	if doConfig {
+		if err := applyPackage(VariantConfig, ModeConfig); err != nil {
+			return rep, errors.Join(err, rollback())
+		}
+	}
+	if doApp {
+		bin, tag, err := u.applyGitHubBinary(ctx, check.Latest.Release)
+		if err != nil {
+			return rep, errors.Join(fmt.Errorf("deploy: установка бинарника: %w", err), rollback())
+		}
+		if tag != "" && CompareVersions(tag, check.Latest.Release) != 0 {
+			return rep, errors.Join(fmt.Errorf("deploy: бинарник %s не совпадает с релизом %s", tag, check.Latest.Release), rollback())
+		}
+		if bin != nil && rep.Apply != nil {
+			rep.Apply.Installed += bin.Installed
+		}
+	}
+	for _, tr := range transactions {
+		if err := tr.finishTransaction(true); err != nil {
+			return rep, err
+		}
+	}
+	return rep, nil
+}
+
+// ApplyRemoteResources downloads and applies resource archives without touching
+// the running binary. Used by first install before the app has its final path.
+func (u *Updater) ApplyRemoteResources(ctx context.Context, mode string) (*ApplyResult, error) {
+	if u.Offline {
+		return nil, ErrOffline
+	}
+	check, err := u.CheckLatest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if check.Latest == nil {
+		return nil, fmt.Errorf("%w: latest metadata missing", ErrInvalidLatest)
+	}
+	packages := map[string]string{}
+	for _, name := range []string{VariantApp, VariantConfig} {
+		if mode == ModeApp && name == VariantConfig || mode == ModeConfig && name == VariantApp {
+			continue
+		}
+		asset, err := check.Latest.Asset(name)
+		if err != nil {
+			return nil, err
+		}
+		archive, err := u.DownloadAsset(ctx, check.Latest, name)
+		if err != nil {
+			return nil, err
+		}
+		packages[name] = archive
+		_ = asset
+	}
+	defer func() {
+		for _, file := range packages {
+			_ = os.Remove(file)
+		}
+	}()
+	return u.applyResourceArchives(mode, packages, check.Latest, TrackingLatest)
+}
+
+func (u *Updater) applyResourceArchives(mode string, files map[string]string, meta *Latest, tracking string) (*ApplyResult, error) {
+	if mode == "" {
+		mode = ModeFull
+	}
+	if mode != ModeApp && mode != ModeConfig && mode != ModeFull {
+		return nil, fmt.Errorf("%w: mode %q", ErrUnknownVariant, mode)
+	}
+	var tx []*ApplyResult
+	var out *ApplyResult
+	rollback := func(cause error) error {
+		var errs []error
+		for i := len(tx) - 1; i >= 0; i-- {
+			errs = append(errs, tx[i].finishTransaction(false))
+		}
+		return errors.Join(append([]error{cause}, errs...)...)
+	}
+	apply := func(name, component string) error {
+		file := files[name]
+		if file == "" {
+			return fmt.Errorf("deploy: archive %s is missing", name)
+		}
+		res, err := u.ApplyArchive(file, ApplyOptions{Tracking: tracking, Meta: meta, Component: component, deferCommit: true})
+		if err != nil {
+			return err
+		}
+		tx = append(tx, res)
+		if out == nil {
+			out = res
+		} else {
+			out.Installed += res.Installed
+			out.Unchanged += res.Unchanged
+			out.Kept += res.Kept
+			out.Skipped += res.Skipped
+			out.Files = append(out.Files, res.Files...)
+			out.HasCore = out.HasCore || res.HasCore
+			out.HasWebUI = out.HasWebUI || res.HasWebUI
+		}
+		return nil
+	}
+	if mode != ModeConfig {
+		if err := apply(VariantApp, ModeApp); err != nil {
+			return nil, rollback(err)
+		}
+	}
+	if mode != ModeApp {
+		if err := apply(VariantConfig, ModeConfig); err != nil {
+			return nil, rollback(err)
+		}
+	}
+	for _, res := range tx {
+		if err := res.finishTransaction(true); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
 // Run выполняет полный цикл: проверка → загрузка → проверка sha256 →
 // staging → применение. Без обновления (и без Force) возвращает Report с
 // UpToDate=true и ничего не скачивает.
 func (u *Updater) Run(ctx context.Context, opts RunOptions) (*Report, error) {
+	if opts.Mode != "" {
+		return u.RunMode(ctx, opts)
+	}
 	variant := opts.Variant
 	if variant == "" {
 		variant = VariantFull

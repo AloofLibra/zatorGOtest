@@ -240,6 +240,8 @@ func (s *Server) wssizeGet(cfg *config.Config) any {
 func (s *Server) updateCheck() any {
 	out := map[string]any{
 		"update_available":  false,
+		"update_zator":      false,
+		"update_config":     false,
 		"release":           "",
 		"latest_zator_date": "",
 		"latest_webui_date": "",
@@ -258,6 +260,8 @@ func (s *Server) updateCheck() any {
 		return out
 	}
 	out["update_available"] = res.UpdateAvailable()
+	out["update_zator"] = res.UpdateZator || res.UpdateWebUI
+	out["update_config"] = res.UpdateConfig
 	if res.Latest != nil {
 		out["release"] = res.Latest.Release
 		out["latest_zator_date"] = res.Latest.ZatorDate

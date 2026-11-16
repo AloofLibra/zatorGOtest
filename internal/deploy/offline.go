@@ -1,6 +1,9 @@
 package deploy
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,8 +27,10 @@ const (
 
 // Bundle — офлайн-бандл: каталог с vendor/ и архивом zator-<variant>.tar.gz.
 type Bundle struct {
-	Dir       string
-	VendorDir string
+	Dir           string
+	VendorDir     string
+	AppArchive    string
+	ConfigArchive string
 	// Tarball — архив zator; при нескольких предпочитается zator-full.tar.gz.
 	Tarball string
 }
@@ -59,7 +64,113 @@ func FindBundle(dir string) (Bundle, bool) {
 			tar = f
 		}
 	}
-	return Bundle{Dir: dir, VendorDir: vendor, Tarball: tar}, true
+	b := Bundle{Dir: dir, VendorDir: vendor, Tarball: tar}
+	for _, f := range files {
+		switch filepath.Base(f) {
+		case "zator-app.tar.gz":
+			b.AppArchive = f
+		case "zator-config.tar.gz":
+			b.ConfigArchive = f
+		}
+	}
+	return b, true
+}
+
+// ApplyBundleMode installs only the selected resource archives and binary.
+func (u *Updater) ApplyBundleMode(ctx context.Context, b Bundle, mode string) (*ApplyResult, error) {
+	if mode == "" {
+		mode = ModeFull
+	}
+	if mode != ModeApp && mode != ModeConfig && mode != ModeFull {
+		return nil, fmt.Errorf("%w: mode %q", ErrUnknownVariant, mode)
+	}
+	if b.AppArchive == "" && b.ConfigArchive == "" {
+		if mode == ModeFull && b.Tarball != "" {
+			res, err := u.ApplyBundle(b, "")
+			if err != nil {
+				return nil, err
+			}
+			bin, err := u.ApplyBundleBinary(ctx, b)
+			if err != nil {
+				return nil, errors.Join(err, res.finishTransaction(false))
+			}
+			if res != nil {
+				res.Installed += bin.Installed
+			}
+			return res, nil
+		}
+		return nil, fmt.Errorf("deploy: offline bundle does not contain split resource archives")
+	}
+	var tx []*ApplyResult
+	var out *ApplyResult
+	rollback := func(cause error) error {
+		var errs []error
+		for i := len(tx) - 1; i >= 0; i-- {
+			errs = append(errs, tx[i].finishTransaction(false))
+		}
+		return errors.Join(append([]error{cause}, errs...)...)
+	}
+	apply := func(file, component string) error {
+		if file == "" {
+			return fmt.Errorf("deploy: offline archive %s is missing", component)
+		}
+		res, err := u.ApplyArchive(file, ApplyOptions{Tracking: "offline", Component: component, deferCommit: true})
+		if err != nil {
+			return err
+		}
+		tx = append(tx, res)
+		if out == nil {
+			out = res
+		} else {
+			out.Installed += res.Installed
+			out.Unchanged += res.Unchanged
+			out.Kept += res.Kept
+			out.Files = append(out.Files, res.Files...)
+		}
+		return nil
+	}
+	if mode != ModeConfig {
+		if err := apply(b.AppArchive, ModeApp); err != nil {
+			return nil, rollback(err)
+		}
+	}
+	if mode != ModeApp {
+		if err := apply(b.ConfigArchive, ModeConfig); err != nil {
+			return nil, rollback(err)
+		}
+	}
+	if mode != ModeConfig {
+		bin, err := u.ApplyBundleBinary(ctx, b)
+		if err != nil {
+			return nil, rollback(err)
+		}
+		if out != nil {
+			out.Installed += bin.Installed
+		}
+	}
+	for _, res := range tx {
+		if err := res.finishTransaction(true); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// ApplyBundleResources installs resources from an offline bundle without replacing
+// the current binary. This is the resource phase of a fresh install.
+func (u *Updater) ApplyBundleResources(b Bundle, mode string) (*ApplyResult, error) {
+	files := map[string]string{}
+	if b.AppArchive != "" {
+		files[VariantApp] = b.AppArchive
+	}
+	if b.ConfigArchive != "" {
+		files[VariantConfig] = b.ConfigArchive
+	}
+	if len(files) == 0 && mode == ModeFull && b.Tarball != "" {
+		res, err := u.ApplyBundle(b, "")
+		return res, err
+	}
+	return u.applyResourceArchives(mode, files, nil, "offline")
 }
 
 // OfflineStatus — результат определения офлайн-режима.

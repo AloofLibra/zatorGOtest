@@ -18,10 +18,12 @@ type PreflightReport struct {
 	RAMAvailable            int64 `json:"ram_available"`
 	TmpAvailable            int64 `json:"tmp_available"`
 	FlashAvailable          int64 `json:"flash_available"`
+	ZapretFlashAvailable    int64 `json:"zapret_flash_available"`
 	TmpRequired             int64 `json:"tmp_required"`
 	TmpBaseRequired         int64 `json:"tmp_base_required"`
 	BackupRequired          int64 `json:"backup_required"`
 	FlashRequired           int64 `json:"flash_required"`
+	ZapretFlashRequired     int64 `json:"zapret_flash_required"`
 	CanRollback             bool  `json:"can_rollback"`
 	CanProceedWithoutBackup bool  `json:"can_proceed_without_backup"`
 	CanUpdate               bool  `json:"can_update"`
@@ -95,11 +97,32 @@ func CheckPreflight(p paths.Paths, latest *Latest, mode string) (PreflightReport
 	if err != nil {
 		return PreflightReport{}, err
 	}
+	zapretRoot := p.ZapretRoot
+	for {
+		if _, err := os.Stat(zapretRoot); err == nil {
+			break
+		}
+		parent := filepath.Dir(zapretRoot)
+		if parent == zapretRoot {
+			return PreflightReport{}, fmt.Errorf("не найден flash-раздел для %s", p.ZapretRoot)
+		}
+		zapretRoot = parent
+	}
+	zapretFree, err := fsAvailable(zapretRoot)
+	if err != nil {
+		return PreflightReport{}, err
+	}
 	var archive, expanded, binary int64
 	if latest != nil {
-		// Current releases publish "full"; reserve its uncompressed size plus archive.
-		if a, ok := latest.Assets["full"]; ok {
-			archive, expanded = a.Size, a.UnpackedSize
+		packages := []string{mode}
+		if mode == ModeFull {
+			packages = []string{VariantApp, VariantConfig}
+		}
+		for _, name := range packages {
+			if a, ok := latest.Assets[name]; ok {
+				archive += a.Size
+				expanded += a.UnpackedSize
+			}
 		}
 	}
 	if archive == 0 {
@@ -108,22 +131,31 @@ func CheckPreflight(p paths.Paths, latest *Latest, mode string) (PreflightReport
 	if expanded == 0 {
 		expanded = 32 << 20
 	}
-	if st, e := os.Stat(filepath.Join(p.BinDir, "zator")); e == nil {
-		binary = st.Size()
-	}
 	userBackup := treeBytes(p.ConfigDir) + treeBytes(p.ListsDir) + treeBytes(p.StateOrchestraDir())
 	if st, e := os.Stat(p.ZapretConfig); e == nil && st.Mode().IsRegular() {
 		userBackup += st.Size()
 	}
-	r := PreflightReport{RAMAvailable: memAvailable(), TmpAvailable: tmpFree, FlashAvailable: flashFree,
+	if st, e := os.Stat(filepath.Join(p.BinDir, "zator")); e == nil {
+		binary = st.Size()
+	}
+	zapretRequired := int64(0)
+	if mode != ModeApp {
+		zapretRequired = 1 << 20
+	}
+	r := PreflightReport{RAMAvailable: memAvailable(), TmpAvailable: tmpFree, FlashAvailable: flashFree, ZapretFlashAvailable: zapretFree,
 		TmpBaseRequired: archive + expanded + 2<<20,
 		BackupRequired:  binary + userBackup,
-		FlashRequired:   expanded + 4<<20}
+		FlashRequired: expanded + (func() int64 {
+			if mode != ModeConfig {
+				return binary
+			}
+			return 0
+		})() + 4<<20, ZapretFlashRequired: zapretRequired}
 	r.TmpRequired = r.TmpBaseRequired + r.BackupRequired
 	// Resource archives are staged in tmpfs; flash requirement covers replacement
 	// headroom and filesystem metadata, not the pre-update binary backup.
 	r.CanProceedWithoutBackup = tmpFree >= r.TmpBaseRequired && (r.RAMAvailable == 0 || r.RAMAvailable >= r.TmpBaseRequired)
 	r.CanRollback = r.CanProceedWithoutBackup && (r.RAMAvailable == 0 || r.RAMAvailable >= r.TmpRequired)
-	r.CanUpdate = flashFree >= r.FlashRequired
+	r.CanUpdate = flashFree >= r.FlashRequired && zapretFree >= r.ZapretFlashRequired
 	return r, nil
 }
