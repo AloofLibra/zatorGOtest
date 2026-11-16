@@ -3,6 +3,17 @@
 Референс: ветка `feat/googlevideo-fix` репозитория AloofLibra/zator.
 Цель: весь управляющий функционал доступен через bootstrap CLI + Web UI.
 
+## Текущая контрольная точка (2026-11-16)
+
+- `zatorGO` и `origin/zatorGO` совпадают на `ead4db75f7da49c9d8b36543490067baa5bce948`; Bash-эталон `feat/googlevideo-fix` проверен на `fe97cd9e64b1c7e6d811f54bce7e399acd264bd5`.
+- Тестовый OpenWrt `192.168.1.37` работает на `zator 0.1.40-test19`. Установленный бинарник SHA-256 `43826b56d66605f95feab31f3a4307b2e14deae27e18032e11090780c79055af`; `/opt/zator/state/deploy/version.env` связывает его с commit выше. `zator-webui`, `zator-strategy-validator` и `zapret2` запущены; локальный API отвечает. SHA `/opt/zapret2/config` — `9a995f37f98facc6726f405ed3f7038b19bdba0f70401c9c562858655e421da2`.
+- Удалён отдельный переключатель/профиль `QUIC fakes :443`; общий UDP/443 блок и его QUIC-стратегии остаются. Runtime-аргументы показывают активный `quic_initial`; отдельный реальный QUIC transport-тест не выполнялся.
+- Изолированный Googlevideo probe проверен на роутере с WSSIZE off, Full и Lite; одиночная стратегия 16 прошла TLS 1.2/1.3 и три media-range, packet capture подтвердил изменённые SYN window/scale. Это не сравнение производительности режимов и не полный повторный SuperSweep.
+- Последний полный замер простоя показал отсутствие роста CPU ticks на наблюдавшихся процессах за 12 секунд; суммарный RSS был около 32 MiB с возможным двойным учётом shared pages. Целевой PSS недоступен: ядро `6.12.87` не предоставляет `smaps`/`smaps_rollup`.
+- Открытые проверки, которым нужна другая среда или опубликованный релиз: Keenetic/NDM end-to-end, PSS на ARM64 ядре с `CONFIG_PROC_PAGE_MONITOR`, MIPS runtime, `latest.json` update и реальный packet mark от контролируемого LAN-клиента. Результаты Quick/SuperSweep приведены ниже; широкие прогоны повторно не запускались. `circular_locked` lock profile 2 / TLS / strategy 16 создан Bash Zator; не приписывать его Go. `circular_quality` нестабилен и не включается миграцией.
+
+Строки ниже содержат результаты проверок разных сборок и запусков; для текущего состояния приоритетна контрольная точка выше.
+
 ## Аудит перехода на `zatorGO` (2026-11-16)
 
 | Функция | Bash `feat/googlevideo-fix` | Go `zatorGO` | Пробел / действие |
