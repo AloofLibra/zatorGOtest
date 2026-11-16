@@ -23,28 +23,29 @@ var postSettingsTable map[string]postFn
 
 func init() {
 	postSettingsTable = map[string]postFn{
-		"tls_blob":         (*Server).postTLSBlob,
-		"tls_blob_profile": (*Server).postTLSBlobProfile,
-		"fake_mode":        (*Server).postFakeMode,
-		"clone_size":       (*Server).postCloneSize,
-		"wg_blob":          (*Server).postWGBlob,
-		"wg_repeats":       (*Server).postWGRepeats,
-		"ports_add":        (*Server).postPortsAdd,
-		"ports_remove":     (*Server).postPortsRemove,
+		"tls_blob":          (*Server).postTLSBlob,
+		"tls_blob_profile":  (*Server).postTLSBlobProfile,
+		"fake_mode":         (*Server).postFakeMode,
+		"sni_override":      (*Server).postSNIOverride,
+		"clone_size":        (*Server).postCloneSize,
+		"wg_blob":           (*Server).postWGBlob,
+		"wg_repeats":        (*Server).postWGRepeats,
+		"ports_add":         (*Server).postPortsAdd,
+		"ports_remove":      (*Server).postPortsRemove,
 		"provider_set":      (*Server).postProviderSet,
 		"provider_redetect": (*Server).postProviderRedetect,
-		"client_scope": (*Server).postClientScope,
-		"wssize_ramp":  (*Server).postWssizeRamp,
-		"supersweep":    (*Server).postSupersweep,
-		"fwtype":        varSetting("FWTYPE", "Некорректное значение: ", "iptables", "nftables"),
-		"flowoffload":   varSetting("FLOWOFFLOAD", "Некорректное значение: ", "donttouch", "none", "software", "hardware"),
-		"ifaces":        (*Server).postIfaces,
-		"iface":         (*Server).postIfaces,
-		"interfaces":    (*Server).postIfaces,
-		"config_raw":         (*Server).postConfigRaw,
-		"config":             (*Server).postConfigRaw,
-		"update_apply":       (*Server).postUpdateApply,
-		"strategy_register":  (*Server).postStrategyRegister,
+		"client_scope":      (*Server).postClientScope,
+		"wssize_ramp":       (*Server).postWssizeRamp,
+		"supersweep":        (*Server).postSupersweep,
+		"fwtype":            varSetting("FWTYPE", "Некорректное значение: ", "iptables", "nftables"),
+		"flowoffload":       varSetting("FLOWOFFLOAD", "Некорректное значение: ", "donttouch", "none", "software", "hardware"),
+		"ifaces":            (*Server).postIfaces,
+		"iface":             (*Server).postIfaces,
+		"interfaces":        (*Server).postIfaces,
+		"config_raw":        (*Server).postConfigRaw,
+		"config":            (*Server).postConfigRaw,
+		"update_apply":      (*Server).postUpdateApply,
+		"strategy_register": (*Server).postStrategyRegister,
 	}
 	for _, t := range toggles {
 		t := t
@@ -346,6 +347,26 @@ func (s *Server) postFakeMode(_ *http.Request, p params) (map[string]any, error)
 		err = s.store.SetOverride(orchestra.OverrideMode, profile, v)
 	default:
 		return nil, errf(http.StatusBadRequest, "Некорректное значение: "+v)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "restarted": false, "restart_required": false}, nil
+}
+
+func (s *Server) postSNIOverride(_ *http.Request, p params) (map[string]any, error) {
+	profile, err := overrideProfile(p)
+	if err != nil {
+		return nil, err
+	}
+	value := strings.TrimSpace(p.Get("value"))
+	if value == "" {
+		err = s.store.ClearOverride(orchestra.OverrideSNI, profile)
+	} else {
+		if err := orchestra.OverrideSNI.ValidateValue(value); err != nil {
+			return nil, errf(http.StatusBadRequest, "Некорректный SNI: "+value)
+		}
+		err = s.store.SetOverride(orchestra.OverrideSNI, profile, value)
 	}
 	if err != nil {
 		return nil, err

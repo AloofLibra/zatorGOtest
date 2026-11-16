@@ -135,6 +135,8 @@ export const applySetting = {
     api<ApplyResult>('/api/settings', formBody({ setting: 'tls_blob_profile', profile, value })),
   fake_mode: (profile: string, value: string) =>
     api<ApplyResult>('/api/settings', formBody({ setting: 'fake_mode', profile, value })),
+  sni_override: (profile: string, value: string) =>
+    api<ApplyResult>('/api/settings', formBody({ setting: 'sni_override', profile, value })),
   clone_size: (profile: string, value: string) =>
     api<ApplyResult>('/api/settings', formBody({ setting: 'clone_size', profile, value })),
   wg_blob: (value: string, restart: boolean) =>

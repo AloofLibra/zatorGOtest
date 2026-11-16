@@ -10,6 +10,7 @@ import (
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/netcheck"
+	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/provider"
 )
 
@@ -457,6 +458,37 @@ func TestSettingsWssizeFwtypeClientScope(t *testing.T) {
 	}
 	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "client_scope", "client_scope_enable", "1", "client_scope_mark_mask", "zz")
 	wantStatus(t, resp, 400)
+}
+
+func TestSNIOverrideRoundTrip(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	if err := e.srv.store.SetOverride(orchestra.OverrideSNI, "1", "old.example"); err != nil {
+		t.Fatal(err)
+	}
+	resp, out := e.post("/cgi-bin/settings.cgi", "setting", "sni_override", "profile", "2", "value", "new.example")
+	wantOK(t, resp, out)
+	if out["restart_required"] != false {
+		t.Fatalf("SNI override unexpectedly requires restart: %v", out)
+	}
+	tls := settingGetMap(t, e, "")
+	snis := tls["profile_snis"].(map[string]any)
+	if snis["1"] != "old.example" || snis["2"] != "new.example" {
+		t.Fatalf("profile_snis = %v", snis)
+	}
+	raw, err := os.ReadFile(filepath.Join(e.srv.paths.StateOrchestraDir(), orchestra.SNIOverrideFileName))
+	if err != nil || string(raw) != "1\told.example\n2\tnew.example\n" {
+		t.Fatalf("persisted SNI overrides = %q, %v", raw, err)
+	}
+
+	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "sni_override", "profile", "2", "value", "Bad.Example")
+	wantStatus(t, resp, 400)
+
+	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "sni_override", "profile", "2", "value", "")
+	wantOK(t, resp, out)
+	snis = settingGetMap(t, e, "")["profile_snis"].(map[string]any)
+	if snis["1"] != "old.example" || snis["2"] != "" {
+		t.Fatalf("profile_snis after clear = %v", snis)
+	}
 }
 
 func TestSupersweepEndpoints(t *testing.T) {

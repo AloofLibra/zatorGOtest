@@ -20,6 +20,7 @@ type DraftMap = Record<string, string | number>
 const draft = ref<DraftMap>({})
 const fakeMode = ref<Record<string, string>>({})
 const tlsProfile = ref<Record<string, string>>({})
+const profileSni = ref<Record<string, string>>({})
 const cloneSize = ref<Record<string, string>>({})
 const overrideDirty = ref<Record<string, boolean>>({})
 
@@ -71,6 +72,7 @@ function syncOverridesFromSettings(force = false) {
     if (!force && overrideDirty.value[id]) continue
     fakeMode.value[id] = t.profile_modes?.[id] || 'classic'
     tlsProfile.value[id] = t.profile_blobs?.[id] ?? ''
+    profileSni.value[id] = t.profile_snis?.[id] ?? ''
     cloneSize.value[id] = t.profile_sizes?.[id] || ''
   }
 }
@@ -281,6 +283,19 @@ async function saveCloneSize(profile: string) {
     showToast((e as Error).message, 'error')
   }
 }
+
+async function saveSniOverride(profile: string) {
+  try {
+    await withBusy(`sni-${profile}`, async () => {
+      await applySetting.sni_override(profile, profileSni.value[profile] || '')
+      showToast(`SNI клона профиля ${profile} сохранён`)
+      overrideDirty.value[profile] = false
+      await refreshTlsBlobSettings()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
 </script>
 
 <template>
@@ -357,6 +372,15 @@ async function saveCloneSize(profile: string) {
           <div class="actions" style="align-items:end">
             <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `fake-${p.profile}` }"
               @click="saveFake(String(p.profile))">Сохранить</button>
+          </div>
+          <label v-if="fakeMode[String(p.profile)] === 'clone'" class="field">
+            <span>SNI для клона</span>
+            <input v-model.trim="profileSni[String(p.profile)]" :disabled="busyActive" placeholder="www.google.com"
+              @input="markOverrideDirty(String(p.profile))">
+          </label>
+          <div v-if="fakeMode[String(p.profile)] === 'clone'" class="actions" style="align-items:end">
+            <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `sni-${p.profile}` }"
+              @click="saveSniOverride(String(p.profile))">SNI</button>
           </div>
           <label class="field">
             <span>TLS blob</span>
