@@ -73,6 +73,16 @@ export interface ScopesPayload {
   mode?: string
 }
 
+export interface ClientScopeMapping {
+  scope: string
+  ip: string
+}
+
+export interface ClientScopeMappingsPayload {
+  mappings: ClientScopeMapping[]
+  max_scope: number
+}
+
 export interface CheckDetail {
   text?: string
   state?: string

@@ -1,6 +1,7 @@
 import { api, downloadBlob, formBody } from './client'
 import type {
   ApplyResult, BackupsPayload, CheckPayload, DomainsImportResult, DomainsListPayload,
+  ClientScopeMappingsPayload,
   FallbackSettings, IfacesSettings, LockResult, ModeSettingData, PortInfo, PortsSettings, ProfileInfo, ProviderSettings,
   ScopesPayload, StatePayload, StatusPayload, TlsBlobSettings, UdpGamesSettings, UpdateCheckResult,
   WgBlobSettings, WgStateSettings, Recommendations, SupersweepPayload, WssizeRampSettings,
@@ -39,6 +40,11 @@ export const supersweepCancel = () =>
     formBody({ setting: 'supersweep', value: 'cancel' }))
 
 export const fetchScopes = () => api<ScopesPayload>('/api/scopes')
+
+export const fetchClientScopes = () => api<ClientScopeMappingsPayload>('/api/client-scopes')
+
+export const updateClientScope = (action: 'add' | 'remove', ip: string, scope = '') =>
+  api<ApplyResult>('/api/client-scopes', formBody({ action, ip, scope }))
 
 export const setLock = (profile: string, strategy: number, scope: string) =>
   api<LockResult>('/api/set-lock',

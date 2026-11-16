@@ -14,7 +14,8 @@
 | POST | `/api/check` | сетевая проверка; профиль 2 автоматически получает подписанные YouTube audio/video URL через Innertube. Опционально принимает `video_id` или подписанный `media_url`; `verdict=unknown` означает, что медиа получить/подтвердить не удалось. |
 | GET/POST | `/api/domains` | списки доменов (`action=refresh_ips` — googlevideo-ipv4 для WSSIZE) |
 | GET/POST | `/api/backups` | бэкапы |
-| GET | `/api/scopes` | client scopes |
+| GET | `/api/scopes` | strategy lock scopes and client scope settings |
+| GET/POST | `/api/client-scopes` | list IP→mark mappings; POST `action=add|remove`, `ip`, and for add `scope=mark:N`; mapping changes restart zapret2 unless `restart=0` |
 | GET/POST | `/api/settings` | настройки (`setting=…`) |
 | POST | `/api/settings` (`setting=supersweep`) | full run/status/cancel; `quick_profile=1|2|3|4` с `address` запускает короткий перебор одной цели через тот же coordinator, `tls_pref=any|12|13|both` задаёт TLS preference, зелёный победитель применяется автоматически |
 | POST | `/api/blob-upload` | загрузка TLS/WG blob |

@@ -634,7 +634,25 @@ func (s *Server) validScope(c *config.Config) error {
 	if err != nil {
 		return err
 	}
-	return cc.Validate()
+	if err := cc.Validate(); err != nil {
+		return err
+	}
+	mapPath, err := clientScopeMapPath(cc.MapFile, s.paths.ZatorRoot)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(mapPath)
+	if err != nil {
+		return fmt.Errorf("не удалось прочитать client_scope.tsv: %w", err)
+	}
+	entries, _, err := cc.ParseTSV(strings.NewReader(string(data)))
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("добавьте хотя бы один IP-маппинг перед включением client scopes")
+	}
+	return nil
 }
 
 // --- wssize_ramp ---

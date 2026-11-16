@@ -2,7 +2,9 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, formBody } from '../api/client'
-import { applySetting, backups as backupsApi, fetchSetting } from '../api/endpoints'
+import {
+  applySetting, backups as backupsApi, fetchClientScopes, fetchSetting, updateClientScope,
+} from '../api/endpoints'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { confirmDialog } from '../stores/confirm'
 import {
@@ -12,7 +14,7 @@ import {
   refreshTlsBlobSettings, refreshUdpGamesSettings, refreshWgBlobSettings, refreshWgStateSettings,
   refreshWssizeRampSettings,
 } from '../stores/settings'
-import type { WssizeRampSettings } from '../api/types'
+import type { ClientScopeMapping, WssizeRampSettings } from '../api/types'
 import { backups } from '../stores/backups'
 import { fetchAndApplyState } from '../stores/state'
 import { refreshAll, scopes, status } from '../stores/status'
@@ -115,6 +117,9 @@ watch(provider, (p) => {
 }, { immediate: true })
 
 const scopeForm = reactive({ enable: false, mask: '0xff00', shift: '8', max: '255' })
+const clientMappings = ref<ClientScopeMapping[]>([])
+const clientIP = ref('')
+const clientScopeID = ref('1')
 watch(scopes, (s) => {
   if (!s) return
   scopeForm.enable = !!s.enabled
@@ -298,6 +303,44 @@ async function saveScope() {
       } else {
         showToast(enabled ? 'Client scopes включены' : 'Client scopes выключены')
       }
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function refreshClientScopes() {
+  const data = await fetchClientScopes()
+  clientMappings.value = data.mappings || []
+}
+
+async function addClientScope() {
+  const ip = clientIP.value.trim()
+  const id = Number(clientScopeID.value)
+  if (!ip || !Number.isInteger(id) || id < 1 || id > Number(scopes.value.max_scope || 255)) {
+    showToast(`Укажите IP и номер scope от 1 до ${scopes.value.max_scope || 255}`, 'error')
+    return
+  }
+  try {
+    await withBusy('client-scope-add', async () => {
+      announceRestart()
+      const res = await updateClientScope('add', ip, `mark:${id}`)
+      clientIP.value = ''
+      showToast(`Клиент ${ip} добавлен в mark:${id}.${restartSuffix(res)}`)
+      await refreshClientScopes()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function removeClientScope(mapping: ClientScopeMapping) {
+  try {
+    await withBusy(`client-scope-rm-${mapping.ip}`, async () => {
+      announceRestart()
+      const res = await updateClientScope('remove', mapping.ip)
+      showToast(`Клиент ${mapping.ip} удалён.${restartSuffix(res)}`)
+      await refreshClientScopes()
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -599,6 +642,7 @@ onMounted(async () => {
   // Последовательно: параллельный withBusy раньше сбрасывал busy чужим finally.
   await loadConfig()
   await loadErrors()
+  try { await refreshClientScopes() } catch (e) { showToast((e as Error).message, 'error') }
   await nextTick()
   scrollToPanel()
 })
@@ -884,6 +928,20 @@ onMounted(async () => {
         </div>
         <div class="actions" style="margin-top:0.8rem">
           <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'scope' }" @click="saveScope">Сохранить scopes</button>
+        </div>
+        <hr>
+        <p class="panel-d">IP клиента → mark scope. Устройства с этим IP будут использовать стратегии выбранного mark.</p>
+        <div class="row">
+          <input v-model="clientIP" :disabled="busyActive" placeholder="192.168.1.10 или IPv6" style="flex:1;min-width:12rem">
+          <label class="field" style="max-width:9rem"><span>Mark ID</span><input v-model="clientScopeID" :disabled="busyActive" type="number" min="1" :max="scopes.max_scope || 255"></label>
+          <button type="button" class="primary" :disabled="busyActive" @click="addClientScope">Добавить клиента</button>
+        </div>
+        <div class="domain-list" style="margin-top:0.8rem">
+          <div v-for="mapping in clientMappings" :key="mapping.ip" class="domain-item">
+            <code>{{ mapping.ip }}</code><span>{{ mapping.scope }}</span>
+            <button type="button" class="ghost danger" :disabled="busyActive" @click="removeClientScope(mapping)">Удалить</button>
+          </div>
+          <p v-if="!clientMappings.length" class="panel-d">IP-маппинги ещё не добавлены.</p>
         </div>
       </section>
 

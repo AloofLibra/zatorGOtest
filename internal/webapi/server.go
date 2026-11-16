@@ -181,19 +181,20 @@ func (s *Server) defaultStatic() fs.FS {
 type endpoint func(s *Server, w http.ResponseWriter, r *http.Request, p params)
 
 var endpoints = map[string]endpoint{
-	"status":       (*Server).handleStatus,
-	"state":        (*Server).handleState,
-	"set-lock":     (*Server).handleSetLock,
-	"clear-lock":   (*Server).handleClearLock,
-	"service":      (*Server).handleService,
-	"check":        (*Server).handleCheck,
-	"domains":      (*Server).handleDomains,
-	"backups":      (*Server).handleBackups,
-	"scopes":       (*Server).handleScopes,
-	"settings":     (*Server).handleSettings,
-	"blob-upload":  (*Server).handleBlobUpload,
-	"login":        (*Server).handleLogin,
-	"logout":       (*Server).handleLogout,
+	"status":        (*Server).handleStatus,
+	"state":         (*Server).handleState,
+	"set-lock":      (*Server).handleSetLock,
+	"clear-lock":    (*Server).handleClearLock,
+	"service":       (*Server).handleService,
+	"check":         (*Server).handleCheck,
+	"domains":       (*Server).handleDomains,
+	"client-scopes": (*Server).handleClientScopes,
+	"backups":       (*Server).handleBackups,
+	"scopes":        (*Server).handleScopes,
+	"settings":      (*Server).handleSettings,
+	"blob-upload":   (*Server).handleBlobUpload,
+	"login":         (*Server).handleLogin,
+	"logout":        (*Server).handleLogout,
 }
 
 // Handler возвращает корневой http.Handler (авторизация + API + статика).
