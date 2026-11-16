@@ -9,7 +9,7 @@ import (
 func TestArchFromGOARCH(t *testing.T) {
 	cases := map[string]Arch{
 		"arm": ArchARM, "arm64": ArchARM64, "mips": ArchMIPS, "mipsle": ArchMIPSEL,
-		"mips64": ArchMIPS64, "mips64le": ArchMIPSEL64, "ppc64": ArchPPC,
+		"mips64": ArchUnknown, "mips64le": ArchUnknown, "ppc64": ArchUnknown,
 		"386": ArchX86, "amd64": ArchX86_64, "riscv64": ArchRISCV64, "s390x": ArchUnknown,
 	}
 	for in, want := range cases {
@@ -120,7 +120,7 @@ func TestReleaseArchAndBinaryAssetName(t *testing.T) {
 		t.Fatalf("BinaryAssetName(riscv64) = %q", got)
 	}
 	released := ReleasedArches()
-	if len(released) < 10 {
+	if len(released) != 7 {
 		t.Fatalf("ReleasedArches too short: %v", released)
 	}
 	for _, a := range released {

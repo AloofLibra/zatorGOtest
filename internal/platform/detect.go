@@ -32,25 +32,21 @@ const (
 type Arch string
 
 const (
-	ArchARM      Arch = "arm"
-	ArchARM64    Arch = "arm64"
-	ArchMIPS     Arch = "mips"
-	ArchMIPS64   Arch = "mips64"
-	ArchMIPSEL   Arch = "mipsel"
-	ArchMIPSEL64 Arch = "mipsel64"
-	ArchPPC      Arch = "ppc"
-	ArchX86      Arch = "x86"
-	ArchX86_64   Arch = "x86_64"
-	ArchRISCV64  Arch = "riscv64"
-	ArchLexra    Arch = "lexra"
-	ArchUnknown  Arch = ""
+	ArchARM     Arch = "arm"
+	ArchARM64   Arch = "arm64"
+	ArchMIPS    Arch = "mips"
+	ArchMIPSEL  Arch = "mipsel"
+	ArchX86     Arch = "x86"
+	ArchX86_64  Arch = "x86_64"
+	ArchRISCV64 Arch = "riscv64"
+	ArchLexra   Arch = "lexra"
+	ArchUnknown Arch = ""
 )
 
 // AllArches возвращает все известные архитектуры платформы (включая Lexra).
 func AllArches() []Arch {
 	return []Arch{
-		ArchARM, ArchARM64, ArchMIPS, ArchMIPS64, ArchMIPSEL, ArchMIPSEL64,
-		ArchPPC, ArchX86, ArchX86_64, ArchRISCV64, ArchLexra,
+		ArchARM, ArchARM64, ArchMIPS, ArchMIPSEL, ArchX86, ArchX86_64, ArchRISCV64, ArchLexra,
 	}
 }
 
@@ -58,8 +54,7 @@ func AllArches() []Arch {
 // Lexra отдельного Go-таргета не имеет (см. ReleaseArch).
 func ReleasedArches() []Arch {
 	return []Arch{
-		ArchARM, ArchARM64, ArchMIPS, ArchMIPS64, ArchMIPSEL, ArchMIPSEL64,
-		ArchPPC, ArchX86, ArchX86_64, ArchRISCV64,
+		ArchARM, ArchARM64, ArchMIPS, ArchMIPSEL, ArchX86, ArchX86_64, ArchRISCV64,
 	}
 }
 
@@ -146,12 +141,6 @@ func ArchFromGOARCH(goarch string) Arch {
 		return ArchMIPS
 	case "mipsle":
 		return ArchMIPSEL
-	case "mips64":
-		return ArchMIPS64
-	case "mips64le":
-		return ArchMIPSEL64
-	case "ppc64", "ppc64le", "ppc":
-		return ArchPPC
 	case "386":
 		return ArchX86
 	case "amd64":

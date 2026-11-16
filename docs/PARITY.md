@@ -37,7 +37,7 @@
 
 Проверка зависимостей ARM64 CI-артефакта (`go version -m`, Go 1.22.12): в бинарник вошли модули `x/crypto`, `x/sys`, `x/term`; исходники не импортируют QUIC/HTTP3/Brotli-библиотеки (`go mod why` подтверждает, что `quic-go` и Brotli не требуются). Эти библиотеки не являются кандидатом на сокращение размера; измерение вклада embedded assets остаётся открытым.
 
-Для сборки проверены все 10 целей `scripts/crossbuild.sh` (arm, arm64, mips, mips64, mipsel, mipsel64, ppc, 386, amd64, riscv64); бинарники создавались во временном каталоге Windows-хоста. Это подтверждает компиляцию, но запуск на MIPS/ARM и размер runtime-памяти там не проверены.
+`scripts/crossbuild.sh` собирает семь поддерживаемых целей (arm, arm64, mips, mipsel, 386, amd64, riscv64); бинарники создавались во временном каталоге Windows-хоста. MIPS64, MIPSel64 и PPC64 исключены из официальной поддержки. Это подтверждает компиляцию, но запуск на MIPS/ARM и размер runtime-памяти там не проверены.
 
 ## Bootstrap / лаунчер
 
@@ -50,7 +50,7 @@
 | `zator webui` + URL/token | done | `cmd/zator`, `internal/webapi` |
 | `zator update` / self-update tar | done | `internal/deploy` |
 | Offline bundle (`Z2R_OFFLINE`, vendor/) | done | `internal/deploy` |
-| Cross-build arm/arm64/mips*/ppc/x86/x86_64 | done | `scripts/crossbuild.sh`, CI |
+| Cross-build arm/arm64/mips*/x86/x86_64/riscv64 | done | `scripts/crossbuild.sh`, CI |
 
 ## Web UI / API (контракт CGI)
 

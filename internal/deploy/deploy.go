@@ -250,10 +250,6 @@ func New(p paths.Paths) *Updater {
 		snifferArch = "386"
 	case platform.ArchMIPSEL:
 		snifferArch = "mipsle"
-	case platform.ArchMIPSEL64:
-		snifferArch = "mips64le"
-	case platform.ArchPPC:
-		snifferArch = "ppc64"
 	}
 	return &Updater{
 		Paths:     p,

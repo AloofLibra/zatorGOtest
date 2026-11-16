@@ -47,10 +47,7 @@ jobs:
           arm arm-linux-musleabihf
           arm64 aarch64-linux-musl
           mips mips-linux-musl
-          mips64 mips64-linux-musl
           mipsle mipsel-linux-musl
-          mips64le mips64el-linux-musl
-          ppc64 powerpc64-linux-musl
           386 x86-linux-musl
           amd64 x86_64-linux-musl
           riscv64 riscv64-linux-musl
@@ -77,17 +74,9 @@ jobs:
           - goarch: mips
             gomips: softfloat
             name: mips
-          - goarch: mips64
-            gomips: softfloat
-            name: mips64
           - goarch: mipsle
             gomips: softfloat
             name: mipsel
-          - goarch: mips64le
-            gomips: softfloat
-            name: mipsel64
-          - goarch: ppc64
-            name: ppc
           - goarch: "386"
             name: x86
           - goarch: amd64

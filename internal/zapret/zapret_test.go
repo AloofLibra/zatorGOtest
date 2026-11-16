@@ -79,17 +79,14 @@ func fastClient() *fetch.Client {
 
 func TestResolveArch(t *testing.T) {
 	cases := map[platform.Arch]string{
-		platform.ArchARM:      "linux-arm",
-		platform.ArchARM64:    "linux-arm64",
-		platform.ArchMIPS:     "linux-mips",
-		platform.ArchMIPSEL:   "linux-mipsel",
-		platform.ArchMIPS64:   "linux-mips64",
-		platform.ArchMIPSEL64: "linux-mipsel64",
-		platform.ArchPPC:      "linux-ppc",
-		platform.ArchX86:      "linux-x86",
-		platform.ArchX86_64:   "linux-x86_64",
-		platform.ArchRISCV64:  "linux-riscv64",
-		platform.ArchLexra:    "linux-lexra",
+		platform.ArchARM:     "linux-arm",
+		platform.ArchARM64:   "linux-arm64",
+		platform.ArchMIPS:    "linux-mips",
+		platform.ArchMIPSEL:  "linux-mipsel",
+		platform.ArchX86:     "linux-x86",
+		platform.ArchX86_64:  "linux-x86_64",
+		platform.ArchRISCV64: "linux-riscv64",
+		platform.ArchLexra:   "linux-lexra",
 	}
 	for a, want := range cases {
 		got, err := ResolveArch(a)
@@ -106,8 +103,10 @@ func TestResolveArch(t *testing.T) {
 	if _, err := ResolveArch(platform.ArchUnknown); err == nil {
 		t.Error("для неизвестной архитектуры ожидалась ошибка")
 	}
-	if d, _ := ArchDirs(platform.ArchMIPSEL64); len(d) != 2 || d[1] != "linux-mipsel" {
-		t.Errorf("запасной вариант mipsel64: %v", d)
+	for _, unsupported := range []platform.Arch{"mips64", "mipsel64", "ppc"} {
+		if _, err := ArchDirs(unsupported); err == nil {
+			t.Errorf("для неподдерживаемой архитектуры %s ожидалась ошибка", unsupported)
+		}
 	}
 }
 

@@ -110,13 +110,13 @@ func binaryAssetName() string {
 		case "riscv64":
 			arch = platform.ArchRISCV64
 		default:
-			arch = platform.Arch(runtime.GOARCH)
+			return ""
 		}
 	}
 	if name := platform.BinaryAssetName(arch); name != "" {
 		return name
 	}
-	return "zator-linux-" + string(platform.ReleaseArch(arch))
+	return ""
 }
 
 // FindGitHubBinaryURL ищет URL zator-linux-<arch> в latest-релизе.
@@ -126,6 +126,10 @@ func (u *Updater) FindGitHubBinaryURL(ctx context.Context) (tag, url string, siz
 		return "", "", 0, "", ErrOffline
 	}
 	owner, repo := ReleaseOwner(), ReleaseRepo()
+	want := binaryAssetName()
+	if want == "" {
+		return "", "", 0, "", fmt.Errorf("deploy: неподдерживаемая архитектура %q", runtime.GOARCH)
+	}
 	api := strings.TrimRight(GitHubAPIBase, "/") + "/repos/" + owner + "/" + repo + "/releases/latest"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api, nil)
 	if err != nil {
@@ -154,7 +158,6 @@ func (u *Updater) FindGitHubBinaryURL(ctx context.Context) (tag, url string, siz
 		return "", "", 0, "", err
 	}
 	tag = strings.TrimSpace(rel.TagName)
-	want := binaryAssetName()
 	var sumsURL string
 	for _, a := range rel.Assets {
 		switch {
@@ -269,6 +272,9 @@ func (u *Updater) applyGitHubBinary(ctx context.Context, expectedVersion string)
 // устройства, из vendor/ офлайн-бандла. SHA-256 берётся из соседнего .sha256.
 func (u *Updater) ApplyBundleBinary(ctx context.Context, b Bundle) (*ApplyResult, error) {
 	name := binaryAssetName()
+	if name == "" {
+		return nil, fmt.Errorf("deploy: неподдерживаемая архитектура %q", runtime.GOARCH)
+	}
 	source := filepath.Join(b.VendorDir, name)
 	data, err := os.ReadFile(source)
 	if err != nil {

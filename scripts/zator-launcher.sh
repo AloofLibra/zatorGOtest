@@ -23,12 +23,8 @@ detect_arch() {
     i386|i686|x86) echo x86 ;;
     aarch64|arm64) echo arm64 ;;
     armv7*|armv6*|arm) echo arm ;;
-    mips64el|mips64le) echo mipsel64 ;;
-    mips64) echo mips64 ;;
     mipsel|mipsle) echo mipsel ;;
     mips) echo mips ;;
-    ppc|ppc32) echo ppc ;;
-    ppc64|ppc64le) echo ppc ;;
     riscv64) echo riscv64 ;;
     *)
       if grep -qiE 'lexra|rlx' /proc/cpuinfo 2>/dev/null; then

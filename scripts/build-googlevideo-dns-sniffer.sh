@@ -8,7 +8,6 @@ case "$ARCH" in
   aarch64) ARCH=arm64 ;;
   armv6l|armv7l|armv8l) ARCH=arm ;;
   mipsel*) ARCH=mipsle ;;
-  mips64el*) ARCH=mips64le ;;
 esac
 OUT=${1:-"$ROOT/assets/tools/bin/googlevideo-dns-sniffer-$ARCH"}
 CC=${CC:-cc}

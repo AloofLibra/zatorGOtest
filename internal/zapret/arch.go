@@ -8,8 +8,6 @@ import (
 
 // ArchDirs возвращает имена каталогов binaries/ в архиве zapret2 для
 // архитектуры платформы в порядке предпочтения (первый — основной).
-// Для 64-битных MIPS запасным вариантом служит 32-битный (o32) бинарник,
-// который ядро mips64 способно исполнять.
 func ArchDirs(a platform.Arch) ([]string, error) {
 	switch a {
 	case platform.ArchARM:
@@ -20,12 +18,6 @@ func ArchDirs(a platform.Arch) ([]string, error) {
 		return []string{"linux-mips"}, nil
 	case platform.ArchMIPSEL:
 		return []string{"linux-mipsel"}, nil
-	case platform.ArchMIPS64:
-		return []string{"linux-mips64", "linux-mips"}, nil
-	case platform.ArchMIPSEL64:
-		return []string{"linux-mipsel64", "linux-mipsel"}, nil
-	case platform.ArchPPC:
-		return []string{"linux-ppc"}, nil
 	case platform.ArchX86:
 		return []string{"linux-x86"}, nil
 	case platform.ArchX86_64:

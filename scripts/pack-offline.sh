@@ -10,12 +10,9 @@ case "$TARGET_ARCH" in
   armv7*|armv6*|arm) TARGET_ARCH=arm ;;
   x86_64|amd64) TARGET_ARCH=x86_64 ;;
   i386|i686|x86) TARGET_ARCH=x86 ;;
-  mips64el|mips64le|mipsel64) TARGET_ARCH=mipsel64 ;;
-  mips64) TARGET_ARCH=mips64 ;;
   mipsel|mipsle) TARGET_ARCH=mipsel ;;
   lexra|rlx) TARGET_ARCH=mipsel ;;
   mips) TARGET_ARCH=mips ;;
-  ppc|ppc32|ppc64|ppc64le) TARGET_ARCH=ppc ;;
   riscv64) TARGET_ARCH=riscv64 ;;
   *) echo "unknown TARGET_ARCH: $TARGET_ARCH" >&2; exit 1 ;;
 esac
@@ -30,10 +27,7 @@ case "$TARGET_ARCH" in
   arm) SNIFFER_ARCH=arm; SNIFFER_TARGET=arm-linux-musleabihf ;;
   arm64) SNIFFER_ARCH=arm64; SNIFFER_TARGET=aarch64-linux-musl ;;
   mips) SNIFFER_ARCH=mips; SNIFFER_TARGET=mips-linux-musl ;;
-  mips64) SNIFFER_ARCH=mips64; SNIFFER_TARGET=mips64-linux-musl ;;
   mipsel) SNIFFER_ARCH=mipsle; SNIFFER_TARGET=mipsel-linux-musl ;;
-  mipsel64) SNIFFER_ARCH=mips64le; SNIFFER_TARGET=mips64el-linux-musl ;;
-  ppc) SNIFFER_ARCH=ppc64; SNIFFER_TARGET=powerpc64-linux-musl ;;
   x86) SNIFFER_ARCH=386; SNIFFER_TARGET=x86-linux-musl ;;
   x86_64) SNIFFER_ARCH=amd64; SNIFFER_TARGET=x86_64-linux-musl ;;
   riscv64) SNIFFER_ARCH=riscv64; SNIFFER_TARGET=riscv64-linux-musl ;;

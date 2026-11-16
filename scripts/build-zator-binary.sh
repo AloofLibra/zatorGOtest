@@ -6,6 +6,15 @@ OUTPUT="${1:?usage: build-zator-binary.sh OUTPUT [VERSION]}"
 VER="${2:-${VER:-dev}}"
 LDFLAGS="-s -w -X github.com/AloofLibra/zator.versionOverride=${VER}"
 
+if [[ "${GOOS:-linux}" == "linux" ]]; then
+  case "${GOARCH:-}" in
+    mips64|mips64le|ppc|ppc64|ppc64le)
+      echo "unsupported release architecture: linux/${GOARCH}" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 mkdir -p "$(dirname "$OUTPUT")"
 if [[ "${ZATOR_GARBLE:-0}" == "1" ]]; then
   command -v garble >/dev/null || { echo "garble is required when ZATOR_GARBLE=1" >&2; exit 1; }
@@ -23,13 +32,6 @@ if [[ "${GOOS:-linux}" != "linux" ]]; then
   echo "UPX packing skipped: only Linux release binaries are configured" >&2
   exit 0
 fi
-case "${GOARCH:-}" in
-  mips64|mips64le)
-    echo "UPX packing skipped: UPX 5.3.0 does not support linux/${GOARCH}; keeping the Garble binary" >&2
-    exit 0
-    ;;
-esac
-
 PACKED="$(mktemp "${OUTPUT}.upx.XXXXXX")"
 trap 'rm -f "$PACKED"' EXIT
 cp "$OUTPUT" "$PACKED"
