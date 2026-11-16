@@ -24,8 +24,7 @@ for spec in "${targets[@]}"; do
   IFS=':' read -r name goarch goarm gomips <<<"$spec"
   echo "==> linux/$name ($goarch)"
   env GOOS=linux GOARCH="$goarch" GOARM="${goarm:-}" GOMIPS="${gomips:-}" \
-    go build -trimpath -ldflags "-s -w -X github.com/AloofLibra/zator.versionOverride=${VER}" \
-    -o "$OUT/zator-linux-${name}" "$ROOT/cmd/zator"
+    VER="$VER" bash "$ROOT/scripts/build-zator-binary.sh" "$OUT/zator-linux-${name}"
 done
 
 cp "$ROOT/scripts/zator-launcher.sh" "$OUT/zator-launcher.sh"

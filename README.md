@@ -163,6 +163,8 @@ Blockcheck2 временно останавливает zapret2, поэтому 
 
 Соберите bundle под архитектуру целевого роутера (например, `TARGET_ARCH=arm64 bash scripts/pack-offline.sh`). Bundle содержит отдельные `zator-app.tar.gz` и `zator-config.tar.gz`, а также бинарники и checksums в `vendor/`. Запустите `sh zator-launcher.sh` из каталога bundle, чтобы выполнить установку без GitHub. Для обновления используйте `Z2R_OFFLINE=1 ZATOR_BUNDLE_DIR=/путь/к/bundle zator update -mode full`. Необходимые системные пакеты и модули ядра должны быть доступны локально или уже установлены; bundle их не упаковывает.
 
+Release-бинарники собираются Garble `-tiny` и упаковываются UPX `--best --lzma`; для `linux/mips64` и `linux/mips64le` UPX пропускается, так как формат не поддерживается. Для такой же упаковки локального offline-bundle установите Garble v0.18.0 и UPX v5.3.0 и запустите `ZATOR_GARBLE=1 ZATOR_UPX=1 TARGET_ARCH=arm64 bash scripts/pack-offline.sh`. Без этих переменных локальная кросс-сборка остаётся обычной.
+
 ---
 
 ## Раскладка на устройстве

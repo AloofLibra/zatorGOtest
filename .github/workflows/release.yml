@@ -19,11 +19,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22.x"
+          go-version: "1.27.x"
       - name: Test
-        run: go test ./...
+        run: go test -mod=mod ./...
       - name: Vet
-        run: go vet ./...
+        run: go vet -mod=mod ./...
 
   build-sniffers:
     runs-on: ubuntu-latest
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22.x"
+          go-version: "1.27.x"
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.13.0
@@ -56,7 +56,7 @@ jobs:
           riscv64 riscv64-linux-musl
           TARGETS
       - name: Verify embedded sniffer install
-        run: go test -mod=readonly ./internal/app -run '^TestInstallEmbeddedGooglevideoSniffer$'
+        run: go test -mod=mod ./internal/app -run '^TestInstallEmbeddedGooglevideoSniffer$'
       - uses: actions/upload-artifact@v4
         with:
           name: googlevideo-sniffers
@@ -98,7 +98,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22.x"
+          go-version: "1.27.x"
+      - name: Install Garble and UPX
+        env:
+          GARBLE_VERSION: v0.18.0
+          UPX_VERSION: 5.3.0
+        run: |
+          set -eu
+          go install "mvdan.cc/garble@${GARBLE_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          asset="upx-${UPX_VERSION}-amd64_linux.tar.xz"
+          curl -fsSL "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${asset}" -o "$RUNNER_TEMP/${asset}"
+          echo "79cea8a50b6fa102d10c7b79a419cd77dead3cc2d78661de2dc5e5815dc505c1  $RUNNER_TEMP/${asset}" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/upx"
+          tar -xJf "$RUNNER_TEMP/${asset}" --strip-components=1 -C "$RUNNER_TEMP/upx"
+          echo "$RUNNER_TEMP/upx" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@v4
         with:
           name: googlevideo-sniffers
@@ -120,8 +134,8 @@ jobs:
         run: |
           ver="${RELEASE_TAG:-${GITHUB_REF_NAME:-dev}}"
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w -X github.com/AloofLibra/zator.versionOverride=${ver}" \
-            -o "dist/zator-linux-${{ matrix.name }}" ./cmd/zator
+          ZATOR_GARBLE=1 ZATOR_UPX=1 VER="$ver" bash scripts/build-zator-binary.sh \
+            "dist/zator-linux-${{ matrix.name }}"
           sha256sum "dist/zator-linux-${{ matrix.name }}" | tee "dist/zator-linux-${{ matrix.name }}.sha256"
       - uses: actions/upload-artifact@v4
         with:
