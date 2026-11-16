@@ -67,12 +67,6 @@ func cmdBlockcheck(args []string, stdout, stderr io.Writer) (exitCode int) {
 			fmt.Fprintf(stderr, "не удалось безопасно остановить zapret2: %v\n", err)
 			return 1
 		}
-		if err := waitForNfqws2(stopCtx, false); err != nil {
-			cancel()
-			fmt.Fprintln(stderr, "zapret2 всё ещё запущен после stop; Blockcheck2 не будет запущен")
-			return 1
-		}
-		cancel()
 		defer func() {
 			restartCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
@@ -86,6 +80,12 @@ func cmdBlockcheck(args []string, stdout, stderr io.Writer) (exitCode int) {
 				exitCode = 1
 			}
 		}()
+		if err := waitForNfqws2(stopCtx, false); err != nil {
+			cancel()
+			fmt.Fprintln(stderr, "zapret2 всё ещё запущен после stop; Blockcheck2 не будет запущен")
+			return 1
+		}
+		cancel()
 	}
 	logDir := filepath.Join(os.TempDir(), "zapret2", "cache", "blockcheck2")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
