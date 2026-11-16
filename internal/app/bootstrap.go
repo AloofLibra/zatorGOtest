@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
@@ -219,19 +221,38 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 
 	zapretUnits := []service.Unit{service.UnitZapret2, service.UnitValidator}
 	if prepErr == nil {
+		upstreamZapretInit := filepath.Join(a.Paths.ZapretRoot, "init.d", "openwrt", "zapret2")
+		systemZapretInit := filepath.Join("/etc/init.d", string(service.UnitZapret2))
+		var registerZapretErr error
+		if a.Platform.Kind == platform.KindOpenWRT && a.Platform.InitSystem == platform.InitProcd {
+			registerZapretErr = registerOpenWrtZapretInit(upstreamZapretInit, systemZapretInit)
+			if registerZapretErr != nil {
+				soft = append(soft, "register upstream OpenWrt zapret2 init: "+registerZapretErr.Error())
+			} else {
+				if err := cleanupOpenWrtInitLinks(systemZapretInit, "/etc/rc.d"); err != nil {
+					soft = append(soft, "cleanup OpenWrt zapret2 init links: "+err.Error())
+				}
+				if err := enableOpenWrtZapretInit(ctx, systemZapretInit); err != nil {
+					soft = append(soft, "enable upstream OpenWrt zapret2 init: "+err.Error())
+				}
+			}
+		}
 		for _, u := range zapretUnits {
-			// На OpenWrt upstream procd init владеет nft queue rules и custom.d.
-			// Оставляем его на месте и используем Go только для подготовки config/hooks.
-			preserveOpenWrtInit := u == service.UnitZapret2 && a.Platform.Kind == platform.KindOpenWRT && a.Platform.InitSystem == platform.InitProcd
-			if preserveOpenWrtInit {
-				initPath := filepath.Join(a.Paths.ZapretRoot, "init.d", "openwrt", "zapret2")
-				if _, err := os.Stat(initPath); err != nil {
-					soft = append(soft, "upstream OpenWrt zapret2 init missing: "+err.Error())
+			if u == service.UnitZapret2 && registerZapretErr != nil {
+				continue
+			}
+			// Сохраняем upstream init только если он действительно подключён в
+			// /etc/init.d; одного исходного файла в каталоге zapret2 недостаточно.
+			preserveOpenWrtInit := u == service.UnitZapret2 && preserveOpenWrtZapretInit(
+				a.Platform,
+				upstreamZapretInit,
+				systemZapretInit,
+			)
+			if !preserveOpenWrtInit {
+				if err := mgr.Install(ctx, u); err != nil {
+					soft = append(soft, fmt.Sprintf("install %s: %v", u, err))
 					continue
 				}
-			} else if err := mgr.Install(ctx, u); err != nil {
-				soft = append(soft, fmt.Sprintf("install %s: %v", u, err))
-				continue
 			}
 			if err := mgr.Restart(ctx, u); err != nil {
 				soft = append(soft, fmt.Sprintf("start %s: %v", u, err))
@@ -282,6 +303,145 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 	}
 	a.ClearServiceWarnings()
 	return nil
+}
+
+func preserveOpenWrtZapretInit(pl platform.Platform, upstreamPath, systemPath string) bool {
+	if pl.Kind != platform.KindOpenWRT || pl.InitSystem != platform.InitProcd {
+		return false
+	}
+	for _, path := range []string{upstreamPath, systemPath} {
+		st, err := os.Stat(path)
+		if err != nil || !st.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
+}
+
+func enableOpenWrtZapretInit(ctx context.Context, systemPath string) error {
+	out, err := service.ExecRunner().Run(ctx, systemPath, "enable")
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func cleanupOpenWrtInitLinks(systemPath, rcDir string) error {
+	data, err := os.ReadFile(systemPath)
+	if err != nil {
+		return err
+	}
+	start, stop := "", ""
+	for _, line := range strings.Split(string(data), "\n") {
+		t := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(t, "START="):
+			start = strings.TrimPrefix(t, "START=")
+		case strings.HasPrefix(t, "STOP="):
+			stop = strings.TrimPrefix(t, "STOP=")
+		}
+	}
+	if stop == "" {
+		stop = "10" // rc.common default when an init script omits STOP.
+	}
+	if !validInitPriority(start) || !validInitPriority(stop) {
+		return nil
+	}
+	startNum, _ := strconv.Atoi(start)
+	stopNum, _ := strconv.Atoi(stop)
+	expected := map[string]bool{
+		"S" + fmt.Sprintf("%02d", startNum) + "zapret2": true,
+		"K" + fmt.Sprintf("%02d", stopNum) + "zapret2":  true,
+	}
+	entries, err := os.ReadDir(rcDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if expected[name] {
+			continue
+		}
+		if !(strings.HasSuffix(name, "zapret2") && (strings.HasPrefix(name, "S") || strings.HasPrefix(name, "K"))) {
+			continue
+		}
+		linkPath := filepath.Join(rcDir, name)
+		if entry.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		link, err := os.Readlink(linkPath)
+		if err != nil {
+			return err
+		}
+		if filepath.Clean(filepath.Join(rcDir, link)) == filepath.Clean(systemPath) {
+			if err := os.Remove(linkPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validInitPriority(value string) bool {
+	if value == "" || len(value) > 2 {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func registerOpenWrtZapretInit(upstreamPath, systemPath string) error {
+	if !regularFile(upstreamPath) {
+		return fmt.Errorf("upstream init not found at %s", upstreamPath)
+	}
+	info, err := os.Lstat(systemPath)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, readErr := os.Readlink(systemPath)
+			if readErr != nil {
+				return readErr
+			}
+			if link == upstreamPath {
+				return nil
+			}
+			if regularFile(systemPath) {
+				return nil // preserve a locally managed symlink
+			}
+			return fmt.Errorf("existing init symlink is broken: %s", systemPath)
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		content, readErr := os.ReadFile(systemPath)
+		if readErr != nil {
+			return readErr
+		}
+		if !strings.Contains(string(content), "(создано zator)") {
+			return nil // preserve a locally managed init script
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	tmp := systemPath + ".new"
+	_ = os.Remove(tmp)
+	if err := os.Symlink(upstreamPath, tmp); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, systemPath); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func regularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // SoftServiceError — zapret/runtime предупреждения при живом Web UI.

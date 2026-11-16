@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -314,8 +315,8 @@ func (c *Config) SetRSTGuard(on bool) error {
 	return fmt.Errorf("%w: rst_guard lines", ErrNotFound)
 }
 
-// EnsureLuaInit вставляет --lua-init=@path в NFQWS2_OPT, если строки ещё нет.
-// Возвращает true, если конфиг изменился.
+// EnsureLuaInit оставляет ровно один lua-init с таким именем файла и
+// приводит его путь к absPath. Возвращает true, если конфиг изменился.
 func (c *Config) EnsureLuaInit(absPath string) (bool, error) {
 	absPath = strings.TrimSpace(absPath)
 	if absPath == "" {
@@ -326,22 +327,42 @@ func (c *Config) EnsureLuaInit(absPath string) (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("%w: %s", ErrNotFound, OptVar)
 	}
-	for _, ln := range strings.Split(opt, "\n") {
-		if strings.TrimSpace(ln) == needle {
-			return false, nil
-		}
-	}
 	lines := strings.Split(opt, "\n")
-	at := 0
-	for i, ln := range lines {
+	out := make([]string, 0, len(lines)+1)
+	base := path.Base(absPath)
+	found, changed := false, false
+	for _, ln := range lines {
 		t := strings.TrimSpace(ln)
-		if strings.HasPrefix(t, "--lua-init=") {
-			at = i + 1
+		if strings.HasPrefix(t, "--lua-init=@") && path.Base(strings.TrimPrefix(t, "--lua-init=@")) == base {
+			if found {
+				changed = true
+				continue
+			}
+			found = true
+			if t != needle {
+				changed = true
+				out = append(out, needle)
+			} else {
+				out = append(out, ln)
+			}
+			continue
 		}
+		out = append(out, ln)
 	}
-	out := append([]string{}, lines[:at]...)
-	out = append(out, needle)
-	out = append(out, lines[at:]...)
+	if !found {
+		at := 0
+		for i, ln := range out {
+			t := strings.TrimSpace(ln)
+			if strings.HasPrefix(t, "--lua-init=") {
+				at = i + 1
+			}
+		}
+		out = append(out[:at], append([]string{needle}, out[at:]...)...)
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
 	if err := c.SetNFQWS2Opt(strings.Join(out, "\n")); err != nil {
 		return false, err
 	}

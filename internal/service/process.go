@@ -48,16 +48,20 @@ func MatchWebUI(comm string, cmdline []string) bool {
 
 // MatchValidator выбирает strategy-validator.sh --daemon.
 func MatchValidator(comm string, cmdline []string) bool {
-	base := exeBase(comm)
-	if strings.Contains(base, "strategy-validator") {
+	if isValidatorName(comm) {
 		return true
 	}
 	for _, a := range cmdline {
-		if strings.Contains(a, "strategy-validator") {
+		if isValidatorName(a) {
 			return true
 		}
 	}
 	return false
+}
+
+func isValidatorName(s string) bool {
+	base := exeBase(s)
+	return base == "strategy-validator" || base == "strategy-validator.sh"
 }
 
 func exeBase(p string) string {

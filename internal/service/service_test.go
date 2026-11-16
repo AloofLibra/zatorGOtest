@@ -755,6 +755,7 @@ func TestMatchers(t *testing.T) {
 	}
 	if !MatchValidator("strategy-validator.sh", nil) ||
 		!MatchValidator("sh", []string{"/bin/sh", "/opt/zator/lua/strategy-validator.sh", "--daemon"}) ||
+		MatchValidator("nfqws2", []string{"/opt/zapret2/nfq2/nfqws2", "--comment=strategy-validator.lua"}) ||
 		MatchValidator("bash", []string{"bash", "-c", "echo"}) {
 		t.Error("MatchValidator")
 	}
