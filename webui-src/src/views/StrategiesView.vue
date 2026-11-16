@@ -23,7 +23,9 @@ const draft = ref<DraftMap>({})
 const fakeMode = ref<Record<string, string>>({})
 const tlsProfile = ref<Record<string, string>>({})
 const profileSni = ref<Record<string, string>>({})
-const cloneSize = ref<Record<string, string>>({})
+const customSni = ref<Record<string, string>>({})
+const globalCloneSize = ref('')
+const sniPresets = ['www.google.com', 'www.youtube.com', 'www.googlevideo.com', 'google.com']
 const overrideDirty = ref<Record<string, boolean>>({})
 
 function draftText(profile: string): string {
@@ -74,9 +76,11 @@ function syncOverridesFromSettings(force = false) {
     if (!force && overrideDirty.value[id]) continue
     fakeMode.value[id] = t.profile_modes?.[id] || 'classic'
     tlsProfile.value[id] = t.profile_blobs?.[id] ?? ''
-    profileSni.value[id] = t.profile_snis?.[id] ?? ''
-    cloneSize.value[id] = t.profile_sizes?.[id] || ''
+    const sni = t.profile_snis?.[id] ?? ''
+    profileSni.value[id] = !sni || sniPresets.includes(sni) ? sni : '__custom__'
+    customSni.value[id] = sniPresets.includes(sni) ? '' : sni
   }
+  globalCloneSize.value = t.global_clone_size || ''
 }
 
 watch(locks, (list) => syncDraftFromLocks(list, false), { immediate: true, deep: true })
@@ -262,12 +266,11 @@ async function saveTlsProfile(profile: string) {
   }
 }
 
-async function saveCloneSize(profile: string) {
+async function saveCloneSize() {
   try {
-    await withBusy(`clone-${profile}`, async () => {
-      const res = await applySetting.clone_size(profile, cloneSize.value[profile] || '')
-      showToast(`Лимит клона профиля ${profile}.${restartSuffix(res)}`)
-      overrideDirty.value[profile] = false
+    await withBusy('clone-size-global', async () => {
+      const res = await applySetting.clone_size_global(globalCloneSize.value || '')
+      showToast(`Глобальный лимит клона сохранён.${restartSuffix(res)}`)
       await refreshTlsBlobSettings()
     })
   } catch (e) {
@@ -278,7 +281,8 @@ async function saveCloneSize(profile: string) {
 async function saveSniOverride(profile: string) {
   try {
     await withBusy(`sni-${profile}`, async () => {
-      await applySetting.sni_override(profile, profileSni.value[profile] || '')
+      const choice = profileSni.value[profile] || ''
+      await applySetting.sni_override(profile, choice === '__custom__' ? (customSni.value[profile] || '') : choice)
       showToast(`SNI клона профиля ${profile} сохранён`)
       overrideDirty.value[profile] = false
       await refreshTlsBlobSettings()
@@ -375,14 +379,20 @@ async function saveSniOverride(profile: string) {
           </div>
           <label v-if="fakeMode[String(p.profile)] === 'clone'" class="field">
             <span>SNI для клона</span>
-            <input v-model.trim="profileSni[String(p.profile)]" :disabled="busyActive" placeholder="www.google.com"
+            <select v-model="profileSni[String(p.profile)]" :disabled="busyActive"
+              @change="markOverrideDirty(String(p.profile))">
+              <option value="">www.google.com (по умолчанию)</option>
+              <option v-for="sni in sniPresets" :key="sni" :value="sni">{{ sni }}</option>
+              <option value="__custom__">Указать свой…</option>
+            </select>
+            <input v-if="profileSni[String(p.profile)] === '__custom__'" v-model.trim="customSni[String(p.profile)]" :disabled="busyActive" placeholder="example.com"
               @input="markOverrideDirty(String(p.profile))">
           </label>
           <div v-if="fakeMode[String(p.profile)] === 'clone'" class="actions" style="align-items:end">
             <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `sni-${p.profile}` }"
               @click="saveSniOverride(String(p.profile))">SNI</button>
           </div>
-          <label class="field">
+          <label v-if="fakeMode[String(p.profile)] !== 'clone'" class="field">
             <span>TLS blob</span>
             <select v-model="tlsProfile[String(p.profile)]" :disabled="busyActive"
               @change="markOverrideDirty(String(p.profile))">
@@ -391,22 +401,20 @@ async function saveSniOverride(profile: string) {
               <option v-for="b in (tlsBlobSettings?.available_blobs || [])" :key="b" :value="b">{{ b }}</option>
             </select>
           </label>
-          <div class="actions" style="align-items:end">
+          <div v-if="fakeMode[String(p.profile)] !== 'clone'" class="actions" style="align-items:end">
             <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `tlsprof-${p.profile}` }"
               @click="saveTlsProfile(String(p.profile))">TLS</button>
-          </div>
-          <label v-if="fakeMode[String(p.profile)] === 'clone'" class="field">
-            <span>Лимит клона</span>
-            <input v-model="cloneSize[String(p.profile)]" :disabled="busyActive" placeholder="1200"
-              @input="markOverrideDirty(String(p.profile))">
-          </label>
-          <div v-if="fakeMode[String(p.profile)] === 'clone'" class="actions" style="align-items:end">
-            <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `clone-${p.profile}` }"
-              @click="saveCloneSize(String(p.profile))">Лимит</button>
           </div>
           </div>
         </details>
       </article>
     </div>
+    <section v-if="locks.some((p) => canOverride(p))" class="panel strategy-global-setting">
+      <label class="field">
+        <span>Глобальный лимит клона (64–1200 байт)</span>
+        <input v-model="globalCloneSize" type="number" min="64" max="1200" placeholder="1200" :disabled="busyActive">
+      </label>
+      <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'clone-size-global' }" @click="saveCloneSize">Сохранить</button>
+    </section>
   </section>
 </template>

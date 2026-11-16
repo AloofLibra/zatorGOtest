@@ -31,8 +31,12 @@ const themes: { id: ThemeMode; label: string }[] = [
 const active = computed(() => String(route.name || 'status'))
 const title = computed(() => [...primaryTabs, ...extraTabs].find((tab) => tab.name === active.value)?.label || 'Обзор')
 const running = computed(() => Boolean(status.value?.zapret2_running))
-const releaseVersion = computed(() => updateCheckState.value === 'success' && updateCheckResult.value?.update_available
-  ? (updateCheckResult.value.release || versionInfo.value?.latest_release || '') : '')
+const releaseVersion = computed(() => {
+  if (updateCheckState.value !== 'success' || !updateCheckResult.value?.update_available) return ''
+  const next = updateCheckResult.value.release || versionInfo.value?.latest_release || ''
+  const current = versionInfo.value?.zator_version || ''
+  return next.replace(/^v/i, '').toLowerCase() !== current.replace(/^v/i, '').toLowerCase() ? next : ''
+})
 const healthOverall = computed(() => status.value?.health?.overall || 'unknown')
 const warnCount = computed(() => status.value?.service_warnings?.length || 0)
 const healthLabel = computed(() => ({

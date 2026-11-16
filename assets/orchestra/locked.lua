@@ -657,11 +657,11 @@ local Z2R_TLS_FAKE_LIMIT_MAX = 1200
 -- Рантайм-поле с порезанным фейк-блобом (по образцу Z2R_CLONE_FIELD).
 local Z2R_CAP_FIELD = "z2r_blob_cap"
 
--- Лимит клона профиля: clonesize.tsv[profile], нет строки = 1200.
+-- Глобальный лимит clonesize.tsv[0] имеет приоритет над legacy лимитами профилей.
 local function z2r_clone_limit_for(profile_key)
   -- Явный диагностический режим полного клона; обычные профили ограничены 1200.
   if tonumber(_G.Z2R_CLONE_MAX_SIZE) == 0 then return 0 end
-  local v = profile_key and CLONE_SIZES[tostring(profile_key)]
+  local v = CLONE_SIZES["0"]
   if type(v) == "number" and v >= 64 and v <= Z2R_TLS_FAKE_LIMIT_MAX then return v end
   return Z2R_TLS_FAKE_LIMIT_MAX
 end

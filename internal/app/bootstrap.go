@@ -45,7 +45,7 @@ func (a *App) InstallSelfBinary() error {
 	}
 	dst := filepath.Join(a.Paths.BinDir, "zator")
 	if sameFile(exe, dst) {
-		return nil
+		return a.EnsureZatorCommand()
 	}
 	if err := a.Paths.EnsureDirs(); err != nil {
 		return err
@@ -78,6 +78,29 @@ func (a *App) InstallSelfBinary() error {
 		}
 	}
 	_ = os.Chmod(dst, 0o755)
+	return a.EnsureZatorCommand()
+}
+
+// EnsureZatorCommand exposes the installed CLI through the standard system PATH.
+func (a *App) EnsureZatorCommand() error {
+	if runtime.GOOS == "windows" || !a.isRouterHost() {
+		return nil
+	}
+	link := "/usr/bin/zator"
+	target := filepath.Join(a.Paths.BinDir, "zator")
+	if resolved, err := filepath.EvalSymlinks(link); err == nil {
+		if resolved == target {
+			return nil
+		}
+		return fmt.Errorf("команда %s уже занята: %s", link, resolved)
+	} else if _, err := os.Lstat(link); err == nil {
+		return fmt.Errorf("команда %s уже существует", link)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Symlink(target, link); err != nil {
+		return fmt.Errorf("добавить zator в PATH через %s: %w", link, err)
+	}
 	return nil
 }
 

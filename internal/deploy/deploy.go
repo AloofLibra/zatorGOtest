@@ -334,7 +334,12 @@ func CompareLatest(cur Version, l *Latest, webUIInstalled bool) CheckResult {
 	if l == nil {
 		return r
 	}
+	// A release tag is immutable: matching installed and published versions
+	// must not be offered again just because build metadata has a different SHA.
+	sameRelease := knownVersion(cur.ZatorVersion) && strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(cur.ZatorVersion), "v"), strings.TrimPrefix(strings.TrimSpace(l.Release), "v"))
 	switch {
+	case sameRelease:
+		r.UpdateZator = false
 	case cur.ZatorSHA != "" && l.ZatorSHA != "":
 		r.UpdateZator = !strings.EqualFold(cur.ZatorSHA, l.ZatorSHA)
 	case knownVersion(cur.ZatorVersion):
@@ -345,6 +350,8 @@ func CompareLatest(cur Version, l *Latest, webUIInstalled bool) CheckResult {
 	}
 	if webUIInstalled {
 		switch {
+		case sameRelease:
+			r.UpdateWebUI = false
 		case cur.WebUISHA != "" && l.WebUISHA != "":
 			r.UpdateWebUI = !strings.EqualFold(cur.WebUISHA, l.WebUISHA)
 		case knownVersion(cur.WebUIVersion):

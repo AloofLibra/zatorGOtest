@@ -179,13 +179,14 @@ func (s *Server) tlsBlobGet(cfg *config.Config) (any, error) {
 		modes[k] = mode
 	}
 	return map[string]any{
-		"current_mode":    cfg.TLSBlobModeValue(),
-		"current_blob":    cfg.TLSBlobFile(),
-		"available_blobs": s.listFake(tlsBlobFileRe),
-		"profile_blobs":   blobs,
-		"profile_modes":   modes,
-		"profile_snis":    snis,
-		"profile_sizes":   sizes,
+		"current_mode":      cfg.TLSBlobModeValue(),
+		"current_blob":      cfg.TLSBlobFile(),
+		"available_blobs":   s.listFake(tlsBlobFileRe),
+		"profile_blobs":     blobs,
+		"profile_modes":     modes,
+		"profile_snis":      snis,
+		"profile_sizes":     sizes,
+		"global_clone_size": sizeMap["0"],
 	}, nil
 }
 

@@ -145,6 +145,8 @@ export const applySetting = {
     api<ApplyResult>('/api/settings', formBody({ setting: 'sni_override', profile, value })),
   clone_size: (profile: string, value: string) =>
     api<ApplyResult>('/api/settings', formBody({ setting: 'clone_size', profile, value })),
+  clone_size_global: (value: string) =>
+    api<ApplyResult>('/api/settings', formBody({ setting: 'clone_size_global', value })),
   wg_blob: (value: string, restart: boolean) =>
     api<ApplyResult>('/api/settings',
       formBody(restart ? { setting: 'wg_blob', value } : { setting: 'wg_blob', value, restart: '0' })),

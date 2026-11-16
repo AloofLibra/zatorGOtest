@@ -146,6 +146,7 @@ export interface TlsBlobSettings {
   profile_snis?: Record<string, string>
   // «профиль -> лимит клонов в байтах»: "" = без ограничения (граница ТСПУ 1200)
   profile_sizes?: Record<string, string>
+  global_clone_size?: string
 }
 
 export interface WgBlobSettings {

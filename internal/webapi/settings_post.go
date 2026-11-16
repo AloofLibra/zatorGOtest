@@ -30,6 +30,7 @@ func init() {
 		"fake_mode":         (*Server).postFakeMode,
 		"sni_override":      (*Server).postSNIOverride,
 		"clone_size":        (*Server).postCloneSize,
+		"clone_size_global": (*Server).postGlobalCloneSize,
 		"wg_blob":           (*Server).postWGBlob,
 		"wg_repeats":        (*Server).postWGRepeats,
 		"ports_add":         (*Server).postPortsAdd,
@@ -422,6 +423,23 @@ func (s *Server) postCloneSize(_ *http.Request, p params) (map[string]any, error
 		return nil, err
 	}
 	return map[string]any{"ok": true, "restarted": false, "restart_required": false}, nil
+}
+
+func (s *Server) postGlobalCloneSize(_ *http.Request, p params) (map[string]any, error) {
+	v := strings.TrimSpace(p.Get("value"))
+	if v == "" || v == "global" {
+		if err := s.store.ClearOverride(orchestra.OverrideCloneSize, "0"); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	if err := orchestra.OverrideCloneSize.ValidateValue(v); err != nil {
+		return nil, errf(http.StatusBadRequest, fmt.Sprintf("Некорректное значение: %s (допустимо %d..%d)", v, orchestra.CloneSizeMin, orchestra.CloneSizeMax))
+	}
+	if err := s.store.SetOverride(orchestra.OverrideCloneSize, "0", v); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
 }
 
 func (s *Server) postWGBlob(r *http.Request, p params) (map[string]any, error) {

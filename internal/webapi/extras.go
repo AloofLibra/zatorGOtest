@@ -253,6 +253,11 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		}
 	}
 	if installed > 0 && !upToDate {
+		if s.app != nil && mode != deploy.ModeConfig {
+			if err := s.app.EnsureZatorCommand(); err != nil {
+				out["command_path_warning"] = err.Error()
+			}
+		}
 		verifyOK := true
 		if s.app != nil && mode != deploy.ModeConfig {
 			if err := s.app.VerifyAfterUpdate(); err != nil {
