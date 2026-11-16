@@ -47,7 +47,7 @@
 | set-lock / clear-lock | done |
 | service start/stop/restart | done |
 | check (TLS 1.2/1.3) | done |
-| Profile 2 YouTube media check | partial: signed media ranges succeeded through `AWG_pers` (does not test WSSIZE); direct WAN Go media probe captured the local WSSIZE SYN transformation but TLS timed out before HTTP; client playback is unverified |
+| Profile 2 YouTube media check | verified on OpenWrt ARM64: current strategy 16 returned TLS 1.2/1.3 and real HTTP 206 media ranges (audio 256 KiB, video 1 MiB, middle 2 MiB); WAN capture during the Go API test showed the media SYN with `win 1, wscale 2` and control TLS SYNs with `win 64240, wscale 6`; client playback is unverified |
 | Blockcheck2 TLS 1.2/1.3 lists | verified on OpenWrt ARM64: Go CLI invokes upstream `blockcheck2.sh`, captures log/SUMMARY, and restores service; `example.com` succeeded with TLS 1.2/1.3 without bypass |
 | domains (netrogat/custom/substring) | done |
 | backups create/list/download/delete/upload | done |
@@ -112,7 +112,7 @@
 - [x] OpenWRT: quick-profile API start/cancel; isolated probe and SuperSweep firewall cleanup
 - [x] OpenWRT: quick profile 2 completed all 44 strategies in a temporary ZATOR_ROOT; zero winners, probe/firewall cleanup verified
 - [x] OpenWRT ARM64 Go binary, loopback WebUI and status API smoke (temporary `/tmp` roots)
-- [x] Router media end-to-end: after reboot with Full WSSIZE, TLS 1.2/1.3 and real signed media ranges succeeded through `AWG_pers`; primary WAN Googlevideo times out and client playback remains unverified
+- [x] Router media end-to-end: after reboot with Full WSSIZE, Go Profile 2 on strategy 16 passed TLS 1.2/1.3 and signed audio/video/middle media ranges over the primary WAN; simultaneous WAN capture verified `win 1, wscale 2` on the media SYN and ordinary window scale on control HTTPS; client playback remains unverified
 - [x] Blockcheck2 Go CLI launch and SUMMARY creation on router (target TLS checks aborted with DNS code 6; port-check unavailable without ncat)
 - [ ] Keenetic Entware: S90, ndm hook, iptables
 - [ ] Merlin: firewall-start hook
