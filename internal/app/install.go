@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -122,6 +123,7 @@ func (a *App) removeRuntime() error {
 		a.Paths.LuaDir,
 		a.Paths.DataDir,
 		filepath.Join(a.Paths.ZatorRoot, "blockcheck2.d"),
+		filepath.Join(a.Paths.ZatorRoot, "tools", "bin", "googlevideo-dns-sniffer"),
 		filepath.Join(a.Paths.ExtraStratsDir, "cache"),
 		a.Paths.OrchestraDir,
 	} {
@@ -133,6 +135,11 @@ func (a *App) removeRuntime() error {
 }
 
 func (a *App) syncAssets() error {
+	if runtime.GOOS == "linux" {
+		if err := installGooglevideoSniffer(a.Paths.ZatorRoot, uiembed.Tools(), runtime.GOARCH); err != nil {
+			return fmt.Errorf("распаковка Googlevideo DNS sniffer: %w", err)
+		}
+	}
 	if err := copyFS(uiembed.WebUI(), a.Paths.WebUIDir); err != nil {
 		return fmt.Errorf("распаковка Web UI: %w", err)
 	}

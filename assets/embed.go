@@ -32,3 +32,6 @@ var Blockcheck2 embed.FS
 
 //go:embed all:init
 var Init embed.FS
+
+//go:embed all:tools
+var Tools embed.FS
