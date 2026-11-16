@@ -27,24 +27,6 @@ if [[ -n "${BINARY_PATH:-}" ]]; then
   install -m 0755 "$BINARY_PATH" "$STAGE/bin/zator"
 fi
 
-MAN="$STAGE/extra_strats/cache/deploy/manifest.tsv"
-: > "$MAN"
-while IFS= read -r -d '' f; do
-  rel=${f#"$STAGE/"}
-  [[ "$rel" == extra_strats/cache/deploy/* ]] && continue
-  sum=$(sha256sum "$f" | awk '{print $1}')
-  size=$(wc -c <"$f" | tr -d ' ')
-  exec=0
-  [[ -x "$f" ]] && exec=1
-  class=auto
-  case "$rel" in
-    extra_strats/cache/orchestra/*) class=auto ;;
-    files/fake/custom_tls.bin) class=keep-if-exists ;;
-    lists/*|extra_strats/*) class=keep-if-exists ;;
-  esac
-  printf '%s|/opt/zator/%s|%s|%s|%s|%s\n' "$rel" "$rel" "$class" "$sum" "$size" "$exec" >>"$MAN"
-done < <(find "$STAGE" -type f -print0)
-
 WEBUI_SHA="$(find "$ROOT/assets/webui" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
 cat >"$STAGE/extra_strats/cache/deploy/version.env" <<EOF
 ZATOR_VERSION="$VER"
@@ -56,6 +38,25 @@ WEBUI_DATE="$DATE"
 WEBUI_SHA="$WEBUI_SHA"
 TRACKING="latest"
 EOF
+
+MAN="$STAGE/extra_strats/cache/deploy/manifest.tsv"
+: > "$MAN"
+while IFS= read -r -d '' f; do
+  rel=${f#"$STAGE/"}
+  [[ "$rel" == extra_strats/cache/deploy/manifest.tsv ]] && continue
+  sum=$(sha256sum "$f" | awk '{print $1}')
+  size=$(wc -c <"$f" | tr -d ' ')
+  exec=0
+  [[ -x "$f" ]] && exec=1
+  class=auto
+  case "$rel" in
+    extra_strats/cache/deploy/version.env) class=auto ;;
+    extra_strats/cache/orchestra/*) class=auto ;;
+    files/fake/custom_tls.bin) class=keep-if-exists ;;
+    lists/*|extra_strats/*) class=keep-if-exists ;;
+  esac
+  printf '%s|/opt/zator/%s|%s|%s|%s|%s\n' "$rel" "$rel" "$class" "$sum" "$size" "$exec" >>"$MAN"
+done < <(find "$STAGE" -type f -print0)
 
 ARCHIVE="$OUT/zator-full.tar.gz"
 tar -C "$STAGE" -czf "$ARCHIVE" .
