@@ -4,6 +4,8 @@ import type { CheckPayload, ProfileInfo, ScopesPayload, StatusPayload, VersionIn
 
 export const status = ref<StatusPayload | null>(null)
 export const versionInfo = ref<VersionInfo | null>(null)
+export const versionInfoFresh = ref(false)
+export const versionInfoCheckedAt = ref<number | null>(null)
 export const locks = ref<ProfileInfo[]>([])
 export const scopes = ref<ScopesPayload>({ enabled: false, warning: '', scopes: ['default'] })
 export const scope = ref('default')
@@ -12,6 +14,7 @@ export const statusLoaded = ref(false)
 export const strategyChecks = reactive<Record<string, CheckPayload>>({})
 export const statusCheck = ref<CheckPayload | null>(null)
 export const statusCheckRan = ref(false)
+export const statusCheckAt = ref<number | null>(null)
 
 export async function refreshAll() {
   const payload = await fetchStatus(scope.value)

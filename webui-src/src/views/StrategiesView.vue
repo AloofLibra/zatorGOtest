@@ -3,12 +3,13 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { applySetting, clearLock, setLock, profileCheck } from '../api/endpoints'
 import type { ProfileInfo } from '../api/types'
-import { gatedReason, isProfileGated } from '../gating'
+import { gatedPanel, gatedReason, isProfileGated } from '../gating'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { fetchAndApplyState } from '../stores/state'
 import { locks, refreshAll, scope, scopes, statusLoaded, strategyChecks } from '../stores/status'
 import { refreshTlsBlobSettings, tlsBlobSettings } from '../stores/settings'
 import { restartSuffix, showToast } from '../stores/toast'
+import { confirmDialog } from '../stores/confirm'
 import CheckResults from '../components/ui/CheckResults.vue'
 
 const OVERRIDE_PROFILES = new Set(['1', '2', '3', '4', '8'])
@@ -156,6 +157,15 @@ async function save(profile: string, p: ProfileInfo) {
       showToast(`Стратегия вне диапазона (1–${max}, или 0)`, 'error')
       return
     }
+    if (n === 0) {
+      const ok = await confirmDialog({
+        title: `Выключить профиль ${profile}?`,
+        message: `${p.label}: обработка профиля будет отключена для scope «${scope.value}».`,
+        danger: true,
+        confirmText: 'Выключить профиль',
+      })
+      if (!ok) return
+    }
     const { lockRes, checkPayload } = await withBusy(`lock-${profile}`, async () => {
       const lockRes = await setLock(profile, n, scope.value)
       draft.value[profile] = String(n)
@@ -300,40 +310,49 @@ async function saveSniOverride(profile: string) {
 
 <template>
   <section>
-    <div class="page-head sticky-head">
+    <div class="page-heading">
       <div>
+        <span class="eyebrow">Профили трафика</span>
         <h1>Стратегии</h1>
-        <p>Локи профилей. Тестовые desync — во «Вручную».</p>
+        <p>Управляйте фиксациями и проверяйте результат профиля. `auto` означает отсутствие ручной фиксации.</p>
       </div>
       <div class="actions">
-        <label class="field" style="min-width:140px">
+        <label v-if="scopes.enabled" class="field scope-picker">
           <span>Scope</span>
           <select :value="scope" :disabled="busyActive" @change="changeScope(($event.target as HTMLSelectElement).value)">
             <option v-for="s in scopeOptions" :key="s" :value="s">{{ s }}</option>
           </select>
         </label>
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh-locks' }" @click="refresh">Обновить</button>
-        <router-link class="ghost btn-link" to="/manual#supersweep-panel">Суперсвип</router-link>
+        <router-link class="secondary-button" to="/sweep">Подбор</router-link>
       </div>
     </div>
 
     <p v-if="scopes.warning" class="panel-d" style="color:var(--warn)">{{ scopes.warning }}</p>
 
-    <h2 class="section-title">Локи профилей</h2>
+    <div class="section-heading">
+      <div><h2>Профили</h2><p>Максимум — верхний номер допустимой стратегии, а не число вариантов.</p></div>
+      <span v-if="scopes.enabled" class="scope-label">Изменения для scope {{ scope }}</span>
+      <span v-else class="scope-label">Текущий scope: {{ scope }}</span>
+    </div>
     <div v-if="!statusLoaded" class="loading">Загрузка…</div>
     <div v-else class="strategy-grid">
       <article :id="`strategy-${p.profile}`" v-for="p in locks" :key="p.profile" class="strategy" :class="{ 'is-gated': gated(p) }">
         <div class="strategy-head">
           <h3>{{ p.profile }}. {{ p.label }}</h3>
           <div class="meta">
-            lock {{ p.current_lock || 'auto' }} · max {{ p.max_strategy ?? '—' }}
+            <span class="status-badge" :class="p.current_lock === '0' ? 'is-danger' : p.current_lock && p.current_lock !== 'auto' ? 'is-success' : 'is-neutral'">
+              {{ p.current_lock === '0' ? 'Профиль выключен' : p.current_lock && p.current_lock !== 'auto' ? `Зафиксировано #${p.current_lock}` : 'Без ручной фиксации' }}
+            </span>
+            <span>Макс. № {{ p.max_strategy ?? '—' }}</span>
             <template v-if="p.is_fallback"> · fb {{ p.fallback_enabled ? 'on' : 'off' }}</template>
             <template v-if="p.is_udp_games"> · games {{ p.udp_games_enabled ? 'on' : 'off' }}</template>
             <template v-if="p.is_dns_desync"> · dns {{ p.dns_desync_enabled ? 'on' : 'off' }}</template>
           </div>
         </div>
-        <p v-if="p.description" class="meta" style="opacity:0.85">{{ p.description }}</p>
-        <p v-if="gated(p)" class="panel-d" style="color:var(--warn);margin:0">{{ gatedReason(p) }}</p>
+        <p v-if="p.description" class="profile-description">{{ p.description }}</p>
+        <div v-if="gated(p)" class="gate-message"><p>{{ gatedReason(p) }}</p><router-link v-if="gatedPanel(p)" :to="`/settings/${gatedPanel(p)}`">Открыть настройки</router-link></div>
+        <p v-if="p.is_fallback || p.is_udp_games" class="profile-limitation">{{ p.is_fallback ? 'Проверка TLS не подтверждает работу fallback для всех доменов.' : 'Проверка TLS не подтверждает игровой UDP-трафик.' }}</p>
         <div class="strategy-actions">
           <input
             type="number" min="0" :max="p.max_strategy || 999"
@@ -360,7 +379,9 @@ async function saveSniOverride(profile: string) {
           empty-message="Нет результатов проверки."
           :empty-hidden="false"
         />
-        <div v-if="canOverride(p)" class="grid-2" style="margin-top:0.35rem">
+        <details v-if="canOverride(p)" class="profile-advanced">
+          <summary>Дополнительные параметры</summary>
+          <div class="grid-2">
           <label class="field">
             <span>Режим фейков</span>
             <select v-model="fakeMode[String(p.profile)]" :disabled="busyActive"
@@ -404,7 +425,8 @@ async function saveSniOverride(profile: string) {
             <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === `clone-${p.profile}` }"
               @click="saveCloneSize(String(p.profile))">Лимит</button>
           </div>
-        </div>
+          </div>
+        </details>
       </article>
     </div>
   </section>
