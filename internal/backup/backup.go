@@ -211,6 +211,30 @@ func (m *Manager) collect(opts CreateOptions) ([]fileEntry, error) {
 	for _, f := range stateOrchestraFiles() {
 		add(entryOrch+"/"+f, filepath.Join(orchDir, f))
 	}
+	// Preserve the last report produced by the Go SuperSweep.
+	add("supersweep/last-report.tsv", filepath.Join(m.Paths.StateDir, "last-report.tsv"))
+	// Bash Zator stores result archives in orchestra/supersweep. Keep the
+	// newest one when importing/continuing an existing Bash installation.
+	ssDir := filepath.Join(orchDir, "supersweep")
+	if ents, err := os.ReadDir(ssDir); err == nil {
+		var newest os.DirEntry
+		var newestTime time.Time
+		for _, e := range ents {
+			if e.IsDir() || !strings.HasPrefix(e.Name(), "supersweep-") || !strings.HasSuffix(e.Name(), ".tar") {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			if newest == nil || info.ModTime().After(newestTime) {
+				newest, newestTime = e, info.ModTime()
+			}
+		}
+		if newest != nil {
+			add(entryOrch+"/supersweep/"+newest.Name(), filepath.Join(ssDir, newest.Name()))
+		}
+	}
 	// Файлы client-scope (scopes/mark_N.tsv).
 	if ents, err := os.ReadDir(filepath.Join(orchDir, orchestra.ScopesDirName)); err == nil {
 		for _, e := range ents {
@@ -433,7 +457,7 @@ func (m *Manager) Import(src, origName string) (string, error) {
 func looksLikeBackup(names []string) bool {
 	for _, n := range names {
 		if n == entryConfig || strings.HasPrefix(n, entryLists+"/") || strings.HasPrefix(n, entryOrch+"/") ||
-			strings.HasPrefix(n, "extra_strats/") || strings.HasPrefix(n, "lists/") {
+			n == "supersweep/last-report.tsv" || strings.HasPrefix(n, "extra_strats/") || strings.HasPrefix(n, "lists/") {
 			return true
 		}
 	}
@@ -821,6 +845,8 @@ func (m *Manager) restoreStateSnap(root string, snapshot func(string) error) ([]
 func (m *Manager) destFor(name string) string {
 	name = path.Clean(name)
 	switch {
+	case name == "supersweep/last-report.tsv":
+		return filepath.Join(m.Paths.StateDir, "last-report.tsv")
 	case strings.HasPrefix(name, entryLists+"/"):
 		return filepath.Join(m.Paths.ListsDir, filepath.FromSlash(strings.TrimPrefix(name, entryLists+"/")))
 	case strings.HasPrefix(name, entryOrch+"/"):

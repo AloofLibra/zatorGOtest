@@ -95,6 +95,18 @@ func (e *env) seed(t *testing.T) {
 	write(t, filepath.Join(p.StateOrchestraDir(), "blob_override.tsv"), "2\tmaxru\n")
 	write(t, filepath.Join(p.StateOrchestraDir(), "scopes", "mark_2.tsv"), "1\ttls\t5\n")
 	write(t, filepath.Join(p.StateOrchestraDir(), "history.tsv"), "history must not be backed up\n")
+	write(t, filepath.Join(p.StateDir, "last-report.tsv"), "last completed sweep\n")
+	ssDir := filepath.Join(p.StateOrchestraDir(), "supersweep")
+	older := filepath.Join(ssDir, "supersweep-20261115-old.tar")
+	newest := filepath.Join(ssDir, "supersweep-20261116-new.tar")
+	write(t, older, "older sweep archive\n")
+	write(t, newest, "newest sweep archive\n")
+	if err := os.Chtimes(older, e.now.Add(-time.Hour), e.now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newest, e.now, e.now); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func names(t *testing.T, m *Manager, name string) []string {
@@ -156,6 +168,7 @@ func TestCreateContentsAndName(t *testing.T) {
 		"lists/TCP_Custom.txt", "lists/netrogat.txt", "lists/netrogat_substrings.txt",
 		"orchestra/blob_override.tsv", "orchestra/locked.manual.tsv", "orchestra/locked.tsv",
 		"orchestra/mode_override.tsv", "orchestra/scopes/mark_2.tsv",
+		"orchestra/supersweep/supersweep-20261116-new.tar", "supersweep/last-report.tsv",
 	}
 	if got := names(t, e.m, info.Name); !reflect.DeepEqual(got, want) {
 		t.Errorf("contents =\n%v\nwant\n%v", got, want)
@@ -279,12 +292,14 @@ func TestRestoreFullRoundTrip(t *testing.T) {
 	write(t, e.p.LockedTSV, "")
 	os.Remove(filepath.Join(e.p.StateOrchestraDir(), "mode_override.tsv"))
 	os.RemoveAll(filepath.Join(e.p.StateOrchestraDir(), "scopes"))
+	os.Remove(filepath.Join(e.p.StateDir, "last-report.tsv"))
+	os.RemoveAll(filepath.Join(e.p.StateOrchestraDir(), "supersweep"))
 
 	res, err := e.m.Restore(info.Name, RestoreOptions{Mode: ModeFull})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.ConfigReplaced || len(res.Files) != 8 {
+	if !res.ConfigReplaced || len(res.Files) != 10 {
 		t.Errorf("result = %+v", res)
 	}
 	if read(t, e.p.ZapretConfig) != oldConfig {
@@ -295,6 +310,15 @@ func TestRestoreFullRoundTrip(t *testing.T) {
 	}
 	if read(t, filepath.Join(e.p.ListsDir, "TCP_Custom.txt")) != "my.example.org\n" {
 		t.Error("TCP_Custom not restored")
+	}
+	if read(t, filepath.Join(e.p.StateDir, "last-report.tsv")) != "last completed sweep\n" {
+		t.Error("last SuperSweep report not restored")
+	}
+	if read(t, filepath.Join(e.p.StateOrchestraDir(), "supersweep", "supersweep-20261116-new.tar")) != "newest sweep archive\n" {
+		t.Error("newest legacy SuperSweep archive not restored")
+	}
+	if exists(filepath.Join(e.p.StateOrchestraDir(), "supersweep", "supersweep-20261115-old.tar")) {
+		t.Error("older SuperSweep archive should not be included")
 	}
 	if read(t, e.p.LockedTSV) != "1\ttls\t7\nmy.example.org\ttls\t3\n" {
 		t.Error("locked.tsv not restored")
