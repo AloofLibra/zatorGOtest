@@ -119,10 +119,10 @@ local X = "/opt/zator/state/orchestra/foo"
 		t.Fatal(err)
 	}
 	for name, value := range map[string]string{
-		"blob_override.tsv": "2\tcustom\n",
-		"mode_override.tsv": "2\tclone\n",
-		"sni_override.tsv":  "2\twww.google.com\n",
-		"clonesize.tsv":     "2\t964\n",
+		"blob_override.tsv": "1\tcustom1\n2\tcustom2\n3\tcustom3\n4\tcustom4\n8\tcustom8\n",
+		"mode_override.tsv": "1\tclone\n2\tclone\n3\tclone\n4\tclone\n8\tclone\n",
+		"sni_override.tsv":  "1\twww.google.com\n2\twww.google.com\n3\twww.google.com\n4\twww.google.com\n8\twww.google.com\n",
+		"clonesize.tsv":     "1\t964\n2\t964\n3\t964\n4\t964\n8\t964\n",
 	} {
 		if err := os.WriteFile(filepath.Join(p.StateOrchestraDir(), name), []byte(value), 0o600); err != nil {
 			t.Fatal(err)
@@ -159,10 +159,10 @@ NFQWS2_OPT="
 		t.Fatal("production path still present")
 	}
 	for name, want := range map[string]string{
-		"blob_override.tsv": "2\tcustom\n",
-		"mode_override.tsv": "2\tclone\n",
-		"sni_override.tsv":  "2\twww.google.com\n",
-		"clonesize.tsv":     "2\t964\n",
+		"blob_override.tsv": "1\tcustom1\n2\tcustom2\n3\tcustom3\n4\tcustom4\n8\tcustom8\n",
+		"mode_override.tsv": "1\tclone\n2\tclone\n3\tclone\n4\tclone\n8\tclone\n",
+		"sni_override.tsv":  "1\twww.google.com\n2\twww.google.com\n3\twww.google.com\n4\twww.google.com\n8\twww.google.com\n",
+		"clonesize.tsv":     "1\t964\n2\t964\n3\t964\n4\t964\n8\t964\n",
 	} {
 		got, err := os.ReadFile(filepath.Join(probe.OrchestraDir(), name))
 		if err != nil || string(got) != want {
