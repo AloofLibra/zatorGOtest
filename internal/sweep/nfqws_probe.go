@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,8 @@ import (
 
 // Жёстко прошитый в Lua путь к orchestra (см. assets/lua/locked.lua).
 const productionOrchestraLuaPath = "/opt/zator/state/orchestra"
+
+var probeStrategyArg = regexp.MustCompile(`:strategy=[0-9]+(?:$|:)`)
 
 // NfqwsProbeConfig — параметры изолированного пробника nfqws2.
 type NfqwsProbeConfig struct {
@@ -370,6 +374,28 @@ func (p *NfqwsProbe) writeProbeLua(luaDir string) error {
 			return err
 		}
 	}
+	// locked.lua resolves profile blob/clone settings beside its private lock
+	// files. Snapshot the user's menu-16 overrides so an isolated run sees the
+	// same blob, clone mode, SNI, and size as the production queue.
+	for _, name := range []string{
+		"blob_override.tsv", "mode_override.tsv", "sni_override.tsv", "clonesize.tsv",
+	} {
+		src := filepath.Join(p.cfg.Paths.StateOrchestraDir(), name)
+		dst := filepath.Join(p.cfg.OrchestraDir, name)
+		data, err := os.ReadFile(src)
+		if os.IsNotExist(err) {
+			if removeErr := os.Remove(dst); removeErr != nil && !os.IsNotExist(removeErr) {
+				return removeErr
+			}
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("%w: read %s: %v", ErrProbe, src, err)
+		}
+		if err := fsutil.AtomicWriteFile(dst, data, 0o644); err != nil {
+			return fmt.Errorf("%w: snapshot %s: %v", ErrProbe, name, err)
+		}
+	}
 	return nil
 }
 
@@ -379,18 +405,97 @@ func (p *NfqwsProbe) buildArgs(luaDir string) ([]string, error) {
 		userName = fmt.Sprintf("%d", p.cfg.UID)
 	}
 	zapretLua := filepath.ToSlash(filepath.Join(p.cfg.Paths.ZapretRoot, "lua"))
-	out := p.cfg.Config.BuildNfqws2RuntimeArgs(zapretLua, userName, fmt.Sprintf("--qnum=%d", firewall.SuperSweepQueue))
-	if len(out) == 0 {
+	raw, ok := p.cfg.Config.NFQWS2Opt()
+	if !ok {
 		return nil, fmt.Errorf("%w: пустой NFQWS2_OPT", ErrProbe)
 	}
-	for i, arg := range out {
-		if !strings.HasPrefix(arg, "--lua-init=@") {
+	if p.profile < 1 || p.profile > 4 {
+		return nil, fmt.Errorf("%w: некорректный профиль %d", ErrProbe, p.profile)
+	}
+	opt := []string{
+		"--lua-init=@" + filepath.ToSlash(filepath.Join(luaDir, "locked.lua")),
+		"--lua-init=@" + filepath.ToSlash(filepath.Join(p.cfg.Paths.LuaDir, "fake-adapt.lua")),
+	}
+	lines := strings.Split(raw, "\n")
+	template, foundTemplate := false, false
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if !template && line == "--template=z2r_tcp_tls_common" {
+			template, foundTemplate = true, true
+		}
+		if !template {
+			if strings.HasPrefix(line, "--blob=") {
+				opt = append(opt, line)
+			}
 			continue
 		}
-		baseName := filepath.Base(strings.TrimPrefix(arg, "--lua-init=@"))
-		if baseName == "locked.lua" || baseName == "strategy-lock-manager.lua" {
-			out[i] = "--lua-init=@" + filepath.ToSlash(filepath.Join(luaDir, baseName))
+		opt = append(opt, line)
+		if line == "--new" {
+			break
 		}
+	}
+	if !foundTemplate || len(opt) == 0 || opt[len(opt)-1] != "--new" {
+		return nil, fmt.Errorf("%w: не найден общий TLS-шаблон", ErrProbe)
+	}
+	var wssizeArgs []string
+	wssizeIPFile := ""
+	if p.profile == 2 {
+		ws, err := firewall.WssizeConfigFromGetter(p.cfg.Config.Get, p.cfg.Paths.ZatorRoot)
+		if err != nil {
+			return nil, fmt.Errorf("%w: WSSIZE config: %v", ErrProbe, err)
+		}
+		if ws.Active() {
+			wssizeIPFile = filepath.ToSlash(ws.IPFile)
+			mode := strings.ToLower(strings.TrimSpace(p.cfg.Config.GetDefault("Z2R_WSSIZE_RAMP_MODE", "lite")))
+			wsize := p.cfg.Config.GetDefault("Z2R_WSSIZE_RAMP_WSIZE", "1")
+			scale := p.cfg.Config.GetDefault("Z2R_WSSIZE_RAMP_SCALE", "1")
+			open := p.cfg.Config.GetDefault("Z2R_WSSIZE_RAMP_OPEN", "1")
+			wsizeN, wsizeErr := strconv.Atoi(wsize)
+			scaleN, scaleErr := strconv.Atoi(scale)
+			openN, openErr := strconv.Atoi(open)
+			if (mode != "lite" && mode != "full") || wsizeErr != nil || scaleErr != nil || openErr != nil || wsizeN < 0 || wsizeN > 65535 || scaleN < 0 || scaleN > 14 || openN < 1 {
+				return nil, fmt.Errorf("%w: invalid WSSIZE ramp parameters", ErrProbe)
+			}
+			opt = append(opt, "--lua-init=@"+filepath.ToSlash(filepath.Join(p.cfg.Paths.LuaDir, "wssize-ramp.lua")))
+			wssizeArgs = []string{
+				"--filter-l3=ipv4", "--filter-tcp=443",
+				fmt.Sprintf("--filter-mark=0x%08x/0x%08x", ws.Marks.Wssize, ws.Marks.Wssize),
+				"--payload=tls_client_hello,http_req,http_reply,unknown,tls_server_hello",
+				"--out-range=-s34228", "--out-range=a", "--in-range=a", "--payload=all,empty",
+				"--lua-desync=wssize_ramp:mode=" + mode + ":wsize=" + wsize + ":scale=" + scale + ":open=" + open,
+				"--new",
+			}
+		}
+	}
+	opt = append(opt, wssizeArgs...)
+	opt = append(opt, "--filter-tcp=443")
+	if p.profile == 2 && len(wssizeArgs) != 0 {
+		opt = append(opt, "--ipset="+wssizeIPFile)
+	}
+	opt = append(opt, "--filter-l7=tls",
+		"--payload=tls_client_hello,http_req,http_reply,unknown,tls_server_hello",
+		"--out-range=-s34228", "--in-range=-s32768",
+		fmt.Sprintf("--lua-desync=circular_locked:key=%d", p.profile))
+	block, ok := p.cfg.Config.AutoStandardBlock(fmt.Sprintf("%d", p.profile))
+	if !ok {
+		return nil, fmt.Errorf("%w: не найден стандартный профиль %d", ErrProbe, p.profile)
+	}
+	for _, rawLine := range block.Lines {
+		for _, arg := range strings.Fields(strings.TrimSpace(rawLine)) {
+			if strings.HasPrefix(arg, "--import=") ||
+				(strings.HasPrefix(arg, "--lua-desync=") && probeStrategyArg.MatchString(arg)) ||
+				arg == "--in-range=x" || strings.HasPrefix(arg, "--payload=tls_client_hello,discord_ip_discovery") {
+				opt = append(opt, arg)
+			}
+		}
+	}
+	probeConfig := config.Parse(p.cfg.Config.String())
+	if err := probeConfig.SetNFQWS2Opt(strings.Join(opt, "\n")); err != nil {
+		return nil, fmt.Errorf("%w: build isolated NFQWS2_OPT: %v", ErrProbe, err)
+	}
+	out := probeConfig.BuildNfqws2RuntimeArgs(zapretLua, userName, fmt.Sprintf("--qnum=%d", firewall.SuperSweepQueue))
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%w: пустой NFQWS2_OPT", ErrProbe)
 	}
 	return out, nil
 }
