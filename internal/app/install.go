@@ -334,12 +334,17 @@ func copyDirKeepExisting(src, dst string) error {
 			}
 			continue
 		}
-		if _, err := os.Stat(d); err == nil {
+		if st, err := os.Stat(d); err == nil && st.Size() > 0 {
 			continue
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
 		}
 		data, err := os.ReadFile(s)
 		if err != nil {
 			return err
+		}
+		if len(data) == 0 {
+			continue
 		}
 		if err := os.WriteFile(d, data, 0o644); err != nil {
 			return err

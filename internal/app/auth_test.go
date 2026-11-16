@@ -77,24 +77,81 @@ func TestMigrateOrchestraCacheToState(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := filepath.Join(a.Paths.ExtraStratsDir, "cache", "orchestra")
-	if err := os.MkdirAll(filepath.Join(old, "scopes"), 0o755); err != nil {
+	oldScopes := filepath.Join(old, "scopes", "clients")
+	if err := os.MkdirAll(oldScopes, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	legacy := "9\ttls\t4\n"
-	if err := os.WriteFile(filepath.Join(old, "locked.tsv"), []byte(legacy), 0o644); err != nil {
+	legacyFiles := map[string]string{
+		"locked.tsv":        "9\ttls\t4\n",
+		"blob_override.tsv": "2\tclone\n",
+		"mode_override.tsv": "2\tclone\n",
+		"sni_override.tsv":  "2\twww.google.com\n",
+		"clonesize.tsv":     "2\t1200\n",
+		"auto_locked.tsv":   "9\ttls\t4\n",
+		"locked.manual.tsv": "7\ttls\t2\n",
+		"locked.lua":        "must not migrate\n",
+		"ignored_directory": "",
+	}
+	for name, content := range legacyFiles {
+		if name == "ignored_directory" {
+			if err := os.MkdirAll(filepath.Join(old, name), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(old, name, "value.tsv"), []byte("ignore\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(old, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(oldScopes, "profile2.tsv"), []byte("scope legacy\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// state пустой после truncate
-	if err := os.WriteFile(a.Paths.LockedTSV, nil, 0o644); err != nil {
+
+	// Пустые файлы в новом state не должны блокировать миграцию.
+	stateDir := a.Paths.StateOrchestraDir()
+	for _, name := range []string{"locked.tsv", "blob_override.tsv", "sni_override.tsv", "clonesize.tsv", "auto_locked.tsv", "locked.manual.tsv"} {
+		if err := os.WriteFile(filepath.Join(stateDir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Непустой файл нового state имеет приоритет над legacy.
+	if err := os.WriteFile(filepath.Join(stateDir, "mode_override.tsv"), []byte("3\tfake\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(a.Paths.LockedTSV)
-	if err := a.migrateOrchestraCacheToState(); err != nil {
+	if err := os.MkdirAll(filepath.Join(stateDir, "scopes", "clients"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(a.Paths.LockedTSV)
-	if err != nil || string(got) != legacy {
-		t.Fatalf("migrated = %q err=%v", got, err)
+	if err := os.WriteFile(filepath.Join(stateDir, "scopes", "clients", "profile2.tsv"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Update(); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range legacyFiles {
+		if name == "locked.lua" || name == "ignored_directory" || name == "mode_override.tsv" {
+			continue
+		}
+		got, err := os.ReadFile(filepath.Join(stateDir, name))
+		if err != nil || string(got) != want {
+			t.Errorf("%s migrated = %q err=%v, want %q", name, got, err, want)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(stateDir, "mode_override.tsv"))
+	if err != nil || string(got) != "3\tfake\n" {
+		t.Errorf("existing override overwritten: %q err=%v", got, err)
+	}
+	got, err = os.ReadFile(filepath.Join(stateDir, "scopes", "clients", "profile2.tsv"))
+	if err != nil || string(got) != "scope legacy\n" {
+		t.Errorf("scope not migrated into empty state: %q err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "locked.lua")); !os.IsNotExist(err) {
+		t.Errorf("legacy Lua unexpectedly migrated: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "ignored_directory")); !os.IsNotExist(err) {
+		t.Errorf("unrecognized directory unexpectedly migrated: %v", err)
 	}
 }
 
