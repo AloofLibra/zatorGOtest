@@ -35,6 +35,8 @@ fi
 PACKED="$(mktemp "${OUTPUT}.upx.XXXXXX")"
 trap 'rm -f "$PACKED"' EXIT
 cp "$OUTPUT" "$PACKED"
+# mktemp creates mode 0600, but UPX refuses to pack non-executable ELF files.
+chmod +x "$PACKED"
 upx --best --lzma "$PACKED"
 upx -t "$PACKED"
 ORIGINAL_SIZE="$(wc -c <"$OUTPUT" | tr -d ' ')"
