@@ -180,11 +180,11 @@ func ensureOpenWRT(ctx context.Context, rep *Report, opts Options) {
 		checkBinary(rep, b, critical, opts)
 	}
 	if opts.InstallPackages && hasMissingBinaries(rep) {
-		pkgs := []string{"ipset", "iptables-mod-nfqueue", "iptables-mod-conntrack-extra", "kmod-ipt-nfqueue", "kmod-ipt-ipset"}
+		pkgs := []string{"ipset", "iptables-mod-conntrack-extra", "kmod-ipt-conntrack-extra", "kmod-ipt-ipset"}
 		if fw == platform.FWNftables {
-			pkgs = append(pkgs, "nftables")
+			pkgs = append(pkgs, "nftables", "kmod-nfnetlink-queue", "kmod-nft-queue")
 		} else {
-			pkgs = append(pkgs, "iptables-zz-legacy")
+			pkgs = append(pkgs, "iptables-mod-nfqueue", "kmod-ipt-nfqueue", "iptables-zz-legacy")
 		}
 		if err := opkgInstall(ctx, opts, pkgs...); err != nil {
 			rep.Items = append(rep.Items, Item{Name: "opkg install", Kind: "package", Status: StatusFailed, Detail: err.Error()})
@@ -193,9 +193,20 @@ func ensureOpenWRT(ctx context.Context, rep *Report, opts Options) {
 			recheckBinaries(rep, opts)
 		}
 	}
-	criticalMods := map[string]bool{"xt_NFQUEUE": true, "xt_connbytes": true}
-	for _, m := range []string{"xt_NFQUEUE", "xt_connbytes", "ip_set_bitmap_port"} {
-		ensureModule(rep, m, criticalMods[m], opts)
+	queueModules := []string{"xt_NFQUEUE"}
+	if fw == platform.FWNftables {
+		// OpenWrt's iptables-nft translates NFQUEUE into nft queue expressions;
+		// it uses nfnetlink_queue + nft_queue, not the legacy xt_NFQUEUE module.
+		queueModules = []string{"nfnetlink_queue", "nft_queue"}
+	}
+	criticalMods := map[string]bool{"xt_connbytes": true}
+	mods := append(queueModules, "xt_connbytes", "ip_set_bitmap_port")
+	for _, m := range mods {
+		critical := criticalMods[m]
+		if m == "xt_NFQUEUE" || m == "nfnetlink_queue" || m == "nft_queue" {
+			critical = true
+		}
+		ensureModule(rep, m, critical, opts)
 	}
 }
 

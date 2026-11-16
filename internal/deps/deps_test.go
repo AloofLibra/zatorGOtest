@@ -56,6 +56,48 @@ func TestModuleLoaded(t *testing.T) {
 	}
 }
 
+func TestEnsureOpenWRTNftQueueModules(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"nft", "iptables", "ipset"} {
+		path := filepath.Join(root, "usr", "sbin", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	proc := filepath.Join(root, "proc")
+	if err := os.MkdirAll(proc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mods := "nfnetlink_queue 1 0 - Live 0x0\nnft_queue 1 0 - Live 0x0\nxt_connbytes 1 0 - Live 0x0\nip_set_bitmap_port 1 0 - Live 0x0\n"
+	if err := os.WriteFile(filepath.Join(proc, "modules"), []byte(mods), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := Check(platform.Platform{Kind: platform.KindOpenWRT, FWType: platform.FWNftables}, Options{Root: root})
+	if !rep.OK() {
+		t.Fatalf("nftables queue modules should satisfy OpenWrt requirements: %s", rep.Summary())
+	}
+	items := map[string]bool{}
+	for _, item := range rep.Items {
+		if item.Kind == "module" && item.Status == StatusOK {
+			items[item.Name] = true
+		}
+	}
+	for _, want := range []string{"nfnetlink_queue", "nft_queue", "xt_connbytes"} {
+		if !items[want] {
+			t.Errorf("expected %s module check, got %+v", want, items)
+		}
+	}
+	for _, item := range rep.Items {
+		if item.Name == "xt_NFQUEUE" {
+			t.Fatal("nftables backend must not require legacy xt_NFQUEUE")
+		}
+	}
+}
+
 func TestReportSummary(t *testing.T) {
 	r := Report{
 		Platform: platform.Platform{Kind: platform.KindEntware, Hardware: platform.HardwareKeenetic},
