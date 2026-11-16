@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -113,6 +114,21 @@ func TestProfileMaxStrategyFromDefaultConfig(t *testing.T) {
 		if p.MaxStrategy != want[i] {
 			t.Errorf("Profiles()[%d].MaxStrategy = %d, want %d", i, p.MaxStrategy, want[i])
 		}
+	}
+}
+
+func TestDefaultGooglevideoProfileUsesLockedHandler(t *testing.T) {
+	c := loadDefault(t)
+	b, ok := c.AutoStandardBlock("2")
+	if !ok {
+		t.Fatal("profile 2 block missing from config.default")
+	}
+	joined := strings.Join(b.Lines, "\n")
+	if !strings.Contains(joined, "--lua-desync=circular_locked:key=2") {
+		t.Fatalf("profile 2 does not use Bash-compatible locked handler: %s", joined)
+	}
+	if strings.Contains(joined, "circular_quality:key=2") {
+		t.Fatalf("unstable circular_quality enabled in default Googlevideo profile: %s", joined)
 	}
 }
 

@@ -231,7 +231,7 @@ ${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WS
 --hostlist-exclude=/opt/zator/lists/netrogat.txt
 --payload=tls_client_hello,http_req,http_reply,unknown,tls_server_hello
 --out-range=-s34228
---in-range=-s32768 --lua-desync=circular_quality:key=2:fails=2:time=60:failure_detector=combined_failure_detector:success_detector=combined_success_detector:lock_successes=2:lock_tests=3:lock_rate=0.5:unlock_fails=3:hostkey=slm_desync_googlevideo_hostkey:default_strategy=41:soft_success_in=0:soft_success_bytes=65536:exclude_substrings=/opt/zator/lists/netrogat_substrings.txt:payload=tls_client_hello
+--in-range=-s32768 --lua-desync=circular_locked:key=2:soft_success_in=0:soft_success_bytes=65536:exclude_substrings=/opt/zator/lists/netrogat_substrings.txt:payload=tls_client_hello
 --import=z2r_tcp_tls_common
 #Z2R_AUTO_STANDARD_2_END
 
