@@ -204,7 +204,11 @@ func (a *App) copyDevelopmentAssets() error {
 	if err := copyFSKeepCustomTLS(os.DirFS(filepath.Join(root, "files", "fake")), a.Paths.FakeDir); err != nil {
 		return err
 	}
-	if err := copyTree("blockcheck2", filepath.Join(a.Paths.ZapretRoot, "blockcheck2.d")); err != nil {
+	if st, err := os.Stat(a.Paths.ZapretRoot); err == nil && st.IsDir() {
+		if err := copyTree("blockcheck2", filepath.Join(a.Paths.ZapretRoot, "blockcheck2.d")); err != nil {
+			return err
+		}
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	data, err := os.ReadFile(filepath.Join(root, "config.default"))
@@ -406,17 +410,10 @@ func copyDirKeepExisting(src, dst string) error {
 	return nil
 }
 
-// EnsureStockFakes распаковывает встроенные blob в FakeDir. Пользовательский
-// custom_tls.bin сохраняется при обновлении, как в Bash-версии.
+// EnsureStockFakes ensures the target directory exists. Stock blobs are
+// installed from the separate config archive, not embedded in the binary.
 func (a *App) EnsureStockFakes() error {
-	if err := os.MkdirAll(a.Paths.FakeDir, 0o755); err != nil {
-		return err
-	}
-	source, err := fs.Sub(uiembed.FilesAt(a.Paths), "fake")
-	if err != nil {
-		return err
-	}
-	return copyFSKeepCustomTLS(source, a.Paths.FakeDir)
+	return os.MkdirAll(a.Paths.FakeDir, 0o755)
 }
 
 func copyFSKeepCustomTLS(src fs.FS, dst string) error {

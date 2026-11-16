@@ -184,13 +184,13 @@ func TestInstallUnpacksStockFakes(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(a.Paths.FakeDir, "tls_clienthello_5.bin")); err != nil {
 		t.Fatalf("FakeDir должен сохраняться при uninstall без purge: %v", err)
 	}
-	// EnsureStockFakes восстанавливает после полной очистки каталога.
+	// Stock blobs are supplied by the config archive, not embedded in Zator.
 	_ = os.RemoveAll(a.Paths.FakeDir)
 	if err := a.EnsureStockFakes(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(a.Paths.FakeDir, "custom_tls.bin")); err != nil {
-		t.Fatalf("EnsureStockFakes не восстановил blob: %v", err)
+	if _, err := os.Stat(filepath.Join(a.Paths.FakeDir, "custom_tls.bin")); !os.IsNotExist(err) {
+		t.Fatalf("EnsureStockFakes unexpectedly reconstructed non-embedded blob: %v", err)
 	}
 	customPath := filepath.Join(a.Paths.FakeDir, "custom_tls.bin")
 	custom := []byte("user custom TLS blob")

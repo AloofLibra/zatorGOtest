@@ -412,7 +412,7 @@ func TestReadCachedLatest(t *testing.T) {
 		t.Fatalf("empty cache: l=%v err=%v", l, err)
 	}
 	raw, _ := json.Marshal(Latest{SchemaVersion: 1, Release: "v0.1.6", ZatorDate: "2026-01-01"})
-	if err := os.MkdirAll(Dir(p), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(LatestCachePath(p)), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(LatestCachePath(p), raw, 0o644); err != nil {
