@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AloofLibra/zator/internal/deploy"
 	"github.com/AloofLibra/zator/internal/paths"
 	"github.com/AloofLibra/zator/internal/platform"
 )
@@ -99,6 +100,13 @@ func TestRollbackPreUpdateBackupRestoresConfigListsAndBinary(t *testing.T) {
 	if err := os.WriteFile(list, []byte("old.example\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	versionPath := deploy.VersionPath(p)
+	if err := os.MkdirAll(filepath.Dir(versionPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(versionPath, []byte("ZATOR_VERSION=\"old\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	a := NewWith(p, platform.Platform{})
 	if _, err := a.CreatePreUpdateBackup(); err != nil {
 		t.Fatal(err)
@@ -113,6 +121,9 @@ func TestRollbackPreUpdateBackupRestoresConfigListsAndBinary(t *testing.T) {
 	if err := os.WriteFile(list, []byte("new.example\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(versionPath, []byte("ZATOR_VERSION=\"new\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.RollbackPreUpdateBackup(); err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +132,7 @@ func TestRollbackPreUpdateBackupRestoresConfigListsAndBinary(t *testing.T) {
 		filepath.Join(p.BinDir, "zator"): "BIN-V1",
 		p.ZapretConfig:                   "FWTYPE=nftables\n",
 		list:                             "old.example\n",
+		versionPath:                      "ZATOR_VERSION=\"old\"\n",
 	} {
 		got, err := os.ReadFile(path)
 		if err != nil || string(got) != want {
@@ -130,6 +142,27 @@ func TestRollbackPreUpdateBackupRestoresConfigListsAndBinary(t *testing.T) {
 	status, _ := a.PostUpdateVerifyStatus()
 	if status != "warn" {
 		t.Fatalf("expected soft verify warning for absent nfqws2.args, got %q", status)
+	}
+}
+
+func TestRollbackPreUpdateRemovesVersionCreatedAfterSnapshot(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+	a := NewWith(p, platform.Platform{})
+	if err := a.snapshotPreUpdateVersion(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(deploy.VersionPath(p)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(deploy.VersionPath(p), []byte("ZATOR_VERSION=\"new\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.restorePreUpdateVersion(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(deploy.VersionPath(p)); !os.IsNotExist(err) {
+		t.Fatalf("version.env should be absent after rollback, got err=%v", err)
 	}
 }
 

@@ -13,7 +13,10 @@ import (
 	"github.com/AloofLibra/zator/internal/fsutil"
 )
 
-const preUpdateBinRel = "pre_update_bin/zator"
+const (
+	preUpdateBinRel     = "pre_update_bin/zator"
+	preUpdateVersionRel = "pre_update_bin/version.env"
+)
 
 // CreatePreUpdateBackup снимает product-backup перед update (config+lists+orchestra)
 // и снимок бинарника bin/zator (ModeSmart его не откатывает).
@@ -23,10 +26,13 @@ func (a *App) CreatePreUpdateBackup() (backup.Info, error) {
 	if err != nil {
 		return backup.Info{}, err
 	}
-	a.RememberPreUpdateBackup(info.Name)
 	if err := a.snapshotPreUpdateBinary(); err != nil {
 		return info, fmt.Errorf("снимок bin/zator: %w", err)
 	}
+	if err := a.snapshotPreUpdateVersion(); err != nil {
+		return info, fmt.Errorf("снимок version.env: %w", err)
+	}
+	a.RememberPreUpdateBackup(info.Name)
 	return info, nil
 }
 
@@ -81,6 +87,52 @@ func (a *App) restorePreUpdateBinary() error {
 	}
 	_ = os.MkdirAll(a.Paths.BinDir, 0o755)
 	return fsutil.AtomicWriteFile(dst, data, 0o755)
+}
+
+func (a *App) preUpdateVersionPath() string {
+	return filepath.Join(a.Paths.StateDir, filepath.FromSlash(preUpdateVersionRel))
+}
+
+func (a *App) snapshotPreUpdateVersion() error {
+	src := deploy.VersionPath(a.Paths)
+	dst := a.preUpdateVersionPath()
+	data, err := os.ReadFile(src)
+	if os.IsNotExist(err) {
+		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return fsutil.AtomicWriteFile(dst+".missing", []byte("missing\n"), 0o600)
+	}
+	if err != nil {
+		return err
+	}
+	if err := fsutil.AtomicWriteFile(dst, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Remove(dst + ".missing"); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (a *App) restorePreUpdateVersion() error {
+	src := a.preUpdateVersionPath()
+	if _, err := os.Stat(src + ".missing"); err == nil {
+		if err := os.Remove(deploy.VersionPath(a.Paths)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if os.IsNotExist(err) {
+		return nil // совместимость со старыми pre-update snapshots
+	}
+	if err != nil {
+		return err
+	}
+	return fsutil.AtomicWriteFile(deploy.VersionPath(a.Paths), data, 0o644)
 }
 
 // VerifyAfterUpdate — проверка после Apply.
@@ -142,6 +194,9 @@ func (a *App) RollbackPreUpdateBackup() error {
 	binMsg := ""
 	if err := a.restorePreUpdateBinary(); err != nil {
 		binMsg = "; bin: " + err.Error()
+	}
+	if err := a.restorePreUpdateVersion(); err != nil {
+		binMsg += "; version.env: " + err.Error()
 	}
 	a.ClearBlockFullRestore()
 	if err := a.VerifyAfterUpdate(); err != nil {
