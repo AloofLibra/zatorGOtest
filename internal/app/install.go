@@ -13,6 +13,7 @@ import (
 	"github.com/AloofLibra/zator"
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/deploy"
+	"github.com/AloofLibra/zator/internal/telemetry"
 	"github.com/AloofLibra/zator/internal/uiembed"
 )
 
@@ -189,7 +190,34 @@ func (a *App) syncAssets() error {
 			return err
 		}
 	}
+	if err := a.migrateLegacyTelemetry(); err != nil {
+		return err
+	}
 	return a.ensureOrchestraState()
+}
+
+func (a *App) migrateLegacyTelemetry() error {
+	c := telemetry.New(a.Paths)
+	current, err := os.Stat(c.ConfigPath())
+	if err == nil && current.Size() > 0 {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	legacyPath := filepath.Join(a.Paths.ZatorRoot, "z2r_lib", telemetry.ConfigFileName)
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	settings := telemetry.ParseSettings(string(data))
+	if !settings.Decided && settings.UUID == "" && settings.ChannelID == "" {
+		return nil
+	}
+	return c.SaveSettings(settings)
 }
 
 // copyFSKeepExisting копирует файлы, не затирая уже существующие

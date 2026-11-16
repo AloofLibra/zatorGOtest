@@ -339,6 +339,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request, p params) {
 		"dns_desync":    section("dns_desync"),
 		"ports":         section("ports"),
 		"provider":      section("provider"),
+		"telemetry":     section("telemetry"),
 		"fwtype":        section("fwtype"),
 		"flowoffload":   section("flowoffload"),
 		"ifaces":        section("ifaces"),
@@ -571,6 +572,9 @@ func (s *Server) handleSetLock(w http.ResponseWriter, r *http.Request, p params)
 			out["warning"] = w
 		}
 	}
+	if prev != lock {
+		s.notifyTelemetry()
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -619,6 +623,9 @@ func (s *Server) handleClearLock(w http.ResponseWriter, r *http.Request, p param
 		if w := s.voicePorts(r.Context(), true); w != "" {
 			out["warning"] = w
 		}
+	}
+	if prev != "auto" {
+		s.notifyTelemetry()
 	}
 	writeJSON(w, http.StatusOK, out)
 }

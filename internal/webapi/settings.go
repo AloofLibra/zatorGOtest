@@ -101,6 +101,17 @@ func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) 
 		return map[string]any{"tcp": cfg.PortsFor("tcp"), "udp": cfg.PortsFor("udp")}, nil
 	case "provider":
 		return map[string]any{"provider": s.providerText()}, nil
+	case "telemetry":
+		c := telemetry.New(s.paths)
+		settings, err := c.LoadSettings()
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"decided":    settings.Decided,
+			"enabled":    settings.Enabled,
+			"configured": strings.TrimSpace(c.Token) != "" && strings.TrimSpace(c.Endpoint) != "",
+		}, nil
 	case "fwtype":
 		v := cfg.FWType()
 		return map[string]any{"state": v, "value": v}, nil

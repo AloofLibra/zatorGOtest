@@ -281,6 +281,7 @@ func TestUpdatePreservesUserStateAndFiles(t *testing.T) {
 		filepath.Join(a.Paths.ListsDir, "netrogat.txt"):                                 "private.example\n",
 		filepath.Join(a.Paths.ExtraStratsDir, "TCP_Custom.txt"):                         "user.example\n",
 		filepath.Join(a.Paths.FakeDir, "custom_tls.bin"):                                "user TLS blob bytes",
+		filepath.Join(a.Paths.ConfigDir, "telemetry.config"):                            "tel_enabled=0\ntel_uuid=deadbeef\n",
 		filepath.Join(a.Paths.StateDir, "supersweep", "last-report.tsv"):                "completed report\n",
 		backup: "backup archive bytes",
 	}

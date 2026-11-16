@@ -363,6 +363,12 @@ export interface IfacesSettings {
   needs_autodetect?: boolean
 }
 
+export interface TelemetrySettings {
+  decided: boolean
+  enabled: boolean
+  configured: boolean
+}
+
 export interface StatePayload {
   auth_required?: boolean
   status: StatusPayload
@@ -381,6 +387,7 @@ export interface StatePayload {
   dns_desync: ModeSettingData
   ports: PortsSettings
   provider: ProviderSettings
+  telemetry: TelemetrySettings
   fwtype?: ValueSetting
   flowoffload?: ValueSetting
   ifaces?: IfacesSettings

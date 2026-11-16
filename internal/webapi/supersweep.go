@@ -80,6 +80,11 @@ func (s *Server) sweeperOrDefault() (Sweeper, error) {
 		},
 		MaxStrategy: s.maxStrategy,
 		GVURL:       func(ctx context.Context) string { return "https://" + checker.ClusterDomain(ctx) },
+		OnComplete: func(rep sweep.Report, err error) {
+			if err == nil && rep.State == sweep.StateDone && len(rep.Applied) > 0 {
+				s.notifyTelemetry()
+			}
+		},
 	}
 	coord, err := sweep.New(cfg)
 	if err != nil {

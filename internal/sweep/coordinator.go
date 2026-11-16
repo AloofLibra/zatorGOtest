@@ -64,6 +64,8 @@ type Config struct {
 	CancelPoll time.Duration
 	// Logf — необязательный журнал (строки консоли прогона).
 	Logf func(format string, args ...any)
+	// OnComplete уведомляет владельца после сохранения итогового отчёта.
+	OnComplete func(Report, error)
 }
 
 // Params — параметры одного суперавтопрогона.
@@ -285,6 +287,9 @@ func (c *Coordinator) Start(ctx context.Context, p Params) error {
 		c.mu.Lock()
 		c.final, c.err, c.running, c.cancel = rep, err, false, nil
 		c.mu.Unlock()
+		if c.cfg.OnComplete != nil {
+			c.cfg.OnComplete(rep, err)
+		}
 	}()
 	return nil
 }

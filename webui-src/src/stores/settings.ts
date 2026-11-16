@@ -2,7 +2,7 @@ import { reactive, ref } from 'vue'
 import { fetchSetting, fetchTlsBlobSettings } from '../api/endpoints'
 import type {
   FallbackSettings, IfacesSettings, ModeSettingData, PortsSettings, ProviderSettings,
-  TlsBlobSettings, UdpGamesSettings, WgBlobSettings, WgStateSettings, WssizeRampSettings,
+  TelemetrySettings, TlsBlobSettings, UdpGamesSettings, WgBlobSettings, WgStateSettings, WssizeRampSettings,
 } from '../api/types'
 
 export const tlsBlobSettings = ref<TlsBlobSettings | null>(null)
@@ -15,6 +15,7 @@ export const ifacesSettings = ref<IfacesSettings | null>(null)
 export const modeSettings = reactive<Record<string, ModeSettingData | undefined>>({})
 export const ports = ref<PortsSettings | null>(null)
 export const provider = ref<ProviderSettings | null>(null)
+export const telemetrySettings = ref<TelemetrySettings | null>(null)
 export const settingsLoaded = ref(false)
 
 export const MODE_SETTINGS = ['auto_mode', 'hostlist', 'rst_guard', 'reasm', 'dns_desync'] as const
@@ -29,6 +30,7 @@ export const refreshWssizeRampSettings = () => fetchSetting.wssize_ramp().then((
 export const refreshIfacesSettings = () => fetchSetting.ifaces().then((data) => { ifacesSettings.value = data })
 export const refreshPorts = () => fetchSetting.ports().then((data) => { ports.value = data })
 export const refreshProvider = () => fetchSetting.provider().then((data) => { provider.value = data })
+export const refreshTelemetrySettings = () => fetchSetting.telemetry().then((data) => { telemetrySettings.value = data })
 
 export function refreshModeSetting(setting: string) {
   return fetchSetting[setting as ModeSettingKey]().then((data) => { modeSettings[setting] = data })

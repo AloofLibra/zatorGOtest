@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/AloofLibra/zator/internal/telemetry"
 )
 
 func TestSetPasswordVerifyAndUpdatePreserves(t *testing.T) {
@@ -152,6 +154,39 @@ func TestMigrateOrchestraCacheToState(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "ignored_directory")); !os.IsNotExist(err) {
 		t.Errorf("unrecognized directory unexpectedly migrated: %v", err)
+	}
+}
+
+func TestInstallMigratesLegacyTelemetryConsent(t *testing.T) {
+	a := newTestApp(t)
+	legacy := filepath.Join(a.Paths.ZatorRoot, "z2r_lib", telemetry.ConfigFileName)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("tel_enabled=1\ntel_uuid=deadbeef\ntel_channel_id=old-channel\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := telemetry.New(a.Paths).LoadSettings()
+	if err != nil || !s.Decided || !s.Enabled || s.UUID != "deadbeef" || s.ChannelID != "old-channel" {
+		t.Fatalf("migrated telemetry settings = %+v, %v", s, err)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Fatalf("legacy consent should be retained: %v", err)
+	}
+
+	// An explicit setting in the Go path wins over the legacy file on update.
+	if err := telemetry.New(a.Paths).SaveSettings(telemetry.Settings{Decided: true, Enabled: false, UUID: "cafebabe"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Update(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = telemetry.New(a.Paths).LoadSettings()
+	if err != nil || !s.Decided || s.Enabled || s.UUID != "cafebabe" {
+		t.Fatalf("current telemetry settings overwritten: %+v, %v", s, err)
 	}
 }
 

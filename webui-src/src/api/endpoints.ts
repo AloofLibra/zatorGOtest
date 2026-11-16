@@ -4,7 +4,7 @@ import type {
   ClientScopeMappingsPayload,
   FallbackSettings, IfacesSettings, LockResult, ModeSettingData, PortInfo, PortsSettings, ProfileInfo, ProviderSettings,
   ScopesPayload, StatePayload, StatusPayload, TlsBlobSettings, UdpGamesSettings, UpdateCheckResult,
-  WgBlobSettings, WgStateSettings, Recommendations, SupersweepPayload, WssizeRampSettings,
+  WgBlobSettings, WgStateSettings, Recommendations, SupersweepPayload, TelemetrySettings, WssizeRampSettings,
 } from './types'
 
 export const fetchStatus = (scope: string) =>
@@ -88,6 +88,7 @@ export const fetchSetting = {
   dns_desync: () => api<ModeSettingData>('/api/settings?setting=dns_desync'),
   ports: () => api<PortsSettings>('/api/settings?setting=ports'),
   provider: () => api<ProviderSettings>('/api/settings?setting=provider'),
+  telemetry: () => api<TelemetrySettings>('/api/settings?setting=telemetry'),
   update_check: () => api<UpdateCheckResult>('/api/settings?setting=update_check'),
   wssize_ramp: () => api<WssizeRampSettings>('/api/settings?setting=wssize_ramp'),
   ifaces: () => api<IfacesSettings>('/api/settings?setting=ifaces'),
@@ -176,6 +177,9 @@ export const applySetting = {
   provider_redetect: () =>
     api<ApplyResult>('/api/settings',
       formBody({ setting: 'provider_redetect' })),
+  telemetry_consent: (enabled: boolean) =>
+    api<{ ok: boolean; enabled: boolean; configured: boolean; sent: boolean; send_error?: boolean }>(
+      '/api/settings', formBody({ setting: 'telemetry_consent', value: enabled ? '1' : '0' })),
   wssize_ramp: (settings: WssizeRampSettings) =>
     api<ApplyResult & WssizeRampSettings>('/api/settings',
       formBody({ setting: 'wssize_ramp', value: settings.enabled ? '1' : '0',

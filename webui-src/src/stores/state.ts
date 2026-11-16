@@ -1,7 +1,7 @@
 import { fetchState } from '../api/endpoints'
 import { backups } from './backups'
 import {
-  fallbackSettings, ifacesSettings, modeSettings, ports, provider, settingsLoaded, wssizeRampSettings,
+  fallbackSettings, ifacesSettings, modeSettings, ports, provider, settingsLoaded, telemetrySettings, wssizeRampSettings,
   tlsBlobSettings, udpGamesSettings, wgBlobSettings, wgStateSettings,
 } from './settings'
 import { authRequired, locks, scope, scopes, status, statusLoaded, versionInfo } from './status'
@@ -29,6 +29,7 @@ export async function fetchAndApplyState() {
   modeSettings.dns_desync = payload.dns_desync
   ports.value = payload.ports
   provider.value = payload.provider
+  telemetrySettings.value = payload.telemetry
   backups.value = payload.backups
   statusLoaded.value = true
   settingsLoaded.value = true

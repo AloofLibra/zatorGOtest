@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/provider"
+	"github.com/AloofLibra/zator/internal/telemetry"
 )
 
 func settingGetMap(t *testing.T, e *env, setting string) map[string]any {
@@ -301,6 +303,103 @@ func TestSettingsProvider(t *testing.T) {
 	}
 	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "provider_set", "name", "  ")
 	wantError(t, resp, out, 400, "Укажите название провайдера")
+}
+
+func TestSettingsTelemetryConsent(t *testing.T) {
+	t.Setenv(telemetry.EnvStatsToken, "")
+	t.Setenv(telemetry.EnvStatsEndpoint, "")
+	e := newEnv(t, envOpts{})
+
+	got := settingGetMap(t, e, "telemetry")
+	if got["decided"] != false || got["enabled"] != false || got["configured"] != false {
+		t.Fatalf("default telemetry = %v", got)
+	}
+	resp, out := e.post("/cgi-bin/settings.cgi", "setting", "telemetry_consent", "value", "yes")
+	wantError(t, resp, out, http.StatusBadRequest, "Некорректное значение: yes")
+
+	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "telemetry_consent", "value", "1")
+	wantOK(t, resp, out)
+	if out["enabled"] != true || out["sent"] != false || out["configured"] != false {
+		t.Fatalf("enable telemetry without sender = %v", out)
+	}
+	saved, err := telemetry.New(e.app.Paths).LoadSettings()
+	if err != nil || !saved.Decided || !saved.Enabled || !telemetry.ValidUUID(saved.UUID) {
+		t.Fatalf("saved consent = %+v, %v", saved, err)
+	}
+	if got := settingGetMap(t, e, "telemetry"); got["enabled"] != true {
+		t.Fatalf("GET after enable = %v", got)
+	}
+
+	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "telemetry_consent", "value", "0")
+	wantOK(t, resp, out)
+	if out["enabled"] != false {
+		t.Fatalf("disable telemetry = %v", out)
+	}
+	after, err := telemetry.New(e.app.Paths).LoadSettings()
+	if err != nil || after.Enabled || after.UUID != saved.UUID {
+		t.Fatalf("disabled settings = %+v, %v", after, err)
+	}
+}
+
+func TestSettingsTelemetryConsentSendsInitialSnapshot(t *testing.T) {
+	var received bool
+	sender := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+		}
+		received = r.Form.Get("token") == "test-token" && telemetry.ValidUUID(r.Form.Get("uuid"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer sender.Close()
+	t.Setenv(telemetry.EnvStatsToken, "test-token")
+	t.Setenv(telemetry.EnvStatsEndpoint, sender.URL)
+	e := newEnv(t, envOpts{})
+	resp, out := e.post("/cgi-bin/settings.cgi", "setting", "telemetry_consent", "value", "1")
+	wantOK(t, resp, out)
+	if out["configured"] != true || out["sent"] != true || !received {
+		t.Fatalf("initial telemetry send = %v, received=%v", out, received)
+	}
+}
+
+func TestSettingsChangesSendTelemetryOnlyAfterConsent(t *testing.T) {
+	received := make(chan bool, 3)
+	sender := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		received <- r.Form.Get("token") == "test-token"
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer sender.Close()
+	t.Setenv(telemetry.EnvStatsToken, "test-token")
+	t.Setenv(telemetry.EnvStatsEndpoint, sender.URL)
+	e := newEnv(t, envOpts{})
+
+	resp, out := e.post("/api/set-lock", "profile", "1", "strategy", "7")
+	wantOK(t, resp, out)
+	select {
+	case <-received:
+		t.Fatal("statistics sent before explicit consent")
+	default:
+	}
+
+	resp, out = e.post("/api/settings", "setting", "telemetry_consent", "value", "1")
+	wantOK(t, resp, out)
+	if out["sent"] != true {
+		t.Fatalf("initial snapshot not sent: %v", out)
+	}
+	if ok := <-received; !ok {
+		t.Fatal("initial snapshot missing token")
+	}
+
+	resp, out = e.post("/api/set-lock", "profile", "1", "strategy", "8")
+	wantOK(t, resp, out)
+	select {
+	case ok := <-received:
+		if !ok {
+			t.Fatal("lock update missing token")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("lock update did not send a snapshot")
+	}
 }
 
 func TestSettingsProviderRedetect(t *testing.T) {

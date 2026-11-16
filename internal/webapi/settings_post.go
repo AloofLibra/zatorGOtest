@@ -1,6 +1,7 @@
 package webapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/provider"
+	"github.com/AloofLibra/zator/internal/telemetry"
 )
 
 // postFn — обработчик POST settings.cgi; возвращает тело успешного ответа.
@@ -34,6 +36,7 @@ func init() {
 		"ports_remove":      (*Server).postPortsRemove,
 		"provider_set":      (*Server).postProviderSet,
 		"provider_redetect": (*Server).postProviderRedetect,
+		"telemetry_consent": (*Server).postTelemetryConsent,
 		"client_scope":      (*Server).postClientScope,
 		"wssize_ramp":       (*Server).postWssizeRamp,
 		"supersweep":        (*Server).postSupersweep,
@@ -56,6 +59,33 @@ func init() {
 			postSettingsTable[n] = fn
 		}
 	}
+}
+
+func (s *Server) postTelemetryConsent(r *http.Request, p params) (map[string]any, error) {
+	enabled, err := parseOnOff(p)
+	if err != nil {
+		return nil, err
+	}
+	c := telemetry.New(s.paths)
+	settings, err := c.SetEnabled(enabled)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{
+		"ok": true, "decided": settings.Decided, "enabled": settings.Enabled,
+		"configured": strings.TrimSpace(c.Token) != "" && strings.TrimSpace(c.Endpoint) != "",
+		"sent":       false,
+	}
+	if enabled && out["configured"] == true {
+		ctx, cancel := context.WithTimeout(r.Context(), telemetry.SendTimeout)
+		defer cancel()
+		if err := c.SendStats(ctx); err == nil {
+			out["sent"] = true
+		} else {
+			out["send_error"] = true
+		}
+	}
+	return out, nil
 }
 
 // settingsPost разбирает setting и вызывает обработчик.
@@ -270,6 +300,7 @@ func (s *Server) postTLSBlob(r *http.Request, p params) (map[string]any, error) 
 		}
 		return nil, err
 	}
+	s.notifyTelemetry()
 	return map[string]any{"ok": true, "restarted": s.maybeRestart(r.Context(), p)}, nil
 }
 
@@ -295,11 +326,13 @@ func (s *Server) postTLSBlobProfile(r *http.Request, p params) (map[string]any, 
 		if err := s.store.ClearOverride(orchestra.OverrideBlob, profile); err != nil {
 			return nil, err
 		}
+		s.notifyTelemetry()
 		return map[string]any{"ok": true, "restarted": false, "restart_required": false}, nil
 	case v == blobDefault:
 		if err := s.store.SetOverride(orchestra.OverrideBlob, profile, blobDefault); err != nil {
 			return nil, err
 		}
+		s.notifyTelemetry()
 		return map[string]any{"ok": true, "restarted": false, "restart_required": false}, nil
 	case !tlsBlobFileRe.MatchString(v):
 		return nil, errf(http.StatusBadRequest, "Некорректное значение блоба: "+v)
@@ -326,6 +359,7 @@ func (s *Server) postTLSBlobProfile(r *http.Request, p params) (map[string]any, 
 		// Конфиг уже с новым blob — не откатываем и не отдаём 500.
 		out["warning"] = "Конфиг обновлён, но override не сохранён: " + err.Error()
 	}
+	s.notifyTelemetry()
 	return out, nil
 }
 
@@ -345,6 +379,7 @@ func (s *Server) postFakeMode(_ *http.Request, p params) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
+	s.notifyTelemetry()
 	return map[string]any{"ok": true, "restarted": false, "restart_required": false}, nil
 }
 

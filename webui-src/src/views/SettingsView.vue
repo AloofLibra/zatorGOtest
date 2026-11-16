@@ -8,7 +8,7 @@ import {
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { confirmDialog } from '../stores/confirm'
 import {
-  fallbackSettings, ifacesSettings, modeSettings, ports, provider, settingsLoaded,
+  fallbackSettings, ifacesSettings, modeSettings, ports, provider, settingsLoaded, telemetrySettings,
   tlsBlobSettings, udpGamesSettings, wgBlobSettings, wgStateSettings, wssizeRampSettings,
   refreshFallbackSettings, refreshIfacesSettings, refreshModeSetting, refreshPorts, refreshProvider,
   refreshTlsBlobSettings, refreshUdpGamesSettings, refreshWgBlobSettings, refreshWgStateSettings,
@@ -26,6 +26,7 @@ const router = useRouter()
 const sections = [
   { id: 'sec-updates', label: 'Обновления', group: 'Система' },
   { id: 'sec-provider', label: 'Провайдер', group: 'Система' },
+  { id: 'sec-telemetry', label: 'Телеметрия', group: 'Система' },
   { id: 'sec-backups', label: 'Бэкапы', group: 'Система' },
   { id: 'sec-modes', label: 'Режимы', group: 'Обход' },
   { id: 'sec-tls', label: 'TLS', group: 'Обход' },
@@ -40,7 +41,7 @@ const sections = [
 ]
 
 const settingGroups = [
-  { id: 'grp-system', title: 'Система', desc: 'Обновления, провайдер и резервные копии.' },
+  { id: 'grp-system', title: 'Система', desc: 'Обновления, провайдер, телеметрия и резервные копии.' },
   { id: 'grp-bypass', title: 'Обход DPI', desc: 'Режимы стратегий, TLS/WG blob и wssize.' },
   { id: 'grp-net', title: 'Сеть', desc: 'Firewall, интерфейсы WAN/LAN, порты NFQUEUE и client scopes.' },
   { id: 'grp-svc', title: 'Сервис', desc: 'Сырой конфиг zapret2 и журнал ошибок.' },
@@ -277,6 +278,21 @@ async function saveProvider() {
       showToast('Провайдер сохранён')
       await refreshProvider()
       await refreshAll()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function setTelemetryConsent(enabled: boolean) {
+  try {
+    await withBusy('telemetry', async () => {
+      const result = await applySetting.telemetry_consent(enabled)
+      await fetchAndApplyState()
+      if (!enabled) showToast('Отправка статистики отключена')
+      else if (!result.configured) showToast('Согласие сохранено. Сервер отправки не настроен, данные не отправляются.')
+      else if (result.sent) showToast('Согласие сохранено, статистика отправлена')
+      else showToast('Согласие сохранено, отправить статистику не удалось', 'error')
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -701,6 +717,21 @@ onMounted(async () => {
           <button type="button" class="primary" :disabled="busyActive || !providerName.trim()" @click="saveProvider">Сохранить</button>
           <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'provider-redetect' }" @click="redetectProvider">Определить заново</button>
         </div>
+      </section>
+
+      <section id="sec-telemetry" class="panel">
+        <div class="panel-h"><h2>Анонимная статистика</h2></div>
+        <p class="panel-d">При согласии отправляются псевдоним установки, провайдер, номера стратегий, выбранные TLS blob и режим fake, тип устройства и наличие WebUI. Домены и содержимое трафика не отправляются.</p>
+        <p class="panel-d">Отправка выключена, пока вы явно не дадите согласие.</p>
+        <label class="toggle">
+          <input type="checkbox" :checked="!!telemetrySettings?.enabled" :disabled="busyActive"
+            @change="setTelemetryConsent(($event.target as HTMLInputElement).checked)">
+          <span>Разрешить отправку статистики</span>
+          <span class="chip" :class="{ on: telemetrySettings?.enabled }">{{ telemetrySettings?.enabled ? 'вкл' : 'выкл' }}</span>
+        </label>
+        <p class="panel-d" v-if="telemetrySettings?.enabled && !telemetrySettings.configured">
+          Согласие сохранено, но endpoint и token отправки не настроены; статистика не отправляется.
+        </p>
       </section>
 
       <section id="sec-backups" class="panel">
