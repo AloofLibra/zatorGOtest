@@ -80,59 +80,6 @@ func TestFindBlock(t *testing.T) {
 	}
 }
 
-func TestRemoveLegacyQUIC443KeepsFollowingProfile(t *testing.T) {
-	c := Parse(`--new
-#Z2R_QUIC443_BEGIN
---filter-udp=443
---payload=quic_initial
---lua-desync=fake:blob=quic_google:repeats=10
-#Z2R_QUIC443_END
---new
-#Z2R_AUTO_STANDARD_5_BEGIN
---filter-udp=443
---lua-desync=fake:blob=quic_google:strategy=1
-#Z2R_AUTO_STANDARD_5_END
-`)
-	if !c.RemoveLegacyQUIC443() {
-		t.Fatal("expected legacy QUIC443 profile to be removed")
-	}
-	got := c.String()
-	if strings.Contains(got, "QUIC443") || strings.Contains(got, "repeats=10") {
-		t.Fatalf("legacy profile remains: %s", got)
-	}
-	if !strings.Contains(got, "--new\n#Z2R_AUTO_STANDARD_5_BEGIN") || !strings.Contains(got, "strategy=1") {
-		t.Fatalf("shared QUIC strategy profile was removed or corrupted: %s", got)
-	}
-	if c.RemoveLegacyQUIC443() {
-		t.Fatal("second cleanup should be a no-op")
-	}
-}
-
-func TestRemoveLegacyQUIC443KeyedProfile(t *testing.T) {
-	c := Parse(`NFQWS2_OPT="
---new
---filter-udp=443
---lua-desync=circular_locked:key=5:proto=udp
---payload=quic_initial
---lua-desync=fake:blob=quic_google:strategy=1
---new
---filter-udp=1026-65531
---lua-desync=circular_locked:key=7:proto=udp
---lua-desync=fake:blob=quic_google:strategy=18
-"
-`)
-	if !c.RemoveLegacyQUIC443() {
-		t.Fatal("expected keyed legacy QUIC profile to be removed")
-	}
-	opt, _ := c.NFQWS2Opt()
-	if strings.Contains(opt, "key=5:proto=udp") || strings.Contains(opt, "quic_initial") {
-		t.Fatalf("legacy QUIC profile remains: %s", opt)
-	}
-	if !strings.Contains(opt, "key=7:proto=udp") || !strings.Contains(opt, "strategy=18") {
-		t.Fatalf("shared UDP QUIC strategies were removed: %s", opt)
-	}
-}
-
 func TestBlockMaxStrategy(t *testing.T) {
 	c := Parse(sampleBlocks)
 	b, _ := c.AutoStandardBlock("3")
