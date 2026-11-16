@@ -984,6 +984,29 @@ function slm_get_locked(askey, hostkey, scope)
     return nil
 end
 
+--- Return only explicitly verified auto locks; proposal rows (`source=seed`)
+--- must never silently become active strategy locks.
+function slm_get_verified_auto_locked(askey, hostname, scope)
+    if not askey or not hostname then return nil end
+    if type(slm_merge_auto_locked_from_disk) == "function" then
+        slm_merge_auto_locked_from_disk(false)
+    end
+    local key = slm_googlevideo_hostkey(hostname) or slm_normalize_hostkey(hostname)
+    if not key then return nil end
+    local sk = slm_scope_key(scope)
+    local strat = SLM_AUTO_LOCKED[askey]
+        and SLM_AUTO_LOCKED[askey][sk]
+        and SLM_AUTO_LOCKED[askey][sk][key]
+    local source = SLM_AUTO_LOCKED_SOURCE[askey]
+        and SLM_AUTO_LOCKED_SOURCE[askey][sk]
+        and SLM_AUTO_LOCKED_SOURCE[askey][sk][key]
+    strat = tonumber(strat)
+    if source == "learned" and strat and strat >= 1 then
+        return strat
+    end
+    return nil
+end
+
 --- Проверить, является ли лок пользовательским (защищён от auto-unlock)
 --- @param askey string Ключ autostate (tls, http, quic, etc.) - optional, defaults to "default"
 --- @param hostkey string Имя хоста (будет нормализовано)

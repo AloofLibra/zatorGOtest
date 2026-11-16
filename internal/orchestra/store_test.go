@@ -134,7 +134,7 @@ func TestSetLockValidation(t *testing.T) {
 	}{
 		{"ok tls profile 3", "default", "3", "tls", 43, false},
 		{"ok http profile 1", "default", "1", "http", 1, false},
-		{"ok udp profile 5", "default", "5", "udp", 32, false},
+		{"removed QUIC profile 5", "default", "5", "udp", 32, true},
 		{"ok profile 4 max", "default", "4", "tls", 28, false},
 		{"ok fallback 9 http", "default", "9", "http", 8, false},
 		{"ok mark scope", "mark:2", "3", "tls", 1, false},
@@ -198,7 +198,6 @@ func TestGetLockReadsAllFormats(t *testing.T) {
 		"",
 		"1\t5",               // 2 колонки: tls
 		"1\thttp\t2",         // 3 колонки
-		"default\t5\tudp\t9", // 4 колонки, default
 		"mark:3\t2\ttls\t11", // legacy mark
 		"garbage line",
 		"3\ttls\tnot-a-number",
@@ -210,7 +209,6 @@ func TestGetLockReadsAllFormats(t *testing.T) {
 	}{
 		{"default", "1", "tls", 5},
 		{"default", "1", "http", 2},
-		{"default", "5", "udp", 9},
 		{"default", "2", "tls", StrategyAuto}, // mark:3 не виден в default
 		{"mark:3", "2", "tls", 11},            // legacy-строка видна в mark:3
 		{"mark:4", "2", "tls", StrategyAuto},

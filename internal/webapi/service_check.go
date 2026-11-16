@@ -147,6 +147,10 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request, p params) {
 			return
 		}
 		id, _ := strconv.Atoi(profile)
+		if !config.ValidProfile(id) {
+			writeError(w, http.StatusBadRequest, "Некорректный профиль")
+			return
+		}
 		waitApply := p.Get("wait_apply") == "1" || strings.EqualFold(p.Get("wait_apply"), "true")
 		if waitApply {
 			timer := time.NewTimer(luaLockCacheTTL)

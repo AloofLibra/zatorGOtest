@@ -822,7 +822,7 @@ onMounted(async () => {
 
       <section id="sec-modes" class="panel">
         <div class="panel-h"><h2>Режимы обхода</h2></div>
-        <p class="panel-d">Авторотация, hostlist, fallback, DNS, UDP games, RST, reasm, QUIC.</p>
+        <p class="panel-d">Авторотация, hostlist, fallback, DNS, UDP games, RST, reasm.</p>
         <div class="grid-2">
           <label v-for="m in modes" :key="m.key" class="toggle">
             <input type="checkbox" :checked="!!modeOn(m)" :disabled="busyActive"

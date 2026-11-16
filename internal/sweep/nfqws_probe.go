@@ -145,7 +145,7 @@ func (p *NfqwsProbe) Start(ctx context.Context, profile int) error {
 	if err := os.MkdirAll(filepath.Join(p.cfg.OrchestraDir, "scopes"), 0o755); err != nil {
 		return err
 	}
-	for _, name := range []string{"locked.tsv", "locked.manual.tsv"} {
+	for _, name := range []string{"locked.tsv", "locked.manual.tsv", "auto_locked.tsv"} {
 		path := filepath.Join(p.cfg.OrchestraDir, name)
 		if _, err := os.Stat(path); err != nil {
 			if err := fsutil.AtomicWriteFile(path, nil, 0o644); err != nil {
@@ -361,6 +361,8 @@ func (p *NfqwsProbe) writeProbeLua(luaDir string) error {
 		}
 		probeOrch := filepath.ToSlash(p.cfg.OrchestraDir)
 		out := strings.ReplaceAll(string(data), productionOrchestraLuaPath, probeOrch)
+		out = strings.ReplaceAll(out, "/tmp/auto_locked.tsv", filepath.ToSlash(filepath.Join(p.cfg.OrchestraDir, "auto_locked.tsv")))
+		out = strings.ReplaceAll(out, "/tmp/z2r-auto-locked.reload", filepath.ToSlash(filepath.Join(p.cfg.OrchestraDir, "auto_locked.reload")))
 		// На случай кастомных корней: замена state/orchestra и cache/orchestra путей.
 		for _, old := range []string{
 			filepath.ToSlash(filepath.Join(p.cfg.Paths.ExtraStratsDir, "cache", "orchestra")),

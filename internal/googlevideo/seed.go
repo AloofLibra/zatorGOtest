@@ -45,6 +45,9 @@ type SeederConfig struct {
 	DefaultStrat int
 	MaxStrat     int
 	TailMax      int
+	// PreferredStrats пробуются сразу после DefaultStrat, но всё равно
+	// считаются непроверенными до фактической успешной пробы.
+	PreferredStrats []int
 	// Interval между циклами.
 	Interval time.Duration
 	// Cooldown после обработки одного sn.
@@ -219,6 +222,7 @@ func (s *Seeder) tick(ctx context.Context) {
 		return
 	}
 	cands := CandidateStrategies(locks, s.cfg.DefaultStrat, s.cfg.MaxStrat, s.cfg.TailMax)
+	cands = prioritizeCandidates(cands, s.cfg.PreferredStrats, s.cfg.MaxStrat)
 	if s.cfg.ProbeBatch == nil && s.cfg.Probe == nil {
 		// Never turn an untested default into a lock or transfer evidence.
 		s.setStatus(func(st *SeedStatus) {
@@ -230,6 +234,7 @@ func (s *Seeder) tick(ctx context.Context) {
 		return
 	}
 	if s.cfg.ProbeBatch != nil {
+		s.markProbed(hk)
 		strategy, detail, err := s.cfg.ProbeBatch(ctx, fqdn, cands, func(strat int) {
 			s.setStatus(func(st *SeedStatus) {
 				st.State = "probing"
@@ -250,7 +255,6 @@ func (s *Seeder) tick(ctx context.Context) {
 			return
 		}
 		if strategy == 0 {
-			s.markProbed(hk)
 			s.setStatus(func(st *SeedStatus) {
 				st.State = "idle"
 				st.HostKey = ""
@@ -282,7 +286,6 @@ func (s *Seeder) tick(ctx context.Context) {
 			})
 			return
 		}
-		s.markProbed(hk)
 		s.setStatus(func(st *SeedStatus) {
 			st.State = "idle"
 			st.HostKey = ""
@@ -393,6 +396,24 @@ func containsStrategy(strategies []int, value int) bool {
 		}
 	}
 	return false
+}
+
+func prioritizeCandidates(candidates, preferred []int, maxStrategy int) []int {
+	out := append([]int(nil), candidates...)
+	insertAt := 0
+	if len(out) > 0 {
+		insertAt = 1 // keep the configured default candidate first
+	}
+	for _, strategy := range preferred {
+		if strategy < 1 || strategy > maxStrategy || containsStrategy(out, strategy) {
+			continue
+		}
+		out = append(out, 0)
+		copy(out[insertAt+1:], out[insertAt:])
+		out[insertAt] = strategy
+		insertAt++
+	}
+	return out
 }
 
 func (s *Seeder) commit(hostKey string, strategy int, source string) error {

@@ -48,13 +48,14 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 			_, _ = a.SyncGooglevideoHosts()
 			return a.GooglevideoHosts().List()
 		},
-		ProbeBatch:    a.probeGooglevideoCandidates,
-		DefaultStrat:  41,
-		MaxStrat:      44,
-		TailMax:       8,
-		Interval:      45 * time.Second,
-		Cooldown:      2 * time.Second,
-		RetryInterval: time.Hour,
+		ProbeBatch:      a.probeGooglevideoCandidates,
+		DefaultStrat:    41,
+		MaxStrat:        44,
+		TailMax:         8,
+		PreferredStrats: []int{16},
+		Interval:        45 * time.Second,
+		Cooldown:        2 * time.Second,
+		RetryInterval:   time.Hour,
 		OnSeeded: func(hostKey string, strategy int) {
 			_ = hostKey
 			_ = strategy

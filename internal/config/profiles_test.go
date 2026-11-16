@@ -23,13 +23,14 @@ func loadDefault(t *testing.T) *Config {
 }
 
 func TestDefaultProfiles(t *testing.T) {
-	wantMax := []int{44, 44, 44, 28, 32, 32, 20, 44, 8, 20}
+	ids := []int{1, 2, 3, 4, 6, 7, 8, 9, 10}
+	wantMax := []int{44, 44, 44, 28, 32, 20, 44, 8, 20}
 	profiles := DefaultProfiles()
-	if len(profiles) != 10 {
-		t.Fatalf("len = %d, want 10", len(profiles))
+	if len(profiles) != len(ids) {
+		t.Fatalf("len = %d, want %d", len(profiles), len(ids))
 	}
 	for i, p := range profiles {
-		if p.ID != i+1 {
+		if p.ID != ids[i] {
 			t.Errorf("profile[%d].ID = %d", i, p.ID)
 		}
 		if p.MaxStrategy != wantMax[i] {
@@ -39,13 +40,13 @@ func TestDefaultProfiles(t *testing.T) {
 			t.Errorf("profile %d has empty metadata: %+v", p.ID, p)
 		}
 	}
-	if profiles[6].Label != "UDP Games" || !profiles[6].IsUDPGames {
-		t.Errorf("profile 7 = %+v", profiles[6])
+	if profiles[5].Label != "UDP Games" || !profiles[5].IsUDPGames {
+		t.Errorf("profile 7 = %+v", profiles[5])
 	}
-	if !profiles[7].IsFallback || !profiles[8].IsFallback || profiles[0].IsFallback {
+	if !profiles[6].IsFallback || !profiles[7].IsFallback || profiles[0].IsFallback {
 		t.Error("fallback flags are wrong")
 	}
-	if !profiles[9].IsDNSDesync {
+	if !profiles[8].IsDNSDesync {
 		t.Error("profile 10 must be DNS desync")
 	}
 }
@@ -59,7 +60,7 @@ func TestProfileHelpers(t *testing.T) {
 		{2, []string{"tls"}},
 		{3, []string{"tls"}},
 		{4, []string{"tls"}},
-		{5, []string{"udp"}},
+		{5, nil},
 		{6, []string{"udp"}},
 		{7, []string{"udp"}},
 		{8, []string{"tls"}},
@@ -85,8 +86,11 @@ func TestProfileHelpers(t *testing.T) {
 	if ProfileLabel(10) != "DNS Антиспуф" {
 		t.Error("ProfileLabel wrong")
 	}
-	if ValidProfile(0) || !ValidProfile(1) || !ValidProfile(10) || ValidProfile(11) {
+	if ValidProfile(0) || !ValidProfile(1) || !ValidProfile(10) || ValidProfile(5) || ValidProfile(11) {
 		t.Error("ValidProfile wrong")
+	}
+	if _, ok := DefaultProfile(5); ok {
+		t.Error("DefaultProfile(5) must fail")
 	}
 	if _, ok := DefaultProfile(11); ok {
 		t.Error("DefaultProfile(11) must fail")
@@ -103,15 +107,19 @@ func TestProfileHelpers(t *testing.T) {
 // разобранные максимумы TCP-профилей 1/2/3/8 и DefaultMaxStrategy совпадают.
 func TestProfileMaxStrategyFromDefaultConfig(t *testing.T) {
 	c := loadDefault(t)
-	want := []int{44, 44, 44, 28, 32, 32, 20, 44, 8, 20}
+	if c.ProfileMaxStrategy(5) != 0 || c.ProfileMaxStrategy(7) != 20 {
+		t.Fatalf("legacy QUIC profile remains or shared UDP profile missing: profile5=%d profile7=%d", c.ProfileMaxStrategy(5), c.ProfileMaxStrategy(7))
+	}
+	ids := []int{1, 2, 3, 4, 6, 7, 8, 9, 10}
+	want := []int{44, 44, 44, 28, 32, 20, 44, 8, 20}
 	for i, w := range want {
-		id := i + 1
+		id := ids[i]
 		if got := c.ProfileMaxStrategy(id); got != w {
 			t.Errorf("ProfileMaxStrategy(%d) = %d, want %d", id, got, w)
 		}
 	}
 	for i, p := range c.Profiles() {
-		if p.MaxStrategy != want[i] {
+		if p.MaxStrategy != want[i] || p.ID != ids[i] {
 			t.Errorf("Profiles()[%d].MaxStrategy = %d, want %d", i, p.MaxStrategy, want[i])
 		}
 	}
@@ -199,8 +207,9 @@ func TestProfileMaxStrategyOrDefault(t *testing.T) {
 	if got := empty.ProfileMaxStrategyOrDefault(1); got != 44 {
 		t.Errorf("or-default = %d, want 44", got)
 	}
+	ids := []int{1, 2, 3, 4, 6, 7, 8, 9, 10}
 	for i, p := range empty.Profiles() {
-		if p.MaxStrategy != DefaultMaxStrategy(i+1) {
+		if p.MaxStrategy != DefaultMaxStrategy(p.ID) || p.ID != ids[i] {
 			t.Errorf("Profiles()[%d] = %d", i, p.MaxStrategy)
 		}
 	}

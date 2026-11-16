@@ -17,7 +17,7 @@ import (
 const maxBlobUploadBytes = 2 << 20 // 2 MiB
 
 // postStrategyRegister — POST settings.cgi setting=strategy_register
-// profile=1..10, desync=<строка>, lock=0|1 (опц.), restart=0|1.
+// profile=1..10 (кроме зарезервированного ID 5), desync=<строка>, lock=0|1 (опц.), restart=0|1.
 func (s *Server) postStrategyRegister(r *http.Request, p params) (map[string]any, error) {
 	profile := p.Get("profile")
 	if !profileRe.MatchString(profile) {

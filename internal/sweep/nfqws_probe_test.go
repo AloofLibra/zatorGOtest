@@ -118,6 +118,12 @@ local X = "/opt/zator/state/orchestra/foo"
 	if err := os.WriteFile(filepath.Join(p.LuaDir, "locked.lua"), []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	managerSrc := `local SLM_AUTO_LOCKED_PATH = "/tmp/auto_locked.tsv"
+local SLM_AUTO_LOCKED_RELOAD_STAMP = "/tmp/z2r-auto-locked.reload"
+`
+	if err := os.WriteFile(filepath.Join(p.LuaDir, "strategy-lock-manager.lua"), []byte(managerSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for name, value := range map[string]string{
 		"blob_override.tsv": "1\tcustom1\n2\tcustom2\n3\tcustom3\n4\tcustom4\n8\tcustom8\n",
 		"mode_override.tsv": "1\tclone\n2\tclone\n3\tclone\n4\tclone\n8\tclone\n",
@@ -157,6 +163,14 @@ NFQWS2_OPT="
 	}
 	if strings.Contains(string(got), productionOrchestraLuaPath) {
 		t.Fatal("production path still present")
+	}
+	manager, err := os.ReadFile(filepath.Join(luaDir, "strategy-lock-manager.lua"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateAutoPath := filepath.ToSlash(filepath.Join(probe.OrchestraDir(), "auto_locked.tsv"))
+	if !strings.Contains(string(manager), `SLM_AUTO_LOCKED_PATH = "`+privateAutoPath+`"`) || strings.Contains(string(manager), `SLM_AUTO_LOCKED_PATH = "/tmp/auto_locked.tsv"`) {
+		t.Fatalf("isolated probe auto-lock path was not redirected: %s", manager)
 	}
 	for name, want := range map[string]string{
 		"blob_override.tsv": "1\tcustom1\n2\tcustom2\n3\tcustom3\n4\tcustom4\n8\tcustom8\n",

@@ -228,7 +228,7 @@ func TestSeederBatchProbeWritesOnlyReturnedCandidate(t *testing.T) {
 	live := filepath.Join(dir, "live.tsv")
 	var tried []int
 	s := NewSeeder(SeederConfig{
-		LivePath: live, DefaultStrat: 44, MaxStrat: 44, TailMax: 3,
+		LivePath: live, DefaultStrat: 41, MaxStrat: 44, TailMax: 8, PreferredStrats: []int{16},
 		ListHosts: func() ([]string, error) { return []string{"rr1---sn-new.googlevideo.com"}, nil },
 		ProbeBatch: func(_ context.Context, fqdn string, candidates []int, onTry func(int)) (int, string, error) {
 			if fqdn != "rr1---sn-new.googlevideo.com" || len(candidates) == 0 {
@@ -237,7 +237,7 @@ func TestSeederBatchProbeWritesOnlyReturnedCandidate(t *testing.T) {
 			for _, candidate := range candidates {
 				onTry(candidate)
 				tried = append(tried, candidate)
-				if candidate == 3 {
+				if candidate == 16 {
 					return candidate, "TLS and download verified", nil
 				}
 			}
@@ -246,13 +246,13 @@ func TestSeederBatchProbeWritesOnlyReturnedCandidate(t *testing.T) {
 	})
 	s.tick(context.Background())
 	got, err := ParseAutoLockedTSV(live)
-	if err != nil || len(got) != 1 || got[0].Strategy != 3 || got[0].Source != SourceLearned {
+	if err != nil || len(got) != 1 || got[0].Strategy != 16 || got[0].Source != SourceLearned {
 		t.Fatalf("batch result = %+v err=%v", got, err)
 	}
-	if len(tried) < 2 || tried[len(tried)-1] != 3 {
+	if len(tried) != 2 || tried[0] != 41 || tried[1] != 16 {
 		t.Fatalf("tried strategies = %v", tried)
 	}
-	if status := s.Status(); status.LastResult != "ok" || status.LastStrat != 3 || status.Pending != 0 {
+	if status := s.Status(); status.LastResult != "ok" || status.LastStrat != 16 || status.Pending != 0 {
 		t.Fatalf("status = %+v", status)
 	}
 }

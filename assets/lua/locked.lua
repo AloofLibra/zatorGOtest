@@ -1173,6 +1173,15 @@ function circular_locked(ctx, desync)
 
   local scope = desync_client_scope(desync)
   local locked = locked_strategy_for_profile(profile, proto, scope)
+  -- Profile 2 uses circular_locked in the stable default config. Consume only
+  -- verified Go/Lua auto-locks; transfer seeds remain proposals, and an
+  -- explicit per-host lock above keeps precedence.
+  if not locked and base_profile == "2" and host and type(slm_get_verified_auto_locked) == "function" then
+    locked = slm_get_verified_auto_locked(base_profile, host, scope)
+    if locked then
+      DLOG("circular_locked: verified Googlevideo hostkey lock "..tostring(locked))
+    end
+  end
   if (not locked) and profile ~= base_profile then
     locked = locked_strategy_for_profile(base_profile, proto, scope)
     if locked then

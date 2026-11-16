@@ -25,7 +25,8 @@ func (a *App) NfqwsWantRunningPath() string {
 //   - снимает legacy shell-if у WSSIZE;
 //   - включает WSSIZE lite только если у legacy config ещё нет пользовательского значения;
 //   - синхронизирует ARGS/SKIP;
-//   - гарантирует soft_success_in=0 для circular_quality:key=2.
+//   - profile 2 остаётся на circular_locked, получает soft_success_in=0 и
+//     может применять SNI-локи, если conntrack metadata отсутствует.
 //
 // Явное ENABLE=0 и режим пользователя сохраняются при каждом вызове.
 func (a *App) migratePackageA(cfg *config.Config) bool {
@@ -52,6 +53,9 @@ func (a *App) migratePackageA(cfg *config.Config) bool {
 		changed = true
 	}
 	if ok, err := cfg.EnsureProfile2SoftSuccess(); err == nil && ok {
+		changed = true
+	}
+	if ok, err := cfg.EnsureProfile2AllowNoHost(); err == nil && ok {
 		changed = true
 	}
 	return changed

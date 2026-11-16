@@ -17,7 +17,7 @@ func TestLiveGooglevideoSeedProbe(t *testing.T) {
 		t.Fatal("ZATOR_LIVE_GOOGLEVIDEO_HOST is required")
 	}
 	a := New()
-	candidates := []int{16}
+	candidates := []int{41, 16}
 	strategy, detail, err := a.probeGooglevideoCandidates(context.Background(), host, candidates, func(n int) {
 		t.Logf("trying profile 2 strategy %d", n)
 	})

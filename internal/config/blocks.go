@@ -124,17 +124,38 @@ func (c *Config) ReplaceBlockBody(name string, body []string) error {
 // RemoveLegacyQUIC443 удаляет устаревший профиль целиком, сохраняя `--new`
 // перед следующим профилем.
 func (c *Config) RemoveLegacyQUIC443() bool {
-	b, ok := c.FindBlock("QUIC443")
+	if b, ok := c.FindBlock("QUIC443"); ok {
+		start := b.Begin
+		if start > 0 && strings.TrimSpace(c.lines[start-1]) == "--new" {
+			start--
+		}
+		c.spliceLines(start, b.End+1, nil)
+		c.reindex()
+		return true
+	}
+
+	opt, ok := c.NFQWS2Opt()
 	if !ok {
 		return false
 	}
-	start := b.Begin
-	if start > 0 && strings.TrimSpace(c.lines[start-1]) == "--new" {
-		start--
+	lines := strings.Split(opt, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "--lua-desync=circular_locked:key=5:proto=udp") {
+			continue
+		}
+		start, end := i, i+1
+		for start > 0 && !newLineRe.MatchString(lines[start-1]) {
+			start--
+		}
+		for end < len(lines) && !newLineRe.MatchString(lines[end]) {
+			end++
+		}
+		if end < len(lines) {
+			end++
+		}
+		return c.SetNFQWS2Opt(strings.Join(append(lines[:start], lines[end:]...), "\n")) == nil
 	}
-	c.spliceLines(start, b.End+1, nil)
-	c.reindex()
-	return true
+	return false
 }
 
 // AutoStandardBlock возвращает блок `#Z2R_AUTO_STANDARD_<id>_BEGIN/END`.

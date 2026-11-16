@@ -7,7 +7,8 @@ import (
 	"strings"
 )
 
-// Диапазон номеров профилей.
+// Диапазон идентификаторов профилей. ID 5 зарезервирован: отдельный QUIC/UDP
+// 443 профиль заменён общим UDP-профилем 7.
 const (
 	MinProfile = 1
 	MaxProfile = 10
@@ -48,7 +49,6 @@ var profileTable = [MaxProfile + 1]profileMeta{
 	2:  {"Googlevideo", "Видео-домены YouTube (стратегия из lock)", "TCP 443 (Googlevideo)", []string{"tls"}, 44},
 	3:  {"RKN Лист", "Основные блокировки сайтов", "TCP 443 (RKN)", []string{"tls"}, 44},
 	4:  {"Discord TCP", "TCP профиль Discord", "TCP 443 (Discord)", []string{"tls"}, 28},
-	5:  {"YouTube QUIC", "UDP 443 для YouTube", "UDP 443 (QUIC)", []string{"udp"}, 32},
 	6:  {"Voice UDP", "Discord/STUN и голосовые сервисы", "UDP Voice (Discord/STUN)", []string{"udp"}, 32},
 	7:  {"UDP Games", "Игровой UDP (порты 1026-65531)", "UDP Games (1026-65531)", []string{"udp"}, 20},
 	8:  {"Fallback TLS", "Безразборный режим TLS (profile 8)", "Fallback TLS", []string{"tls"}, 44},
@@ -56,11 +56,11 @@ var profileTable = [MaxProfile + 1]profileMeta{
 	10: {"DNS Антиспуф", "Защита UDP:53 от подмены DNS-ответов (клон с малым TTL)", "DNS антиспуф UDP:53", []string{"udp"}, 20},
 }
 
-// ValidProfile сообщает, входит ли id в диапазон профилей 1..10.
-func ValidProfile(id int) bool { return id >= MinProfile && id <= MaxProfile }
+// ValidProfile сообщает, есть ли профиль с таким ID.
+func ValidProfile(id int) bool { return id >= MinProfile && id <= MaxProfile && id != 5 }
 
 // DefaultMaxStrategy возвращает максимум стратегий профиля для штатного
-// config.default (44,44,44,28,32,32,20,44,8,20); 0 для неизвестного профиля.
+// config.default; 0 для неизвестного или удалённого профиля.
 func DefaultMaxStrategy(id int) int {
 	if !ValidProfile(id) {
 		return 0
@@ -121,17 +121,18 @@ func DefaultProfile(id int) (Profile, bool) {
 	}, true
 }
 
-// DefaultProfiles возвращает профили 1..10 с максимумами по умолчанию.
+// DefaultProfiles возвращает активные профили с максимумами по умолчанию.
 func DefaultProfiles() []Profile {
-	out := make([]Profile, 0, MaxProfile)
+	out := make([]Profile, 0, MaxProfile-1)
 	for id := MinProfile; id <= MaxProfile; id++ {
-		p, _ := DefaultProfile(id)
-		out = append(out, p)
+		if p, ok := DefaultProfile(id); ok {
+			out = append(out, p)
+		}
 	}
 	return out
 }
 
-// Profiles возвращает профили 1..10; MaxStrategy вычисляется по конфигу
+// Profiles возвращает активные профили; MaxStrategy вычисляется по конфигу
 // (ProfileMaxStrategy), а при невозможности определить — берётся значение
 // по умолчанию.
 func (c *Config) Profiles() []Profile {
@@ -184,6 +185,9 @@ func importName(line string) string {
 // в NFQWS2_OPT. Стратегии шаблонов (--template=…) учитываются через --import.
 // Возвращает 0, если стратегий не найдено.
 func (c *Config) ProfileMaxStrategy(id int) int {
+	if !ValidProfile(id) {
+		return 0
+	}
 	var beginMark, endMark string
 	switch id {
 	case ProfileFallbackT:

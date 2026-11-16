@@ -107,7 +107,7 @@ NFQWS2_OPT="
 `)
 	a.migratePackageA(cfg)
 	opt, _ := cfg.NFQWS2Opt()
-	if !strings.Contains(opt, "circular_locked:key=2") || strings.Contains(opt, "circular_quality:key=2") {
+	if !strings.Contains(opt, "circular_locked:key=2:allow_nohost=1") || strings.Contains(opt, "circular_quality:key=2") {
 		t.Fatalf("legacy Googlevideo handler changed during migration: %s", opt)
 	}
 }

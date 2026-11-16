@@ -343,7 +343,6 @@ const (
 	profGV     = "2"
 	profRKN    = "3"
 	profDS     = "4"
-	profUDP    = "5"
 	profVoice  = "6"
 	profGames  = "7"
 	profFBTLS  = "8"
@@ -356,6 +355,7 @@ type Stats struct {
 	ISP  string
 
 	// Номера стратегий по профилям (0 — авто/нет фиксации).
+	// UDP is retained as a zero-valued legacy telemetry field for server schema compatibility.
 	UDP, TCP, GV, RKN, DSTLS, VoiceUDP, GamesUDP, FBTLS, FBHTTP int
 
 	// TLS blob: глобальный и по профилям 1,2,3,4,8 (пусто — неизвестно).
@@ -446,7 +446,6 @@ func (c *Client) CollectStats(uuid string) (Stats, error) {
 		{&s.GV, profGV, orchestra.ProtoTLS},
 		{&s.RKN, profRKN, orchestra.ProtoTLS},
 		{&s.DSTLS, profDS, orchestra.ProtoTLS},
-		{&s.UDP, profUDP, orchestra.ProtoUDP},
 		{&s.VoiceUDP, profVoice, orchestra.ProtoUDP},
 		{&s.GamesUDP, profGames, orchestra.ProtoUDP},
 		{&s.FBTLS, profFBTLS, orchestra.ProtoTLS},

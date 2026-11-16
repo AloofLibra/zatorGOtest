@@ -210,7 +210,7 @@ func TestSendStatsPostsProviderAndLocks(t *testing.T) {
 		n              orchestra.Strategy
 	}{
 		{"1", "tls", 7}, {"2", "tls", 3}, {"3", "tls", 11}, {"4", "tls", 2},
-		{"5", "udp", 5}, {"6", "udp", 1}, {"8", "tls", 4}, {"9", "http", 6},
+		{"6", "udp", 1}, {"8", "tls", 4}, {"9", "http", 6},
 	} {
 		if err := st.SetLock(orchestra.ScopeDefault, l.profile, l.proto, l.n); err != nil {
 			t.Fatalf("SetLock %+v: %v", l, err)
@@ -234,7 +234,7 @@ func TestSendStatsPostsProviderAndLocks(t *testing.T) {
 	want := map[string]string{
 		"token": "test-token", "uuid": s.UUID, "isp": "MTS - Moscow",
 		"tcp": "7", "gv": "3", "rkn": "11", "ds_tls": "2",
-		"udp": "5", "voice_udp": "1", "games_udp": "0", "fb_tls": "4", "fb_http": "6",
+		"udp": "0", "voice_udp": "1", "games_udp": "0", "fb_tls": "4", "fb_http": "6",
 		"mode_1": "clone", "mode_2": "classic", "mode_8": "classic",
 		"os": "openwrt", "webui": "1",
 	}

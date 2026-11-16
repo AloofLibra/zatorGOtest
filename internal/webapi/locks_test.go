@@ -41,7 +41,7 @@ func TestStatusShape(t *testing.T) {
 		t.Errorf("status = %v", st)
 	}
 	// Максимумы считаются по встроенному config.default (44 TLS-стратегии).
-	want := map[int]int{1: 44, 2: 44, 3: 44, 4: 28, 5: 32, 6: 32, 7: 20, 8: 44, 9: 8, 10: 20}
+	want := map[int]int{1: 44, 2: 44, 3: 44, 4: 28, 6: 32, 7: 20, 8: 44, 9: 8, 10: 20}
 	for id, max := range want {
 		p := profileOf(t, st, id)
 		if int(p["max_strategy"].(float64)) != max {
@@ -168,9 +168,9 @@ func TestSetLockAutoRotationConflict(t *testing.T) {
 	wantError(t, resp, out, http.StatusConflict, want)
 	resp, out = e.post("/cgi-bin/clear-lock.cgi", "profile", "3")
 	wantError(t, resp, out, http.StatusConflict, want)
-	// Профили вне 1–4 не затронуты.
+	// Удалённый отдельный QUIC-профиль нельзя зафиксировать.
 	resp, out = e.post("/cgi-bin/set-lock.cgi", "profile", "5", "strategy", "1")
-	wantOK(t, resp, out)
+	wantError(t, resp, out, http.StatusBadRequest, "Стратегия вне диапазона")
 }
 
 func TestSetLockVoiceProfileRestartsAndEditsPorts(t *testing.T) {
