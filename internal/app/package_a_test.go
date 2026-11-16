@@ -92,6 +92,26 @@ func TestMigratePackageAEnablesUnconfiguredWssize(t *testing.T) {
 	}
 }
 
+func TestMigratePackageADoesNotEnableCircularQuality(t *testing.T) {
+	root := t.TempDir()
+	a := NewWith(paths.Paths{ZatorRoot: root, StateDir: filepath.Join(root, "state")}, platform.Platform{})
+	cfg := config.Parse(`Z2R_WSSIZE_RAMP_ENABLE=1
+Z2R_WSSIZE_RAMP_MODE=full
+NFQWS2_OPT="
+#Z2R_AUTO_STANDARD_2_BEGIN
+--filter-tcp=443 --hostlist-domains=googlevideo.com
+--in-range=-s32768 --lua-desync=circular_locked:key=2:exclude_substrings=/opt/zator/lists/netrogat_substrings.txt:payload=tls_client_hello
+--import=z2r_tcp_tls_common
+#Z2R_AUTO_STANDARD_2_END
+"
+`)
+	a.migratePackageA(cfg)
+	opt, _ := cfg.NFQWS2Opt()
+	if !strings.Contains(opt, "circular_locked:key=2") || strings.Contains(opt, "circular_quality:key=2") {
+		t.Fatalf("legacy Googlevideo handler changed during migration: %s", opt)
+	}
+}
+
 func TestApplyZapretRuntimeWritesArgs(t *testing.T) {
 	root := t.TempDir()
 	p := paths.Paths{
