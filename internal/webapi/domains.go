@@ -243,13 +243,7 @@ func (s *Server) googlevideoList(d listDef) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	byHost := map[string]googlevideo.LocalRow{}
-	for _, r := range s.app.GooglevideoCollector().Local() {
-		prev, ok := byHost[r.Host]
-		if !ok || r.Observed >= prev.Observed {
-			byHost[r.Host] = r
-		}
-	}
+	byHost := indexGooglevideoLocalRows(s.app.GooglevideoCollector().Local())
 	items := make([]map[string]any, 0, len(hosts))
 	for _, h := range hosts {
 		item := map[string]any{"value": h, "source": "file"}
@@ -276,6 +270,22 @@ func (s *Server) googlevideoList(d listDef) (map[string]any, error) {
 			"updated_at": seed.UpdatedAt, "pending": seed.Pending,
 		},
 	}, nil
+}
+
+func indexGooglevideoLocalRows(rows []googlevideo.LocalRow) map[string]googlevideo.LocalRow {
+	byHost := make(map[string]googlevideo.LocalRow, len(rows))
+	for _, row := range rows {
+		host, ok := googlevideo.NormalizeHostname(row.Host)
+		if !ok {
+			continue
+		}
+		row.Host = host
+		prev, exists := byHost[host]
+		if !exists || row.Observed >= prev.Observed {
+			byHost[host] = row
+		}
+	}
+	return byHost
 }
 
 // googlevideoAutoLocks читает выученные sn→strat для профиля 2 (live + state backup).

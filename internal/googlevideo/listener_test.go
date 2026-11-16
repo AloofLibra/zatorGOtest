@@ -153,6 +153,11 @@ func TestParseUbusEvent(t *testing.T) {
 			t.Errorf("ParseUbusEvent(%q) = %+v, %v", line, obs, err)
 		}
 	}
+	line := `{"dns_result":{"name":"rr1.sn-h5gtov-n8vl.googlevideo.com","ttl":1164,"type":"A","address":"188.244.8.76"}}`
+	obs, err := ParseUbusEvent(line)
+	if err != nil || obs.Host != "rr1---sn-h5gtov-n8vl.googlevideo.com" || obs.IP != "188.244.8.76" || obs.TTL != 1164 {
+		t.Errorf("dnsmasq CNAME target: %+v %v", obs, err)
+	}
 	for _, line := range []string{
 		``, `{}`, `{"other":{"name":"x"}}`, `not json`,
 		`{"dns_result":{"name":"` + hostA + `","type":"A","address":"9.9.9.9"}}`,

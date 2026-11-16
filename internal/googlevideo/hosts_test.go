@@ -16,6 +16,7 @@ func TestParseHostInput(t *testing.T) {
 		{"https://rr1---sn-2oi5h5-54.googlevideo.com", "rr1---sn-2oi5h5-54.googlevideo.com", true},
 		{"https://rr1---sn-2oi5h5-54.googlevideo.com/videoplayback?x=1", "rr1---sn-2oi5h5-54.googlevideo.com", true},
 		{"HTTPS://RR1---SN-ABC.googlevideo.com:443/path", "rr1---sn-abc.googlevideo.com", true},
+		{"rr1.sn-h5gtov-n8vl.googlevideo.com.", "rr1---sn-h5gtov-n8vl.googlevideo.com", true},
 		{"googlevideo.com", "", false},
 		{"example.com", "", false},
 		{"", "", false},

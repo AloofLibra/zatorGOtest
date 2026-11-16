@@ -95,6 +95,9 @@ func NormalizeHostname(host string) (string, bool) {
 	if strings.HasPrefix(h, ".") || strings.Contains(h, "..") {
 		return "", false
 	}
+	if m := reRRCNAMEHost.FindStringSubmatch(h); len(m) == 3 {
+		h = "rr" + m[1] + "---sn-" + m[2] + ".googlevideo.com"
+	}
 	if !IsRRMediaHost(h) {
 		return "", false
 	}

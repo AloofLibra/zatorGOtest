@@ -174,6 +174,9 @@ func ParseUbusEvent(line string) (Observation, error) {
 	if err != nil {
 		return Observation{}, err
 	}
+	if host, ok := NormalizeHostname(name); ok {
+		name = host
+	}
 	return Observation{Host: name, IP: addr, TTL: n, Type: typ}, nil
 }
 

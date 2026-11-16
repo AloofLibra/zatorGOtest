@@ -13,6 +13,7 @@ import (
 var (
 	reRRMediaHost   = regexp.MustCompile(`(?i)^rr\d+---sn-[a-z0-9-]+\.googlevideo\.com$`)
 	reRRGooglevideo = regexp.MustCompile(`(?i)^rr\d+---sn-([a-z0-9-]+)\.googlevideo\.com$`)
+	reRRCNAMEHost   = regexp.MustCompile(`(?i)^rr(\d+)\.sn-([a-z0-9-]+)\.googlevideo\.com$`)
 	reSNGooglevideo = regexp.MustCompile(`(?i)^sn-([a-z0-9-]+)\.googlevideo\.com$`)
 )
 

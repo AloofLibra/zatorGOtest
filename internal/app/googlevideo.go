@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -80,6 +81,9 @@ func (a *App) GooglevideoCollectionStatus() string {
 	if running {
 		return "enabled"
 	}
+	if nativeGooglevideoCollectorRunning() {
+		return "enabled"
+	}
 	mode := googlevideo.DetectMode(context.Background(), googlevideo.DetectOptions{
 		SnifferPath: filepath.Join(a.Paths.ZatorRoot, googlevideo.DefaultSnifferRelPath),
 	})
@@ -96,6 +100,11 @@ func (a *App) StartGooglevideoCollection(ctx context.Context) error {
 	_, _ = a.SyncGooglevideoHosts()
 	a.EnsureGooglevideoMidstream(ctx)
 	a.StartGooglevideoSeeder(ctx)
+	// The zapret2 custom daemon already owns these same UBus/events and state
+	// files. Avoid a second writer/uploader; keep Go listener as fallback.
+	if nativeGooglevideoCollectorRunning() {
+		return nil
+	}
 
 	gvMu.Lock()
 	defer gvMu.Unlock()
@@ -126,6 +135,23 @@ func (a *App) StartGooglevideoCollection(ctx context.Context) error {
 	gvListener = mgr
 	a.startGooglevideoUploader(ctx, gvCollect)
 	return nil
+}
+
+func nativeGooglevideoCollectorRunning() bool {
+	return nativeGooglevideoCollectorRunningAt("/var/run/z2r-googlevideo-dns.pid", "/proc")
+}
+
+func nativeGooglevideoCollectorRunningAt(pidFile, procRoot string) bool {
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid < 2 {
+		return false
+	}
+	cmdline, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "cmdline"))
+	return err == nil && strings.Contains(string(cmdline), "googlevideo-dns-sniffer") && strings.Contains(string(cmdline), "--collector")
 }
 
 func (a *App) addGooglevideoIPToKernelSet(obs googlevideo.Observation, result googlevideo.ObserveResult) error {

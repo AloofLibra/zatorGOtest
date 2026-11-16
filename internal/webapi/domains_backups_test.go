@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AloofLibra/zator/internal/googlevideo"
 )
 
 func domainItems(t *testing.T, e *env, list string) []map[string]any {
@@ -71,6 +73,16 @@ func TestDomainsGooglevideo(t *testing.T) {
 	wantOK(t, resp, out)
 	if len(domainItems(t, e, "googlevideo")) != 0 {
 		t.Fatal("expected empty")
+	}
+}
+
+func TestIndexGooglevideoLocalRowsNormalizesDnsmasqCNAME(t *testing.T) {
+	rows := indexGooglevideoLocalRows([]googlevideo.LocalRow{{
+		Host: "rr1.sn-h5gtov-n8vl.googlevideo.com", IP: "188.244.8.76", Observed: 10,
+	}})
+	row, ok := rows["rr1---sn-h5gtov-n8vl.googlevideo.com"]
+	if !ok || row.IP != "188.244.8.76" {
+		t.Fatalf("CNAME row not indexed under media URL host: %+v", rows)
 	}
 }
 
