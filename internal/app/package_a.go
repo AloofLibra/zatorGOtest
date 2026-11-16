@@ -127,6 +127,12 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 	}
 
 	qcfg := firewall.QueueHookFromGetter(func(k string) string { return cfg.GetDefault(k, "") })
+	// На обычном Linux делегируем nftables upstream init: он создаёт базовые
+	// таблицы/цепочки и запускает custom.d (включая WSSIZE). На OpenWrt это
+	// делает собственный procd backend.
+	if a.Platform.Kind == platform.KindVPS && cfg.FWType() == string(platform.FWNftables) {
+		qcfg.FWType = string(platform.FWNftables)
+	}
 	hook, err := firewall.WriteQueueHook(a.Paths.ZapretRoot, qcfg)
 	if err != nil {
 		return "", err

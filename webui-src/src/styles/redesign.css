@@ -119,7 +119,7 @@ textarea:focus-visible, summary:focus-visible {
 .profile-summary-list > div { display: flex; justify-content: space-between; gap: .8rem; padding: .65rem 0; border-top: 1px solid var(--line); }.profile-summary-list > div > span { display: grid; gap: .18rem; }.profile-summary-list small, .profile-summary-list b { color: var(--muted); font-size: .75rem; }.profile-summary-list b.is-locked { color: var(--accent); }.profile-summary-list b.is-disabled { color: var(--danger); }
 .diagnostics-card summary { display: flex; justify-content: space-between; cursor: pointer; list-style: none; }.diagnostics-card summary::-webkit-details-marker { display: none; }.diagnostics-card summary span { display: grid; gap: .2rem; }.diagnostics-card summary small { color: var(--muted); }.diagnostics-card dl { margin: .8rem 0; }.diagnostics-card dl div { display: flex; justify-content: space-between; gap: .8rem; padding: .4rem 0; border-top: 1px solid var(--line); font-size: .76rem; }.diagnostics-card dt { color: var(--muted); }.diagnostics-card dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .settings-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: start; gap: 1rem; }
-.settings-nav { position: sticky; z-index: 5; top: 80px; display: grid; gap: .25rem; padding: .55rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); box-shadow: var(--shadow); }
+.settings-nav { position: sticky; z-index: 5; top: 80px; align-self: start; max-height: calc(100vh - 96px); overflow-y: auto; display: grid; gap: .25rem; padding: .55rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); box-shadow: var(--shadow); }
 .settings-nav a { border: 1px solid transparent; border-radius: 8px; padding: .65rem .7rem; color: var(--muted); font-size: .8rem; }.settings-nav a.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .settings-content { min-width: 0; }
 .settings-category { min-width: 0; }
@@ -143,7 +143,7 @@ input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
   .topbar { min-height: 54px; padding-inline: 1rem; }.top-health { display: none; }
   .overview-top, .overview-bottom { grid-template-columns: 1fr; }
   .settings-layout { grid-template-columns: 1fr; gap: .7rem; }
-  .settings-nav { position: sticky; top: 54px; display: flex; overflow-x: auto; }
+  .settings-nav { position: sticky; top: 54px; max-height: none; overflow-y: hidden; display: flex; overflow-x: auto; }
 }
 @media (max-width: 600px) {
   .main { padding: 1rem .8rem 1.5rem; }

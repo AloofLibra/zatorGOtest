@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/AloofLibra/zator/internal/platform"
 	"github.com/AloofLibra/zator/internal/service"
 	"github.com/AloofLibra/zator/internal/webapi"
+	"golang.org/x/term"
 )
 
 const usage = `zator — управление zapret2 через Web UI
@@ -373,15 +376,36 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 	case fileExists(a.ConfigPath) && !a.Config.AuthEnabled:
 		// Ранее сознательно -no-auth / auth disable — не навязываем пароль при refresh.
 	default:
-		pass, err := promptPassword(stderr, "Пароль Web UI: ", "Повтор пароля: ")
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			fmt.Fprintln(stderr, "подсказка: zator install -password '…' или zator install -no-auth")
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprintln(stderr, "нет TTY: задайте пароль флагом -password или используйте -no-auth")
 			return 1
 		}
-		if err := a.SetPassword(pass); err != nil {
-			fmt.Fprintln(stderr, err)
+		fmt.Fprint(stderr, "Установить пароль Web UI? [Y/n]: ")
+		answer, readErr := bufio.NewReader(os.Stdin).ReadString('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			fmt.Fprintf(stderr, "не удалось прочитать ответ: %v\n", readErr)
 			return 1
+		}
+		if strings.EqualFold(strings.TrimSpace(answer), "n") || strings.EqualFold(strings.TrimSpace(answer), "no") {
+			a.DisableAuthExplicitly()
+			fmt.Fprintln(stderr, "внимание: проверка доступа отключена; Web UI открыт всей сети")
+			break
+		}
+		fmt.Fprintln(stderr, "Пароль должен содержать минимум 8 символов.")
+		for {
+			pass, promptErr := promptPassword(stderr, "Пароль Web UI: ", "Повтор пароля: ")
+			if promptErr != nil {
+				fmt.Fprintln(stderr, promptErr)
+				return 1
+			}
+			if setErr := a.SetPassword(pass); errors.Is(setErr, app.ErrPasswordTooShort) {
+				fmt.Fprintln(stderr, "Пароль слишком короткий. Задайте пароль не короче 8 символов.")
+				continue
+			} else if setErr != nil {
+				fmt.Fprintln(stderr, setErr)
+				return 1
+			}
+			break
 		}
 	}
 	resourceUpdater := deploy.New(a.Paths)
@@ -672,7 +696,7 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	addr := net.JoinHostPort(webUIHost(*host, a.Platform.Kind), strconv.Itoa(a.Config.Port))
+	addr := net.JoinHostPort(webUIHost(*host, a.Platform), strconv.Itoa(a.Config.Port))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
@@ -705,18 +729,18 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func webUIHost(override string, kind platform.Kind) string {
+func webUIHost(override string, p platform.Platform) string {
 	if override != "" {
 		return override
 	}
-	if kind == platform.KindVPS {
+	if p.Kind == platform.KindVPS && p.OSID != "alpine" {
 		return "127.0.0.1"
 	}
 	return ""
 }
 
 func webUIURL(a *app.App, override string) string {
-	host := webUIHost(override, a.Platform.Kind)
+	host := webUIHost(override, a.Platform)
 	if host == "" || host == "0.0.0.0" {
 		if ip := netiface.DetectLANIPv4(); ip != "" {
 			host = ip

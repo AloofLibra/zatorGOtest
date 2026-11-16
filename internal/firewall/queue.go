@@ -16,6 +16,8 @@ type QueueHookConfig struct {
 	PortsTCP string // multiport TCP
 	PortsUDP string // multiport UDP (без диапазонов вида a-b для простоты — режем)
 	Mark     string // DESYNC_MARK, по умолчанию 0x40000000
+	FWType   string // backend zapret2
+	NftInit  string // путь к SysV init zapret2 для nftables
 }
 
 // DefaultQueueHook заполняет поля по умолчанию.
@@ -30,6 +32,18 @@ func DefaultQueueHook() QueueHookConfig {
 
 // RenderQueueHook возвращает POSIX sh-скрипт start|stop|restart для iptables NFQUEUE.
 func RenderQueueHook(cfg QueueHookConfig) string {
+	if cfg.FWType == "nftables" && cfg.NftInit != "" {
+		return `#!/bin/sh
+# nftables backend is managed by the upstream zapret2 init script.
+case "$1" in
+	start) action=start_fw ;;
+	stop) action=stop_fw ;;
+	restart) action=restart_fw ;;
+	*) echo "usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+esac
+exec ` + shellQuote(cfg.NftInit) + ` "$action"
+`
+	}
 	if cfg.QNum == "" {
 		cfg.QNum = "300"
 	}
@@ -126,6 +140,9 @@ func sanitizePorts(s string) string {
 
 // WriteQueueHook атомарно пишет скрипт в zapretRoot/QueueHookName.
 func WriteQueueHook(zapretRoot string, cfg QueueHookConfig) (string, error) {
+	if cfg.FWType == "nftables" {
+		cfg.NftInit = filepath.Join(zapretRoot, "init.d", "sysv", "zapret2")
+	}
 	path := filepath.Join(zapretRoot, QueueHookName)
 	if err := fsutil.AtomicWriteFile(path, []byte(RenderQueueHook(cfg)), 0o755); err != nil {
 		return "", err

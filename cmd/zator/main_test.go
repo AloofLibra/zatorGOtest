@@ -43,19 +43,20 @@ func TestVersion(t *testing.T) {
 func TestWebUIHostDefaultsByPlatformAndHonorsOverride(t *testing.T) {
 	tests := []struct {
 		name, override string
-		kind           platform.Kind
+		platform       platform.Platform
 		want           string
 	}{
-		{name: "VPS loops back", kind: platform.KindVPS, want: "127.0.0.1"},
-		{name: "OpenWrt uses firewall", kind: platform.KindOpenWRT, want: ""},
-		{name: "Entware uses firewall", kind: platform.KindEntware, want: ""},
-		{name: "explicit public bind", override: "0.0.0.0", kind: platform.KindVPS, want: "0.0.0.0"},
-		{name: "explicit loopback", override: "127.0.0.1", kind: platform.KindOpenWRT, want: "127.0.0.1"},
+		{name: "VPS loops back", platform: platform.Platform{Kind: platform.KindVPS}, want: "127.0.0.1"},
+		{name: "Alpine listens on all interfaces", platform: platform.Platform{Kind: platform.KindVPS, OSID: "alpine"}, want: ""},
+		{name: "OpenWrt uses firewall", platform: platform.Platform{Kind: platform.KindOpenWRT}, want: ""},
+		{name: "Entware uses firewall", platform: platform.Platform{Kind: platform.KindEntware}, want: ""},
+		{name: "explicit public bind", override: "0.0.0.0", platform: platform.Platform{Kind: platform.KindVPS}, want: "0.0.0.0"},
+		{name: "explicit loopback", override: "127.0.0.1", platform: platform.Platform{Kind: platform.KindOpenWRT}, want: "127.0.0.1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := webUIHost(tc.override, tc.kind); got != tc.want {
-				t.Fatalf("webUIHost(%q, %q) = %q, want %q", tc.override, tc.kind, got, tc.want)
+			if got := webUIHost(tc.override, tc.platform); got != tc.want {
+				t.Fatalf("webUIHost(%q, %+v) = %q, want %q", tc.override, tc.platform, got, tc.want)
 			}
 		})
 	}
