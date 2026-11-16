@@ -21,6 +21,8 @@ NFQWS2_OPT="
 --lua-init=@/opt/zator/lua/locked.lua
 --lua-init=@/opt/zator/lua/strategy-lock-manager.lua
 --filter-tcp=443
+--filter-mark=0x04000000/0x04000000
+--lua-desync=wssize_ramp:mode=full:wsize=1:scale=2:open=1
 "
 `)
 	probe, err := NewNfqwsProbe(NfqwsProbeConfig{
@@ -43,6 +45,9 @@ NFQWS2_OPT="
 	}
 	if !containsArg(args, "--fwmark=0x40000000") {
 		t.Fatalf("fwmark: %v", args)
+	}
+	if !containsArg(args, "--filter-mark=0x04000000/0x04000000") || !containsArg(args, "--lua-desync=wssize_ramp:mode=full:wsize=1:scale=2:open=1") {
+		t.Fatalf("WSSIZE probe options must match the primary queue: %v", args)
 	}
 	lib := "--lua-init=@" + filepath.ToSlash(filepath.Join(p.ZapretRoot, "lua", "zapret-lib.lua"))
 	if !containsArg(args, lib) {
