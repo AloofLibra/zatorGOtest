@@ -13,6 +13,7 @@ import (
 
 	"github.com/AloofLibra/zator/internal/app"
 	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/platform"
 )
 
 func runCmd(t *testing.T, args ...string) (int, string, string) {
@@ -32,6 +33,27 @@ func TestVersion(t *testing.T) {
 	code, out, _ := runCmd(t, "version")
 	if code != 0 || !strings.HasPrefix(out, "zator ") {
 		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+func TestWebUIHostDefaultsByPlatformAndHonorsOverride(t *testing.T) {
+	tests := []struct {
+		name, override string
+		kind           platform.Kind
+		want           string
+	}{
+		{name: "VPS loops back", kind: platform.KindVPS, want: "127.0.0.1"},
+		{name: "OpenWrt uses firewall", kind: platform.KindOpenWRT, want: ""},
+		{name: "Entware uses firewall", kind: platform.KindEntware, want: ""},
+		{name: "explicit public bind", override: "0.0.0.0", kind: platform.KindVPS, want: "0.0.0.0"},
+		{name: "explicit loopback", override: "127.0.0.1", kind: platform.KindOpenWRT, want: "127.0.0.1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := webUIHost(tc.override, tc.kind); got != tc.want {
+				t.Fatalf("webUIHost(%q, %q) = %q, want %q", tc.override, tc.kind, got, tc.want)
+			}
+		})
 	}
 }
 

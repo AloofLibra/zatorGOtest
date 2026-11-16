@@ -20,6 +20,7 @@ import (
 	"github.com/AloofLibra/zator/internal/backup"
 	"github.com/AloofLibra/zator/internal/deploy"
 	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/platform"
 	"github.com/AloofLibra/zator/internal/service"
 	"github.com/AloofLibra/zator/internal/webapi"
 )
@@ -594,7 +595,7 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	port := fs.Int("port", 0, "порт (по умолчанию из конфигурации, 17682)")
-	host := fs.String("host", "", "адрес привязки (по умолчанию все интерфейсы)")
+	host := fs.String("host", "", "адрес привязки (VPS: 127.0.0.1, роутер: все интерфейсы)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -617,7 +618,7 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	addr := net.JoinHostPort(*host, strconv.Itoa(a.Config.Port))
+	addr := net.JoinHostPort(webUIHost(*host, a.Platform.Kind), strconv.Itoa(a.Config.Port))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
@@ -648,4 +649,14 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 		_ = srv.Shutdown(shutdownCtx)
 	}
 	return 0
+}
+
+func webUIHost(override string, kind platform.Kind) string {
+	if override != "" {
+		return override
+	}
+	if kind == platform.KindVPS {
+		return "127.0.0.1"
+	}
+	return ""
 }
