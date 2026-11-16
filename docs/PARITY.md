@@ -9,7 +9,7 @@
 | --- | --- | --- | --- |
 | Vue 3 WebUI и API | Полный интерфейс Zator | Основные экраны/API перенесены; Vite build, vue-tsc и npm audit проходят; роутер отдаёт assets с совпавшими SHA-256 | Продолжить контрактную проверку сценариев |
 | YouTube media | Innertube, подписанные audio/video URL, ограниченная загрузка | Profile 2 и SuperSweep получают signed URL, проверяют audio 256 KiB, video 1 MiB и video middle 2 MiB; валидируют 206, точный Content-Range, MIME и объём. SuperSweep повторяет всю тройку отдельно по TLS 1.2 и 1.3; CDN redirect ограничен двумя подписанными Googlevideo URL. Resolver сохраняет длины и MIME форматов; DNS/API/подпись/HTTP-валидность дают unknown, обрыв тела и сетевой сбой классифицируются отдельно | На тестовом роутере новая ARM64-медиапроба через `AWG_pers` прошла все 6 точных Range-запросов; Go Profile 2 теперь также прошёл через основной WAN: TLS 1.2/1.3 и 3 точных media ranges. Клиентское воспроизведение ещё не проверено |
-| Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | Go CLI передаёт upstream имя хоста; на OpenWrt ARM64 `example.com` прошёл TLS 1.2 и TLS 1.3 (`working without bypass`), SUMMARY сохранён, procd-служба восстановлена | Отдельный port-check недоступен без ncat; DPI-blocked hostname требует отдельного тестового окна/цели |
+| Blockcheck2 HTTPS lists | Установка `10-list.sh` и списков TLS 1.2/1.3 в zapret2 перед запуском `blockcheck2.sh` | 2026-11-16 на OpenWrt 25.12.4 ARM64 Go CLI запустил upstream Blockcheck2 для `google.com`; TLS 1.2/1.3 завершились `working without bypass`, SUMMARY сохранён, procd-служба восстановлена; после прогона nfqws2 работал, NFQUEUE qnum 65535 отсутствовал | Port-check пропущен: ncat не установлен. TLS результат подтверждает сквозной вызов, но не работу DPI bypass; целевой обходной домен требует отдельной проверки |
 | Быстрый подбор | Однопрофильный/доменный подбор, отмена, применение результата | Исторический запуск до включения WSSIZE в isolated probe завершил 44/44 (7 `OK`, 3 предупреждения, 34 отказа), применил стратегию 30; обычная медиапроба прошла на основной очереди. Последний запуск с isolated WSSIZE завершил 44/44 (10 OK, 3 предупреждения, 31 отказ), выбрана стратегия 30 | Bash reference отключает WSSIZE в probe и использует curl, поэтому результаты неравноценны |
 | WSSIZE Full/Lite | Full/Lite, SYN/ACK, window scale, nftables/iptables, Googlevideo set, toggles | Go runtime в `/opt/zator` работает через procd. Full включён (`wsize=1:scale=2:open=1`). Код ставит WSSIZE mark для Googlevideo до isolated qnum 65535; WAN capture именно изолированной пробы показал SYN `win 1, wscale 2` | Последний изолированный quick Profile 2 завершил 44/44, WSSIZE Full активен; длительная потоковая нагрузка не измерена |
 | Авторотация/детекторы | Lua `circular_quality`, success/failure detectors, SLM | Текущие Lua assets сохранены; Go seed пишет provenance, learned-only transfer; validator service доступен | Проверить ложноположительные срабатывания и client-scope на реальном трафике |
@@ -48,7 +48,7 @@
 | service start/stop/restart | done |
 | check (TLS 1.2/1.3) | done |
 | Profile 2 YouTube media check | verified on OpenWrt ARM64: applied strategy 30 returned TLS 1.2/1.3 and real HTTP 206 media ranges (audio 256 KiB, video 1 MiB, middle 2 MiB); WAN capture during the Go API test showed the media SYN with `win 1, wscale 2`; client playback is unverified |
-| Blockcheck2 TLS 1.2/1.3 lists | verified on OpenWrt ARM64: Go CLI invokes upstream `blockcheck2.sh`, captures log/SUMMARY, and restores service; `example.com` succeeded with TLS 1.2/1.3 without bypass |
+| Blockcheck2 TLS 1.2/1.3 lists | verified on OpenWrt 25.12.4 ARM64 (2026-11-16): Go CLI invokes upstream `blockcheck2.sh` for `google.com`, captures log/SUMMARY, and restores service; TLS 1.2/1.3 both report `working without bypass`; ncat missing, so port-check unavailable; nfqws2 running and qnum 65535 absent after completion |
 | domains (netrogat/custom/substring) | done |
 | backups create/list/download/delete/upload | done |
 | scopes | done |
@@ -113,7 +113,7 @@
 - [x] OpenWRT: quick profile 2 completed all 44 strategies in a temporary ZATOR_ROOT; zero winners, probe/firewall cleanup verified
 - [x] OpenWRT ARM64 Go binary, loopback WebUI and status API smoke (temporary `/tmp` roots)
 - [x] Router media end-to-end: after reboot with Full WSSIZE, Go Profile 2 passed TLS 1.2/1.3 and signed media ranges on the primary WAN; after quick-profile applied strategy 30, the check again passed; WAN capture showed `win 1, wscale 2` on media SYN and ordinary window scale on control HTTPS; client playback remains unverified
-- [x] Blockcheck2 Go CLI launch and SUMMARY creation on router (target TLS checks aborted with DNS code 6; port-check unavailable without ncat)
+- [x] Blockcheck2 Go CLI launch and SUMMARY creation on router (`google.com`; TLS 1.2/1.3 available without bypass; service restored; ncat unavailable, so port-check skipped)
 - [ ] Keenetic Entware: S90, ndm hook, iptables
 - [ ] Merlin: firewall-start hook
 - [ ] MIPS/arm бинарник стартует, Web UI отвечает, locks пишутся атомарно
