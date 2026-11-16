@@ -176,3 +176,55 @@ func TestApplyBundleBinaryRejectsBadSHAWithoutReplacingCurrentBinary(t *testing.
 		t.Fatalf("current binary changed: %q, %v", got, err)
 	}
 }
+
+func TestInstallBinaryRollsBackWhenSelfInstallFails(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	current := filepath.Join(p.BinDir, "zator")
+	if err := os.WriteFile(current, []byte("working-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldVersion := []byte("old-version-state\n")
+	if err := os.MkdirAll(filepath.Dir(VersionPath(p)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(VersionPath(p), oldVersion, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	u := New(p)
+	u.runInstallCommand = func(_ context.Context, path string) ([]byte, error) {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != "new-binary" {
+			t.Fatalf("self-install binary = %q", got)
+		}
+		return []byte("embedded asset install failed"), errors.New("install failure")
+	}
+	err := u.installBinary(context.Background(), []byte("new-binary"), "v2.0.0", "latest")
+	if err == nil || !strings.Contains(err.Error(), "embedded asset install failed") {
+		t.Fatalf("expected self-install failure, got %v", err)
+	}
+	got, err := os.ReadFile(current)
+	if err != nil || string(got) != "working-binary" {
+		t.Fatalf("current binary was not restored: %q, %v", got, err)
+	}
+	got, err = os.ReadFile(VersionPath(p))
+	if err != nil || string(got) != string(oldVersion) {
+		t.Fatalf("version state was not restored: %q, %v", got, err)
+	}
+	for _, pattern := range []string{current + ".new", filepath.Join(p.BinDir, ".zator-rollback-*")} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(matches) != 0 {
+			t.Fatalf("temporary update files remain: %v", matches)
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -128,6 +129,91 @@ func TestParseLatestAndRun(t *testing.T) {
 	}
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("file content = %q", got)
+	}
+}
+
+func TestRunRollsBackArchiveWhenBinaryUpdateFails(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(p.LuaDir, "hello.lua")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("old-resource\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldVersion := []byte("ZATOR_VERSION=\"old\"\nTRACKING=\"latest\"\n")
+	if err := os.MkdirAll(filepath.Dir(VersionPath(p)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(VersionPath(p), oldVersion, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte("new-resource\n")
+	sum := sha256.Sum256(payload)
+	file := "lua/hello.lua"
+	manifest := fmt.Sprintf("%s|/opt/zator/%s|auto|%s|%d|0\n", file, file, hex.EncodeToString(sum[:]), len(payload))
+	versionEnv := "ZATOR_VERSION=\"2.0.0\"\nWEBUI_VERSION=\"2.0.0\"\nTRACKING=\"latest\"\n"
+	var archive bytes.Buffer
+	gz := gzip.NewWriter(&archive)
+	tw := tar.NewWriter(gz)
+	writeTar := func(name string, data []byte) {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTar(file, payload)
+	writeTar(ManifestRel, []byte(manifest))
+	writeTar(VersionEnvRel, []byte(versionEnv))
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	archiveSum := sha256.Sum256(archive.Bytes())
+	archiveHash := hex.EncodeToString(archiveSum[:])
+	latest := Latest{
+		SchemaVersion: 1,
+		Release:       "2.0.0",
+		Assets: map[string]Asset{
+			VariantFull: {Name: "zator-full.tar.gz", Size: int64(archive.Len()), SHA256: archiveHash},
+		},
+	}
+	latestData, err := json.Marshal(latest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/latest.json", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(latestData) })
+	mux.HandleFunc("/zator-full.tar.gz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive.Bytes()) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	u := New(p)
+	u.LatestURL = srv.URL + "/latest.json"
+	u.Fetch.HTTP = srv.Client()
+	u.applyBinary = func(context.Context) (*ApplyResult, string, error) {
+		return nil, "", errors.New("binary download failed")
+	}
+	if _, err := u.Run(context.Background(), RunOptions{Variant: VariantFull, Force: true}); err == nil {
+		t.Fatal("expected binary update failure")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "old-resource\n" {
+		t.Fatalf("resource was not rolled back: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(VersionPath(p)); err != nil || string(got) != string(oldVersion) {
+		t.Fatalf("version metadata was not rolled back: %q, %v", got, err)
+	}
+	matches, err := filepath.Glob(filepath.Join(Dir(p), "rollback-*"))
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("rollback snapshots remain: %v, %v", matches, err)
 	}
 }
 

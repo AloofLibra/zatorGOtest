@@ -223,6 +223,8 @@ type Updater struct {
 	Now func() time.Time
 	// applyBinary is a test seam; production always fetches the matching release binary.
 	applyBinary func(context.Context) (*ApplyResult, string, error)
+	// runInstallCommand is a test seam for the post-replacement self-install.
+	runInstallCommand func(context.Context, string) ([]byte, error)
 }
 
 // New создаёт обновлятор для раскладки p. Адрес latest.json берётся из
@@ -609,6 +611,9 @@ type ApplyOptions struct {
 	// Meta — данные latest.json; используются для version.env, если в архиве
 	// нет extra_strats/cache/deploy/version.env.
 	Meta *Latest
+	// deferCommit keeps rollback copies until the caller commits the larger
+	// archive-plus-binary update.
+	deferCommit bool
 }
 
 // ApplyResult — итог применения.
@@ -624,6 +629,16 @@ type ApplyResult struct {
 	// ScriptUpdated — обновлён лаунчер (ScriptDest).
 	ScriptUpdated bool
 	Version       Version
+	finish        func(commit bool) error
+}
+
+func (r *ApplyResult) finishTransaction(commit bool) error {
+	if r == nil || r.finish == nil {
+		return nil
+	}
+	finish := r.finish
+	r.finish = nil
+	return finish(commit)
 }
 
 type undoOp struct {
@@ -674,7 +689,12 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 			return nil, err
 		}
 	}
-	defer os.RemoveAll(backupDir)
+	cleanupBackup := true
+	defer func() {
+		if cleanupBackup {
+			_ = os.RemoveAll(backupDir)
+		}
+	}()
 
 	var undo []undoOp
 	rollback := func() error {
@@ -759,9 +779,35 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 	if err != nil {
 		return nil, withRollback(err)
 	}
+	versionTarget := VersionPath(u.Paths)
+	versionBackup := undoOp{target: versionTarget}
+	if old, err := os.ReadFile(versionTarget); err == nil {
+		versionBackup.backup = filepath.Join(backupDir, "version.env")
+		if err := os.WriteFile(versionBackup.backup, old, 0o600); err != nil {
+			return nil, withRollback(err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, withRollback(err)
+	}
+	undo = append(undo, versionBackup)
 	res.Version = ver
 	if err := WriteVersion(u.Paths, ver); err != nil {
 		return nil, withRollback(err)
+	}
+	if opts.deferCommit {
+		finished := false
+		res.finish = func(commit bool) error {
+			if finished {
+				return nil
+			}
+			finished = true
+			var rollbackErr error
+			if !commit {
+				rollbackErr = rollback()
+			}
+			return errors.Join(rollbackErr, os.RemoveAll(backupDir))
+		}
+		cleanupBackup = false
 	}
 	return res, nil
 }
@@ -854,7 +900,7 @@ func (u *Updater) Run(ctx context.Context, opts RunOptions) (*Report, error) {
 	// Релиз без tar/latest.json (только zator-linux-*): обновляем бинарник с GitHub.
 	if check.Latest != nil {
 		if _, aerr := check.Latest.Asset(variant); aerr != nil {
-			ar, tag, berr := u.ApplyGitHubBinary(ctx)
+			ar, tag, berr := u.applyGitHubBinary(ctx, check.Latest.Release)
 			if berr != nil {
 				return rep, berr
 			}
@@ -871,26 +917,32 @@ func (u *Updater) Run(ctx context.Context, opts RunOptions) (*Report, error) {
 	if !opts.KeepArchive {
 		defer os.Remove(archive)
 	}
-	res, err := u.ApplyArchive(archive, ApplyOptions{Tracking: opts.Tracking, Meta: check.Latest})
+	res, err := u.ApplyArchive(archive, ApplyOptions{Tracking: opts.Tracking, Meta: check.Latest, deferCommit: variant != VariantWebUI})
 	if err != nil {
 		return rep, err
 	}
 	rep.Apply = res
 	if variant != VariantWebUI {
 		applyBinary := u.applyBinary
+		var bin *ApplyResult
+		var tag string
 		if applyBinary == nil {
-			applyBinary = u.ApplyGitHubBinary
+			bin, tag, err = u.applyGitHubBinary(ctx, check.Latest.Release)
+		} else {
+			bin, tag, err = applyBinary(ctx)
 		}
-		bin, tag, err := applyBinary(ctx)
 		if err != nil {
-			return rep, fmt.Errorf("deploy: архив применён, бинарник не обновлён: %w", err)
+			return rep, errors.Join(fmt.Errorf("deploy: архив применён, бинарник не обновлён: %w", err), res.finishTransaction(false))
 		}
 		if check.Latest != nil && tag != "" && CompareVersions(tag, check.Latest.Release) != 0 {
-			return rep, fmt.Errorf("deploy: бинарник %s не совпадает с архивным релизом %s", tag, check.Latest.Release)
+			return rep, errors.Join(fmt.Errorf("deploy: бинарник %s не совпадает с архивным релизом %s", tag, check.Latest.Release), res.finishTransaction(false))
 		}
 		if bin != nil {
 			res.Installed += bin.Installed
 		}
+	}
+	if err := res.finishTransaction(true); err != nil {
+		return rep, fmt.Errorf("deploy: не удалось завершить транзакцию обновления: %w", err)
 	}
 	return rep, nil
 }

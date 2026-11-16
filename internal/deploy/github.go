@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/AloofLibra/zator/internal/fetch"
+	"github.com/AloofLibra/zator/internal/fsutil"
 	"github.com/AloofLibra/zator/internal/platform"
 )
 
@@ -217,9 +219,16 @@ func parseSHA256SUMS(body []byte, wantName string) string {
 // ApplyGitHubBinary скачивает zator-linux-<arch>, заменяет бинарник и
 // запускает «zator install -zapret=false», чтобы подтянуть встроенные assets.
 func (u *Updater) ApplyGitHubBinary(ctx context.Context) (*ApplyResult, string, error) {
+	return u.applyGitHubBinary(ctx, "")
+}
+
+func (u *Updater) applyGitHubBinary(ctx context.Context, expectedVersion string) (*ApplyResult, string, error) {
 	tag, link, size, sha, err := u.FindGitHubBinaryURL(ctx)
 	if err != nil {
 		return nil, "", err
+	}
+	if expectedVersion != "" && CompareVersions(tag, expectedVersion) != 0 {
+		return nil, tag, fmt.Errorf("deploy: бинарник %s не совпадает с архивным релизом %s", tag, expectedVersion)
 	}
 	if link == "" {
 		return nil, tag, fmt.Errorf("deploy: бинарник для этой arch не найден в релизе %s", tag)
@@ -296,40 +305,124 @@ func (u *Updater) installBinary(ctx context.Context, data []byte, tag, tracking 
 	}
 	final := filepath.Join(binDir, "zator")
 	tmp := final + ".new"
+	defer os.Remove(tmp)
 	if err := os.WriteFile(tmp, data, 0o755); err != nil {
 		return err
+	}
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		return err
+	}
+	backup, hadBinary, err := snapshotFile(final)
+	if err != nil {
+		return err
+	}
+	versionPath := VersionPath(u.Paths)
+	oldVersion, versionErr := os.ReadFile(versionPath)
+	if versionErr != nil && !os.IsNotExist(versionErr) {
+		if backup != "" {
+			_ = os.Remove(backup)
+		}
+		return versionErr
+	}
+	hadVersion := versionErr == nil
+	rollback := func(cause error) error {
+		var undoErr error
+		if hadBinary {
+			undoErr = restoreSnapshot(backup, final)
+		} else if err := os.Remove(final); err != nil && !os.IsNotExist(err) {
+			undoErr = err
+		}
+		if hadVersion {
+			undoErr = errors.Join(undoErr, fsutil.AtomicWriteFile(versionPath, oldVersion, 0o644))
+		} else if err := os.Remove(versionPath); err != nil && !os.IsNotExist(err) {
+			undoErr = errors.Join(undoErr, err)
+		}
+		return errors.Join(cause, undoErr)
 	}
 	if err := os.Rename(tmp, final); err != nil {
 		// ETXTBSY / занятый inode: Linux обычно допускает rename запущенного бинарника.
 		if werr := os.WriteFile(final, data, 0o755); werr != nil {
-			_ = os.Remove(tmp)
-			return fmt.Errorf("deploy: замена бинарника: %v; fallback: %w", err, werr)
+			return rollback(fmt.Errorf("deploy: замена бинарника: %v; fallback: %w", err, werr))
 		}
-		_ = os.Remove(tmp)
 	}
 	// Новый бинарник сам разложит актуальные assets (webui и пр.).
 	// -skip-service: не трогаем units; auth из существующего zator.json сохраняется.
-	cmd := exec.CommandContext(ctx, final, "install", "-zapret=false", "-skip-service")
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
+	var out []byte
+	if u.runInstallCommand != nil {
+		out, err = u.runInstallCommand(ctx, final)
+	} else {
+		cmd := exec.CommandContext(ctx, final, "install", "-zapret=false", "-skip-service")
+		cmd.Env = os.Environ()
+		out, err = cmd.CombinedOutput()
+	}
 	if err != nil {
-		return fmt.Errorf("deploy: %s install: %w (%s)", final, err, strings.TrimSpace(string(out)))
+		return rollback(fmt.Errorf("deploy: %s install: %w (%s)", final, err, strings.TrimSpace(string(out))))
 	}
 	if strings.TrimSpace(tag) != "" {
 		ver := strings.TrimPrefix(tag, "v")
 		now := time.Now().UTC().Format("2006-01-02 15:04")
-		_ = WriteVersion(u.Paths, Version{
+		if err := WriteVersion(u.Paths, Version{
 			ZatorVersion: ver,
 			ZatorDate:    now,
 			WebUIVersion: ver,
 			WebUIDate:    now,
 			Tracking:     tracking,
-		})
+		}); err != nil {
+			return rollback(err)
+		}
 	} else if tracking != "" {
 		if current, err := ReadVersion(u.Paths); err == nil {
 			current.Tracking = tracking
-			_ = WriteVersion(u.Paths, current)
+			if err := WriteVersion(u.Paths, current); err != nil {
+				return rollback(err)
+			}
+		} else if !os.IsNotExist(err) {
+			return rollback(err)
 		}
 	}
+	if backup != "" {
+		_ = os.Remove(backup)
+	}
 	return nil
+}
+
+// snapshotFile creates a same-filesystem hard link so rollback needs no full
+// binary copy in RAM or on flash.
+func snapshotFile(path string) (string, bool, error) {
+	st, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if !st.Mode().IsRegular() {
+		return "", false, fmt.Errorf("deploy: нельзя обновить небезопасный файл %s", path)
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".zator-rollback-*")
+	if err != nil {
+		return "", false, err
+	}
+	backup := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(backup)
+		return "", false, err
+	}
+	if err := os.Remove(backup); err != nil {
+		return "", false, err
+	}
+	if err := os.Link(path, backup); err != nil {
+		return "", false, fmt.Errorf("deploy: snapshot бинарника: %w", err)
+	}
+	return backup, true, nil
+}
+
+func restoreSnapshot(backup, target string) error {
+	if err := os.Rename(backup, target); err == nil {
+		return nil
+	}
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(backup, target)
 }
