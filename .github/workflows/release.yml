@@ -106,7 +106,9 @@ jobs:
       - name: Select architecture sniffer
         env:
           GOARCH: ${{ matrix.goarch }}
-        run: cp "sniffer-assets/googlevideo-dns-sniffer-${GOARCH}" assets/tools/bin/
+        run: |
+          mkdir -p assets/tools/bin
+          cp "sniffer-assets/googlevideo-dns-sniffer-${GOARCH}" assets/tools/bin/
       - name: Build
         env:
           CGO_ENABLED: "0"
