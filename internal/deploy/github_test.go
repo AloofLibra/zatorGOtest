@@ -177,6 +177,53 @@ func TestApplyBundleBinaryRejectsBadSHAWithoutReplacingCurrentBinary(t *testing.
 	}
 }
 
+func TestInstallBinaryPreservesArchiveMetadataAfterSelfInstall(t *testing.T) {
+	for _, tc := range []struct {
+		name, tag, tracking string
+		wantTracking        string
+	}{
+		{name: "offline", tracking: "offline", wantTracking: "offline"},
+		{name: "tagged release", tag: "v0.1.41", tracking: "latest", wantTracking: "latest"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
+			if err := p.EnsureDirs(); err != nil {
+				t.Fatal(err)
+			}
+			current := filepath.Join(p.BinDir, "zator")
+			if err := os.WriteFile(current, []byte("working-binary"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			want := Version{
+				ZatorVersion: "0.1.41", ZatorDate: "2026-11-16 08:00", ZatorCommit: "release-commit", ZatorSHA: "release-sha",
+				WebUIVersion: "0.1.41", WebUIDate: "2026-11-16 08:00", WebUISHA: "webui-sha", Tracking: "latest",
+			}
+			if err := WriteVersion(p, want); err != nil {
+				t.Fatal(err)
+			}
+
+			u := New(p)
+			u.runInstallCommand = func(_ context.Context, _ string) ([]byte, error) {
+				// The binary's embedded install writes version/date but knows no
+				// release commit or asset checksums.
+				return nil, WriteVersion(p, Version{ZatorVersion: "0.1.40", WebUIVersion: "0.1.40", Tracking: "latest"})
+			}
+			if err := u.installBinary(context.Background(), []byte("new-binary"), tc.tag, tc.tracking); err != nil {
+				t.Fatal(err)
+			}
+			got, err := ReadVersion(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want.Tracking = tc.wantTracking
+			if got != want {
+				t.Fatalf("version metadata = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestInstallBinaryRollsBackWhenSelfInstallFails(t *testing.T) {
 	root := t.TempDir()
 	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))

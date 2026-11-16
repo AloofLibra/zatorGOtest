@@ -358,16 +358,33 @@ func (u *Updater) installBinary(ctx context.Context, data []byte, tag, tracking 
 	if err != nil {
 		return rollback(fmt.Errorf("deploy: %s install: %w (%s)", final, err, strings.TrimSpace(string(out))))
 	}
+	// The self-install command may rewrite version.env from the binary's
+	// embedded version. Keep the release metadata already applied from the
+	// archive so commit/SHA checks remain meaningful after the binary swap.
+	if hadVersion {
+		if err := fsutil.AtomicWriteFile(versionPath, oldVersion, 0o644); err != nil {
+			return rollback(fmt.Errorf("deploy: restore release metadata after self-install: %w", err))
+		}
+	}
 	if strings.TrimSpace(tag) != "" {
 		ver := strings.TrimPrefix(tag, "v")
 		now := time.Now().UTC().Format("2006-01-02 15:04")
-		if err := WriteVersion(u.Paths, Version{
-			ZatorVersion: ver,
-			ZatorDate:    now,
-			WebUIVersion: ver,
-			WebUIDate:    now,
-			Tracking:     tracking,
-		}); err != nil {
+		current, err := ReadVersion(u.Paths)
+		if err != nil {
+			return rollback(fmt.Errorf("deploy: read release metadata after self-install: %w", err))
+		}
+		current.ZatorVersion = ver
+		if current.ZatorDate == "" {
+			current.ZatorDate = now
+		}
+		current.WebUIVersion = ver
+		if current.WebUIDate == "" {
+			current.WebUIDate = now
+		}
+		if tracking != "" {
+			current.Tracking = tracking
+		}
+		if err := WriteVersion(u.Paths, current); err != nil {
 			return rollback(err)
 		}
 	} else if tracking != "" {
