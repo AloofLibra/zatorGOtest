@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, formBody } from '../api/client'
 import {
@@ -603,53 +603,22 @@ const activeCategory = computed(() => {
   return group === 'Обход' ? 'bypass' : group === 'Сеть' ? 'network' : group === 'Сервис' ? 'diagnostics' : 'system'
 })
 
-function scrollToPanel(forceId?: string) {
-  const id = forceId || panelIdFromRoute()
-  if (!id || !settingsLoaded.value) return
-  const el = document.getElementById(id)
-  if (!el) return
-  // Offset for the pinned application header and category navigation.
-  const nav = document.querySelector('.settings-nav') as HTMLElement | null
-  const strip = document.querySelector('.topbar') as HTMLElement | null
-  const mobileNavOffset = window.matchMedia('(max-width: 900px)').matches ? (nav?.offsetHeight || 0) : 0
-  const offset = mobileNavOffset + (strip?.offsetHeight || 0) + 16
-  const top = el.getBoundingClientRect().top + window.scrollY - offset
-  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
-}
-
 function goSection(id: string, ev?: Event) {
   ev?.preventDefault()
   const slug = id.replace(/^sec-/, '')
-  const target = `/settings/${slug}`
-  if (route.path === target || route.fullPath.endsWith(`/settings/${slug}`)) {
-    void nextTick(() => scrollToPanel(id))
-    return
-  }
-  void router.push(target).then(() => {
-    void nextTick(() => {
-      requestAnimationFrame(() => scrollToPanel(id))
-    })
-  })
+  void router.push(`/settings/${slug}`)
 }
-
-watch(() => [route.params.panel, route.hash, settingsLoaded.value] as const, async () => {
-  if (!settingsLoaded.value) return
-  await nextTick()
-  requestAnimationFrame(() => scrollToPanel())
-}, { immediate: true })
 
 onMounted(async () => {
   // Последовательно: параллельный withBusy раньше сбрасывал busy чужим finally.
   await loadConfig()
   await loadErrors()
   try { await refreshClientScopes() } catch (e) { showToast((e as Error).message, 'error') }
-  await nextTick()
-  scrollToPanel()
 })
 </script>
 
 <template>
-  <section>
+  <section class="settings-page">
     <div class="page-head">
       <div>
         <h1>Настройки</h1>

@@ -6,6 +6,10 @@ html[data-theme="light"] {
   --bg2: #dae6eb;
   --accent: #188b86;
   --accent-ink: #f4fffe;
+  --toggle-off-bg: #e2e8ef;
+  --toggle-off-border: #9aa8b7;
+  --toggle-knob: #ffffff;
+  --toggle-on-knob: #ffffff;
   --surface-2: #fff;
   --rail: rgba(246, 250, 251, .96);
   --radius: 14px;
@@ -20,6 +24,10 @@ html[data-theme="dark"] {
   --line: rgba(180, 198, 218, .12);
   --accent: #62d2c8;
   --accent-ink: #071616;
+  --toggle-off-bg: #26364b;
+  --toggle-off-border: #71839a;
+  --toggle-knob: #e4edf7;
+  --toggle-on-knob: #07302e;
   --surface: rgba(17, 27, 43, .92);
   --surface-2: #111b2b;
   --rail: rgba(10, 16, 27, .97);
@@ -34,6 +42,8 @@ html[data-theme="dark"] {
     --ink: #e8eef6; --muted: #91a0b2; --line: rgba(180, 198, 218, .12);
     --accent: #62d2c8; --accent-ink: #071616; --surface: rgba(17, 27, 43, .92);
     --surface-2: #111b2b; --rail: rgba(10, 16, 27, .97);
+    --toggle-off-bg: #26364b; --toggle-off-border: #71839a;
+    --toggle-knob: #e4edf7; --toggle-on-knob: #07302e;
     --ok: #54d6a1; --warn: #e4bd69; --danger: #fa827b;
   }
 }
@@ -119,17 +129,18 @@ textarea:focus-visible, summary:focus-visible {
 .profile-summary-list > div { display: flex; justify-content: space-between; gap: .8rem; padding: .65rem 0; border-top: 1px solid var(--line); }.profile-summary-list > div > span { display: grid; gap: .18rem; }.profile-summary-list small, .profile-summary-list b { color: var(--muted); font-size: .75rem; }.profile-summary-list b.is-locked { color: var(--accent); }.profile-summary-list b.is-disabled { color: var(--danger); }
 .diagnostics-card summary { display: flex; justify-content: space-between; cursor: pointer; list-style: none; }.diagnostics-card summary::-webkit-details-marker { display: none; }.diagnostics-card summary span { display: grid; gap: .2rem; }.diagnostics-card summary small { color: var(--muted); }.diagnostics-card dl { margin: .8rem 0; }.diagnostics-card dl div { display: flex; justify-content: space-between; gap: .8rem; padding: .4rem 0; border-top: 1px solid var(--line); font-size: .76rem; }.diagnostics-card dt { color: var(--muted); }.diagnostics-card dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .settings-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: start; gap: 1rem; }
-.settings-nav { position: sticky; z-index: 5; top: 80px; align-self: start; max-height: calc(100vh - 96px); overflow-y: auto; display: grid; gap: .25rem; padding: .55rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); box-shadow: var(--shadow); }
+.settings-page > .page-head { padding-left: 206px; }
+.settings-nav { position: fixed; z-index: 19; top: 80px; left: 264px; width: 190px; max-height: calc(100dvh - 96px); overflow-y: auto; display: grid; gap: .25rem; padding: .55rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); box-shadow: var(--shadow); }
+.settings-content { grid-column: 2; min-width: 0; }
 .settings-nav a { border: 1px solid transparent; border-radius: 8px; padding: .65rem .7rem; color: var(--muted); font-size: .8rem; }.settings-nav a.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.settings-content { min-width: 0; }
 .settings-category { min-width: 0; }
 .settings-group { margin: 1rem 0 .65rem; padding: .8rem 1rem; border-left: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); }.settings-group h2 { margin: 0; }.settings-group p { margin: .2rem 0 0; color: var(--muted); }
 .panel { padding: 1rem; margin: 0 0 .8rem; box-shadow: none; }.panel-h h2 { margin: 0; }.panel-d { color: var(--muted); line-height: 1.5; }
-input[type="checkbox"] { appearance: none; -webkit-appearance: none; position: relative; display: inline-block; flex: 0 0 2.55rem; width: 2.55rem; min-width: 2.55rem; height: 1.45rem; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 999px; background: var(--bg2); cursor: pointer; vertical-align: middle; transition: background 160ms ease, border-color 160ms ease; }
-input[type="checkbox"]::before { content: ""; position: absolute; top: 2px; left: 2px; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--surface-2); box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform 160ms ease; }
+input[type="checkbox"] { appearance: none; -webkit-appearance: none; position: relative; display: inline-block; flex: 0 0 2.55rem; width: 2.55rem; min-width: 2.55rem; height: 1.45rem; margin: 0; padding: 0; border: 1px solid var(--toggle-off-border); border-radius: 999px; background: var(--toggle-off-bg); cursor: pointer; vertical-align: middle; transition: background 160ms ease, border-color 160ms ease; }
+input[type="checkbox"]::before { content: ""; position: absolute; top: 2px; left: 2px; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--toggle-knob); box-shadow: 0 1px 3px rgba(0,0,0,.35); transition: transform 160ms ease; }
 input[type="checkbox"]:checked { border-color: var(--accent); background: var(--accent); }
-input[type="checkbox"]:checked::before { transform: translateX(1.1rem); }
-input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
+input[type="checkbox"]:checked::before { transform: translateX(1.1rem); background: var(--toggle-on-knob); }
+input[type="checkbox"]:disabled { opacity: .9; cursor: not-allowed; }
 .toggle { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .toggle input { order: 2; }
 .toggle > span:first-of-type { order: 0; margin-right: auto; }
@@ -142,8 +153,10 @@ input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
   .rail { display: none; }
   .topbar { min-height: 54px; padding-inline: 1rem; }.top-health { display: none; }
   .overview-top, .overview-bottom { grid-template-columns: 1fr; }
+  .settings-page > .page-head { padding: 60px 0 0; }
   .settings-layout { grid-template-columns: 1fr; gap: .7rem; }
-  .settings-nav { position: sticky; top: 54px; max-height: none; overflow-y: hidden; display: flex; overflow-x: auto; }
+  .settings-content { grid-column: 1; }
+  .settings-nav { top: 58px; left: .6rem; width: calc(100vw - 1.2rem); max-height: none; overflow-y: hidden; display: flex; overflow-x: auto; }
 }
 @media (max-width: 600px) {
   .main { padding: 1rem .8rem 1.5rem; }
