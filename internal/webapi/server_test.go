@@ -126,7 +126,7 @@ func TestStateAggregate(t *testing.T) {
 	resp, out := e.get("/cgi-bin/state.cgi")
 	wantStatus(t, resp, http.StatusOK)
 	for _, k := range []string{"status", "version", "scopes", "tls_blob", "wg_blob", "wg_state", "fallback",
-		"udp_games", "wssize_ramp", "auto_mode", "hostlist", "rst_guard", "reasm", "quic443", "dns_desync",
+		"udp_games", "wssize_ramp", "auto_mode", "hostlist", "rst_guard", "reasm", "dns_desync",
 		"ports", "provider", "backups"} {
 		v, ok := out[k]
 		if !ok {

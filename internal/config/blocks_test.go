@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,34 @@ func TestFindBlock(t *testing.T) {
 				t.Errorf("Lines = %q, want %q", b.Lines, tc.wantLines)
 			}
 		})
+	}
+}
+
+func TestRemoveLegacyQUIC443KeepsFollowingProfile(t *testing.T) {
+	c := Parse(`--new
+#Z2R_QUIC443_BEGIN
+--filter-udp=443
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=10
+#Z2R_QUIC443_END
+--new
+#Z2R_AUTO_STANDARD_5_BEGIN
+--filter-udp=443
+--lua-desync=fake:blob=quic_google:strategy=1
+#Z2R_AUTO_STANDARD_5_END
+`)
+	if !c.RemoveLegacyQUIC443() {
+		t.Fatal("expected legacy QUIC443 profile to be removed")
+	}
+	got := c.String()
+	if strings.Contains(got, "QUIC443") || strings.Contains(got, "repeats=10") {
+		t.Fatalf("legacy profile remains: %s", got)
+	}
+	if !strings.Contains(got, "--new\n#Z2R_AUTO_STANDARD_5_BEGIN") || !strings.Contains(got, "strategy=1") {
+		t.Fatalf("shared QUIC strategy profile was removed or corrupted: %s", got)
+	}
+	if c.RemoveLegacyQUIC443() {
+		t.Fatal("second cleanup should be a no-op")
 	}
 }
 

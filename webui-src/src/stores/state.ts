@@ -26,7 +26,6 @@ export async function fetchAndApplyState() {
   modeSettings.hostlist = payload.hostlist
   modeSettings.rst_guard = payload.rst_guard
   modeSettings.reasm = payload.reasm
-  modeSettings.quic443 = payload.quic443
   modeSettings.dns_desync = payload.dns_desync
   ports.value = payload.ports
   provider.value = payload.provider

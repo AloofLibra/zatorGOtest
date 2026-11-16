@@ -49,7 +49,6 @@ export interface StatusPayload {
   wireguard?: string
   rst_guard?: string
   reasm?: string
-  quic443?: string
   provider?: string
   client_scope?: ClientScopeDiagnostics
   profiles?: ProfileInfo[]
@@ -379,7 +378,6 @@ export interface StatePayload {
   hostlist: ModeSettingData
   rst_guard: ModeSettingData
   reasm: ModeSettingData
-  quic443: ModeSettingData
   dns_desync: ModeSettingData
   ports: PortsSettings
   provider: ProviderSettings

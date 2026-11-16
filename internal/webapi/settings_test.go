@@ -49,7 +49,6 @@ func TestSettingsGetDefaults(t *testing.T) {
 		{"rst_guard", "enabled", true},
 		{"rst_guard", "lua_available", true},
 		{"reasm", "enabled", false},
-		{"quic443", "state", "выключены"},
 		{"fallback", "state", "выключен"},
 		{"fallback", "enabled", false},
 		{"udp-games", "enabled", false},
@@ -97,10 +96,17 @@ func TestSettingsGetDefaults(t *testing.T) {
 	if modes := tls["profile_modes"].(map[string]any); modes["1"] != "classic" {
 		t.Errorf("profile_modes = %v", modes)
 	}
-	// Неизвестный setting на GET = TLS-блоб.
-	if out := settingGetMap(t, e, "whatever"); out["current_mode"] == nil {
-		t.Errorf("unknown GET = %v", out)
+	if alias := settingGetMap(t, e, "tls_blob"); alias["current_mode"] == nil {
+		t.Errorf("tls_blob GET alias = %v", alias)
 	}
+}
+
+func TestRemovedQUIC443SettingIsRejected(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	resp, _ := e.get("/cgi-bin/settings.cgi?setting=quic443")
+	wantStatus(t, resp, http.StatusBadRequest)
+	resp, _ = e.post("/cgi-bin/settings.cgi", "setting", "quic443_state", "value", "1")
+	wantStatus(t, resp, http.StatusBadRequest)
 }
 
 func TestSettingsToggles(t *testing.T) {
@@ -121,12 +127,11 @@ func TestSettingsToggles(t *testing.T) {
 		t.Error("config.default не обновлён")
 	}
 
-	// quic443, wg, reasm, dns, udp_games
+	// wg, reasm, dns, udp_games
 	cases := []struct {
 		setting string
 		check   func(c *config.Config) bool
 	}{
-		{"quic443_state", func(c *config.Config) bool { return c.QUIC443Text() == "включены" }},
 		{"wg_state", func(c *config.Config) bool { return c.WireGuardText() == "включено" }},
 		{"reasm_state", func(c *config.Config) bool { return c.ReasmText() == "включено" }},
 		{"udp_games_state", func(c *config.Config) bool { return c.UDPGamesText() == "Включен" }},
@@ -231,13 +236,13 @@ func TestSettingsAutoModeSwitchesBlocks(t *testing.T) {
 func TestSettingsRestartWhenRunning(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	e.svc.running = true
-	resp, out := e.post("/cgi-bin/settings.cgi", "setting", "quic443_state", "value", "1")
+	resp, out := e.post("/cgi-bin/settings.cgi", "setting", "rst_guard_state", "value", "0")
 	wantOK(t, resp, out)
 	if out["restarted"] != true {
 		t.Errorf("restarted = %v", out["restarted"])
 	}
 	// restart=0 откладывает рестарт.
-	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "quic443_state", "value", "0", "restart", "0")
+	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "rst_guard_state", "value", "1", "restart", "0")
 	wantOK(t, resp, out)
 	if out["restarted"] != false {
 		t.Errorf("restarted = %v", out["restarted"])

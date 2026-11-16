@@ -17,7 +17,7 @@ export const ports = ref<PortsSettings | null>(null)
 export const provider = ref<ProviderSettings | null>(null)
 export const settingsLoaded = ref(false)
 
-export const MODE_SETTINGS = ['auto_mode', 'hostlist', 'rst_guard', 'reasm', 'quic443', 'dns_desync'] as const
+export const MODE_SETTINGS = ['auto_mode', 'hostlist', 'rst_guard', 'reasm', 'dns_desync'] as const
 export type ModeSettingKey = typeof MODE_SETTINGS[number]
 
 export const refreshTlsBlobSettings = () => fetchTlsBlobSettings().then((data) => { tlsBlobSettings.value = data })

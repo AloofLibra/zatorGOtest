@@ -27,7 +27,6 @@ const (
 	BlockFallbackTLS   = "FALLBACK"
 	BlockFallbackHTTP  = "FALLBACK_HTTP"
 	BlockWireGuard     = "WG"
-	BlockQUIC443       = "QUIC443"
 	autoModeOnMarker   = "#Z2R_AUTO_MODE=1"
 	autoModeOffMarker  = "#Z2R_AUTO_MODE=0"
 	autoFallbackWasKey = "#Z2R_AUTO_FALLBACK_WAS="
@@ -120,6 +119,22 @@ func (c *Config) ReplaceBlockBody(name string, body []string) error {
 	}
 	c.spliceLines(b.Begin+1, b.End, body)
 	return nil
+}
+
+// RemoveLegacyQUIC443 удаляет устаревший профиль целиком, сохраняя `--new`
+// перед следующим профилем.
+func (c *Config) RemoveLegacyQUIC443() bool {
+	b, ok := c.FindBlock("QUIC443")
+	if !ok {
+		return false
+	}
+	start := b.Begin
+	if start > 0 && strings.TrimSpace(c.lines[start-1]) == "--new" {
+		start--
+	}
+	c.spliceLines(start, b.End+1, nil)
+	c.reindex()
+	return true
 }
 
 // AutoStandardBlock возвращает блок `#Z2R_AUTO_STANDARD_<id>_BEGIN/END`.

@@ -34,7 +34,6 @@ func toggleCases() []toggleCase {
 	return []toggleCase{
 		{"fallback", (*Config).SetFallback, (*Config).FallbackText, "включен", "выключен"},
 		{"wireguard", (*Config).SetWireGuard, (*Config).WireGuardText, "включено", "выключено"},
-		{"quic443", (*Config).SetQUIC443, (*Config).QUIC443Text, "включены", "выключены"},
 		{"dns_desync", (*Config).SetDNSDesync, (*Config).DNSDesyncText, "Включен", "Выключен"},
 		{"udp_games", (*Config).SetUDPGames, (*Config).UDPGamesText, "Включен", "Выключен"},
 		{"rst_guard", (*Config).SetRSTGuard, (*Config).RSTGuardText, "включен", "выключен"},
@@ -92,9 +91,6 @@ func TestTogglesWithoutBlocksReturnError(t *testing.T) {
 	}
 	if err := c.SetWireGuard(true); err == nil {
 		t.Error("SetWireGuard без блока должен вернуть ошибку")
-	}
-	if err := c.SetQUIC443(true); err == nil {
-		t.Error("SetQUIC443 без блока должен вернуть ошибку")
 	}
 	if err := c.SetDNSDesync(true); err == nil {
 		t.Error("SetDNSDesync без блока должен вернуть ошибку")

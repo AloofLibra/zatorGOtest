@@ -182,19 +182,16 @@ func TestDNSDesync(t *testing.T) {
 	}
 }
 
-func TestQUICAndWireGuard(t *testing.T) {
-	tests := []struct{ name, in, quic, wg string }{
-		{"both on", "#Z2R_QUIC443_BEGIN\n--filter-udp=443\n#Z2R_QUIC443_END\n#Z2R_WG_BEGIN\n--filter-l7=wireguard\n#Z2R_WG_END\n", "включены", "включено"},
-		{"both off", "#Z2R_QUIC443_BEGIN\n--skip --filter-udp=443\n#Z2R_QUIC443_END\n#Z2R_WG_BEGIN\n--skip --filter-l7=wireguard\n#Z2R_WG_END\n", "выключены", "выключено"},
-		{"absent", "", "неизвестно", "недоступно"},
-		{"empty blocks", "#Z2R_QUIC443_BEGIN\n#Z2R_QUIC443_END\n#Z2R_WG_BEGIN\n#Z2R_WG_END\n", "неизвестно", "недоступно"},
+func TestWireGuardMode(t *testing.T) {
+	tests := []struct{ name, in, wg string }{
+		{"on", "#Z2R_WG_BEGIN\n--filter-l7=wireguard\n#Z2R_WG_END\n", "включено"},
+		{"off", "#Z2R_WG_BEGIN\n--skip --filter-l7=wireguard\n#Z2R_WG_END\n", "выключено"},
+		{"absent", "", "недоступно"},
+		{"empty block", "#Z2R_WG_BEGIN\n#Z2R_WG_END\n", "недоступно"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := Parse(tc.in)
-			if got := c.ModeText(ModeQUIC443); got != tc.quic {
-				t.Errorf("quic443 = %q, want %q", got, tc.quic)
-			}
 			if got := c.ModeText(ModeWireGuard); got != tc.wg {
 				t.Errorf("wireguard = %q, want %q", got, tc.wg)
 			}
@@ -257,7 +254,6 @@ func TestDefaultConfigModes(t *testing.T) {
 		ModeDNSDesync:   "Выключен",
 		ModeClientScope: "выключен",
 		ModeRSTGuard:    "включен",
-		ModeQUIC443:     "выключены",
 		ModeWireGuard:   "выключено",
 	}
 	for mode, want := range wantText {
@@ -323,7 +319,7 @@ func TestDefaultConfigBlocks(t *testing.T) {
 	}
 	for _, name := range []string{
 		BlockAutoStandard, BlockAuto, BlockTCP443, BlockDNS,
-		BlockFallbackTLS, BlockFallbackHTTP, BlockWireGuard, BlockQUIC443,
+		BlockFallbackTLS, BlockFallbackHTTP, BlockWireGuard,
 	} {
 		if _, ok := c.FindBlock(name); !ok {
 			t.Errorf("block %s not found", name)

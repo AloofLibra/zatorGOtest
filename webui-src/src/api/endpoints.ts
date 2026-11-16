@@ -85,7 +85,6 @@ export const fetchSetting = {
   hostlist: () => api<ModeSettingData>('/api/settings?setting=hostlist'),
   rst_guard: () => api<ModeSettingData>('/api/settings?setting=rst_guard'),
   reasm: () => api<ModeSettingData>('/api/settings?setting=reasm'),
-  quic443: () => api<ModeSettingData>('/api/settings?setting=quic443'),
   dns_desync: () => api<ModeSettingData>('/api/settings?setting=dns_desync'),
   ports: () => api<PortsSettings>('/api/settings?setting=ports'),
   provider: () => api<ProviderSettings>('/api/settings?setting=provider'),

@@ -81,6 +81,9 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 	}
 
 	dirty := false
+	if cfg.RemoveLegacyQUIC443() {
+		dirty = true
+	}
 	if changed, e := a.ensureNetworkIfaces(cfg); e == nil && changed {
 		dirty = true
 	}

@@ -150,12 +150,6 @@ var toggles = []toggle{
 		notFound: "Не найден блок NFQWS2_OPT в конфиге." + cliHint,
 	},
 	{
-		names:    []string{"quic443_state", "quic443"},
-		apply:    (*config.Config).SetQUIC443,
-		state:    (*config.Config).QUIC443Text,
-		notFound: "Блок QUIC (UDP443) не найден в конфиге." + cliHint,
-	},
-	{
 		names:    []string{"dns_desync_state", "dns_desync"},
 		apply:    (*config.Config).SetDNSDesync,
 		state:    (*config.Config).DNSDesyncText,

@@ -137,6 +137,17 @@ Z2R_WSSIZE_RAMP_ARGS=
 Z2R_WSSIZE_RAMP_SKIP=--skip
 NFQWS2_OPT="
 #Z2R_AUTO_STANDARD_BEGIN
+#Z2R_QUIC443_BEGIN
+--filter-udp=443
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=10
+#Z2R_QUIC443_END
+--new
+#Z2R_AUTO_STANDARD_5_BEGIN
+--filter-udp=443
+--lua-desync=fake:blob=quic_google:strategy=1
+#Z2R_AUTO_STANDARD_5_END
+--new
 #Z2R_AUTO_STANDARD_3_BEGIN
 --filter-tcp=443
 "
@@ -172,5 +183,11 @@ NFQWS2_OPT="
 	}
 	if v, _ := live.Get("Z2R_WSSIZE_RAMP_SKIP"); v != "" {
 		t.Fatalf("live SKIP=%q", v)
+	}
+	if strings.Contains(live.String(), "QUIC443") || strings.Contains(live.String(), "repeats=10") {
+		t.Fatalf("legacy QUIC fakes profile was not removed: %s", live.String())
+	}
+	if !strings.Contains(got, "--lua-desync=fake:blob=quic_google:strategy=1") {
+		t.Fatal("shared QUIC strategy profile was removed")
 	}
 }

@@ -94,9 +94,6 @@ func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) 
 	case "reasm", "reasm_state":
 		st := cfg.ReasmText()
 		return map[string]any{"state": st, "enabled": st == "включено"}, nil
-	case "quic443", "quic443_state":
-		st := cfg.QUIC443Text()
-		return map[string]any{"state": st, "enabled": st == "включены"}, nil
 	case "dns_desync", "dns_desync_state":
 		st := cfg.DNSDesyncText()
 		return map[string]any{"state": st, "enabled": st == "Включен"}, nil
@@ -122,8 +119,11 @@ func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) 
 		return s.configRawGet(), nil
 	case "nfqws2_errors", "errors":
 		return s.nfqws2ErrorsGet(), nil
+	case "", "tls_blob":
+		return s.tlsBlobGet(cfg)
+	default:
+		return nil, errf(http.StatusBadRequest, "Неизвестная настройка")
 	}
-	return s.tlsBlobGet(cfg)
 }
 
 // listFake возвращает отсортированные имена файлов FakeDir, подходящих под re.

@@ -54,7 +54,6 @@ const modes = [
   { key: 'dns_desync', post: 'dns_desync_state', title: 'Антиспуф DNS (весь UDP/53)', field: 'enabled' as const },
   { key: 'rst_guard', post: 'rst_guard_state', title: 'RST guard', field: 'enabled' as const },
   { key: 'reasm', post: 'reasm_state', title: 'reasm-disable', field: 'enabled' as const },
-  { key: 'quic443', post: 'quic443_state', title: 'QUIC fakes :443', field: 'enabled' as const },
 ]
 
 const fw = ref(status.value?.fwtype || 'iptables')
@@ -588,7 +587,7 @@ const panelAliases: Record<string, string> = {
   updates: 'sec-updates', provider: 'sec-provider', backups: 'sec-backups',
   modes: 'sec-modes', 'auto-mode': 'sec-modes', fallback: 'sec-modes', hostlist: 'sec-modes',
   'udp-games': 'sec-modes', 'dns-desync': 'sec-modes', 'rst-guard': 'sec-modes',
-  reasm: 'sec-modes', quic443: 'sec-modes',
+  reasm: 'sec-modes',
   tls: 'sec-tls', 'tls-blob': 'sec-tls',
   wg: 'sec-wg', wireguard: 'sec-wg',
   wssize: 'sec-wssize', 'wssize-ramp': 'sec-wssize',

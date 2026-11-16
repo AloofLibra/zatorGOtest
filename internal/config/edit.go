@@ -15,7 +15,6 @@ var (
 	skipStripRe    = regexp.MustCompile(`^(\s*)--skip(\s+|$)`)
 	filterTCPAnyRe = regexp.MustCompile(`^\s*(--skip\s+)?--filter-tcp=`)
 	filterWGRe     = regexp.MustCompile(`^\s*(--skip\s+)?--filter-l7=wireguard\s*$`)
-	filterQUICRe   = regexp.MustCompile(`^\s*(--skip\s+)?--filter-udp=443\s*$`)
 	filterDNSRe    = regexp.MustCompile(`^\s*(--skip\s+)?--filter-udp=53\s*$`)
 	filterGamesRe  = regexp.MustCompile(`^\s*(--skip\s+)?--filter-udp=1026`)
 )
@@ -187,12 +186,6 @@ func (c *Config) SetFallback(on bool) error {
 // SetWireGuard включает/выключает стратегию WireGuard (блок WG).
 func (c *Config) SetWireGuard(on bool) error {
 	_, err := c.toggleSkipBlock(BlockWireGuard, filterWGRe, on)
-	return err
-}
-
-// SetQUIC443 включает/выключает фейки QUIC на UDP 443 (блок QUIC443).
-func (c *Config) SetQUIC443(on bool) error {
-	_, err := c.toggleSkipBlock(BlockQUIC443, filterQUICRe, on)
 	return err
 }
 

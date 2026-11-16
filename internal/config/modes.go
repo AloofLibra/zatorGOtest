@@ -20,8 +20,7 @@ const (
 	ModeDNSDesync   = "dns_desync"
 	ModeTLSBlobMode = "tls_blob_mode"
 	ModeTLSBlobMenu = "tls_blob_menu" // синоним: "tls_blob"
-	ModeQUIC443     = "quic443"
-	ModeWireGuard   = "wireguard" // синоним: "wg_state"
+	ModeWireGuard   = "wireguard"     // синоним: "wg_state"
 	ModeClientScope = "client_scope"
 	ModePorts       = "ports"
 	unknownText     = "неизвестно"
@@ -41,8 +40,6 @@ var (
 	udpGamesOnRe       = regexp.MustCompile(`^\s*--filter-udp=1026`)
 	dnsOnRe            = regexp.MustCompile(`^\s*--filter-udp=53\s*$`)
 	dnsOffRe           = regexp.MustCompile(`^\s*--skip\s+--filter-udp=53\s*$`)
-	quicOnRe           = regexp.MustCompile(`^\s*--filter-udp=443\s*$`)
-	quicOffRe          = regexp.MustCompile(`^\s*--skip\s+--filter-udp=443\s*$`)
 	wgSkipRe           = regexp.MustCompile(`^\s*--skip\s+--filter-l7=wireguard\s*$`)
 	blobMaxruFileRe    = regexp.MustCompile(`--blob=maxru:@/opt/(?:zapret2|zator)/files/fake/(\S+)`)
 	wgBlobRe           = regexp.MustCompile(`--blob=fakewgblob:@/opt/(?:zapret2|zator)/files/fake/(\S+)`)
@@ -92,8 +89,6 @@ func (c *Config) ModeText(mode string) string {
 		return c.TLSBlobModeValue()
 	case ModeTLSBlobMenu, "tls_blob":
 		return c.TLSBlobMenuValue()
-	case ModeQUIC443:
-		return c.QUIC443Text()
 	case ModeWireGuard, "wg_state":
 		return c.WireGuardText()
 	case ModeClientScope:
@@ -235,21 +230,6 @@ func (c *Config) DNSDesyncText() string {
 		return "Включен"
 	}
 	return "Выключен"
-}
-
-// QUIC443Text: "включены" | "выключены" | "неизвестно" по блоку #Z2R_QUIC443_*.
-func (c *Config) QUIC443Text() string {
-	b, ok := c.FindBlock(BlockQUIC443)
-	if !ok {
-		return unknownText
-	}
-	switch {
-	case anyLine(b.Lines, quicOnRe):
-		return "включены"
-	case anyLine(b.Lines, quicOffRe):
-		return "выключены"
-	}
-	return unknownText
 }
 
 // WireGuardText: "включено" | "выключено" | "недоступно" (нет блока #Z2R_WG_*).

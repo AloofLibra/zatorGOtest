@@ -26,7 +26,7 @@ func TestStatusShape(t *testing.T) {
 	resp, st := e.get("/cgi-bin/status.cgi")
 	wantStatus(t, resp, http.StatusOK)
 	for _, k := range []string{"zapret2_running", "strategy_locks_status", "hostlist_mode", "fwtype", "flowoffload",
-		"tls_blob_mode", "wireguard", "auto_mode", "rst_guard", "reasm", "quic443", "provider", "client_scope", "profiles", "health"} {
+		"tls_blob_mode", "wireguard", "auto_mode", "rst_guard", "reasm", "provider", "client_scope", "profiles", "health"} {
 		if _, ok := st[k]; !ok {
 			t.Errorf("нет поля %s", k)
 		}
