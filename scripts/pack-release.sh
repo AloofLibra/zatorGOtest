@@ -39,6 +39,7 @@ while IFS= read -r -d '' f; do
   class=auto
   case "$rel" in
     extra_strats/cache/orchestra/*) class=auto ;;
+    files/fake/custom_tls.bin) class=keep-if-exists ;;
     lists/*|extra_strats/*) class=keep-if-exists ;;
   esac
   printf '%s|/opt/zator/%s|%s|%s|%s|%s\n' "$rel" "$rel" "$class" "$sum" "$size" "$exec" >>"$MAN"

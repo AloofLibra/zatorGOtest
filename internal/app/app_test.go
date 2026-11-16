@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -190,6 +191,18 @@ func TestInstallUnpacksStockFakes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(a.Paths.FakeDir, "custom_tls.bin")); err != nil {
 		t.Fatalf("EnsureStockFakes не восстановил blob: %v", err)
+	}
+	customPath := filepath.Join(a.Paths.FakeDir, "custom_tls.bin")
+	custom := []byte("user custom TLS blob")
+	if err := os.WriteFile(customPath, custom, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnsureStockFakes(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(customPath)
+	if err != nil || !bytes.Equal(got, custom) {
+		t.Fatalf("EnsureStockFakes должен сохранять пользовательский custom_tls.bin: %q, %v", got, err)
 	}
 }
 

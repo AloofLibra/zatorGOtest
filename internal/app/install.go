@@ -360,16 +360,44 @@ func copyDirKeepExisting(src, dst string) error {
 	return nil
 }
 
-// EnsureStockFakes распаковывает встроенные blob в FakeDir (перезаписывает сток,
-// не удаляет пользовательские файлы с другими именами).
+// EnsureStockFakes распаковывает встроенные blob в FakeDir. Пользовательский
+// custom_tls.bin сохраняется при обновлении, как в Bash-версии.
 func (a *App) EnsureStockFakes() error {
 	if err := os.MkdirAll(a.Paths.FakeDir, 0o755); err != nil {
 		return fmt.Errorf("создание FakeDir: %w", err)
 	}
-	if err := copyFS(uiembed.Fake(), a.Paths.FakeDir); err != nil {
+	if err := copyFSKeepCustomTLS(uiembed.Fake(), a.Paths.FakeDir); err != nil {
 		return fmt.Errorf("распаковка files/fake: %w", err)
 	}
 	return nil
+}
+
+func copyFSKeepCustomTLS(src fs.FS, dst string) error {
+	return fs.WalkDir(src, ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, filepath.FromSlash(name))
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if filepath.ToSlash(name) == "custom_tls.bin" {
+			if _, err := os.Stat(target); err == nil {
+				return nil
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+		}
+		data, err := fs.ReadFile(src, name)
+		if err != nil {
+			return err
+		}
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(strings.ToLower(name), ".sh") {
+			mode = 0o755
+		}
+		return os.WriteFile(target, data, mode)
+	})
 }
 
 // copyFS копирует содержимое src в каталог dst.
