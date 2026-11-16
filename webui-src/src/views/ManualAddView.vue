@@ -1,28 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
 import { applySetting, registerStrategy, uploadBlob } from '../api/endpoints'
 import { gatedReason, isProfileGated } from '../gating'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { refreshTlsBlobSettings, refreshWgBlobSettings, tlsBlobSettings, wgBlobSettings } from '../stores/settings'
-import { locks, refreshAll, scope, scopes } from '../stores/status'
+import { locks, refreshAll, scope } from '../stores/status'
 import { restartSuffix, showToast } from '../stores/toast'
-import SupersweepPanel from '../components/strategies/SupersweepPanel.vue'
 
-const route = useRoute()
-const scopeOptions = computed(() => scopes.value.scopes || ['default'])
-
-function scrollToSupersweep() {
-  document.getElementById('supersweep-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-}
-
-function focusSupersweepFromHash() {
-  const hash = String(route.hash || '').replace(/^#/, '')
-  if (hash !== 'supersweep-panel') return
-  nextTick(() => scrollToSupersweep())
-}
-
-watch(() => route.hash, () => focusSupersweepFromHash())
 
 const presets = [
   {
@@ -81,6 +65,12 @@ function applyPreset(id: string) {
 function onFile(ev: Event) {
   const input = ev.target as HTMLInputElement
   const f = input.files?.[0] || null
+  if (f && f.size > 2 * 1024 * 1024) {
+    blobFile.value = null
+    input.value = ''
+    showToast('Размер blob-файла не должен превышать 2 МБ', 'error')
+    return
+  }
   blobFile.value = f
   if (f && !blobName.value) {
     blobName.value = f.name
@@ -99,7 +89,6 @@ onMounted(async () => {
   } catch (e) {
     showToast((e as Error).message, 'error')
   }
-  focusSupersweepFromHash()
 })
 
 async function submitStrategy() {
@@ -166,14 +155,13 @@ async function submitBlob() {
 
 <template>
   <section>
-    <div class="page-head">
+    <div class="page-heading">
       <div>
-        <h1>Вручную</h1>
-        <p>Тестовые desync, blob и суперсвип.</p>
+        <span class="eyebrow">Экспертный режим</span>
+        <h1>Инструменты</h1>
+        <p>Добавление пользовательских стратегий и TLS/WireGuard blob-файлов.</p>
       </div>
-      <div class="actions">
-        <button type="button" class="ghost" @click="scrollToSupersweep">К суперсвипу</button>
-      </div>
+      <router-link class="secondary-button" to="/sweep">Открыть подбор стратегий</router-link>
     </div>
 
     <div class="lab-grid">
@@ -247,7 +235,7 @@ async function submitBlob() {
           <span>Файл .bin</span>
           <input type="file" accept=".bin,application/octet-stream" :disabled="busyActive" @change="onFile">
         </label>
-        <p class="meta">{{ blobHint }}. Макс. 2 МБ.</p>
+        <p class="meta">{{ blobHint }}. Макс. 2 МБ<span v-if="blobFile"> · выбрано {{ blobFile.name }} ({{ (blobFile.size / 1024).toFixed(1) }} КБ)</span>.</p>
 
         <label class="check-row" style="margin-top:0.65rem">
           <input v-model="selectAfter" type="checkbox" :disabled="busyActive">
@@ -267,12 +255,5 @@ async function submitBlob() {
       </article>
     </div>
 
-    <div class="section-label" style="margin-top:1.35rem">Суперсвип</div>
-    <SupersweepPanel
-      :scope="scope"
-      :scopes="scopeOptions"
-      @started="refreshAll"
-      @cancelled="refreshAll"
-    />
   </section>
 </template>

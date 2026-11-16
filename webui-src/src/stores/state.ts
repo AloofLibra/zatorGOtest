@@ -4,7 +4,7 @@ import {
   fallbackSettings, ifacesSettings, modeSettings, ports, provider, settingsLoaded, telemetrySettings, wssizeRampSettings,
   tlsBlobSettings, udpGamesSettings, wgBlobSettings, wgStateSettings,
 } from './settings'
-import { authRequired, locks, scope, scopes, status, statusLoaded, versionInfo } from './status'
+import { authRequired, locks, scope, scopes, status, statusLoaded, versionInfo, versionInfoCheckedAt, versionInfoFresh } from './status'
 
 // Одна агрегирующая загрузка вместо ~15 отдельных CGI: state.cgi читает
 // всё состояние за один процесс на роутере.
@@ -13,6 +13,8 @@ export async function fetchAndApplyState() {
   authRequired.value = payload.auth_required !== false
   status.value = payload.status
   versionInfo.value = payload.version
+  versionInfoCheckedAt.value = Date.now()
+  versionInfoFresh.value = true
   locks.value = payload.status.profiles || []
   scopes.value = payload.scopes
   tlsBlobSettings.value = payload.tls_blob

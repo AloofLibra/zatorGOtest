@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { domains } from '../api/endpoints'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
@@ -16,7 +16,13 @@ const route = useRoute()
 const router = useRouter()
 const input = ref('')
 const bulk = ref('')
+const searchInput = ref('')
+const searchTerm = ref('')
+const page = ref(1)
 const strategyDraft = ref<Record<string, string>>({})
+const renaming = ref('')
+const renameValue = ref('')
+let searchTimer: number | undefined
 
 const labels: Record<DomainListName, string> = {
   netrogat: 'Исключения',
@@ -33,17 +39,35 @@ const active = computed<DomainListName>(() => {
 const isGooglevideo = computed(() => active.value === 'googlevideo')
 const list = computed(() => domainLists[active.value])
 const meta = computed(() => DOMAIN_META[active.value])
+const pageSize = 100
+const filteredItems = computed(() => {
+  const needle = searchTerm.value.trim().toLocaleLowerCase()
+  const items = list.value?.items || []
+  return needle ? items.filter((item) => item.value.toLocaleLowerCase().includes(needle)) : items
+})
+const pageCount = computed(() => Math.max(1, Math.ceil(filteredItems.value.length / pageSize)))
+const visibleItems = computed(() => filteredItems.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
 onMounted(() => {
   if (!domainsLoaded.value) refreshDomains()
 })
+onUnmounted(() => { if (searchTimer !== undefined) window.clearTimeout(searchTimer) })
 const hostlistAuto = computed(() => !!modeSettings.hostlist?.auto)
 const autoLocked = computed(() => hostlistAuto.value && (active.value === 'custom_rkn' || active.value === 'substring'))
 const scopeOptions = computed(() => scopes.value.scopes || ['default'])
 
 watch(active, (name) => {
+  page.value = 1
   if (!domainLists[name]) refreshDomainList(name)
 })
+watch(searchInput, (value) => {
+  if (searchTimer !== undefined) window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => {
+    searchTerm.value = value
+    page.value = 1
+  }, 160)
+})
+watch(pageCount, (count) => { if (page.value > count) page.value = count })
 watch(scope, () => {
   void refreshDomainList('custom_rkn')
   if (isGooglevideo.value) void refreshDomainList('googlevideo')
@@ -72,7 +96,30 @@ watch(list, (payload) => {
 }, { deep: true, immediate: true })
 
 function go(name: DomainListName) {
-  router.push(`/domains/${name}`)
+  void router.push({ path: `/domains/${name}`, query: route.query })
+}
+
+function beginRename(domain: string) {
+  renaming.value = domain
+  renameValue.value = domain
+}
+
+async function rename(domain: string) {
+  const value = renameValue.value.trim()
+  if (!value || value === domain) {
+    renaming.value = ''
+    return
+  }
+  try {
+    await withBusy(`domain-rename-${domain}`, async () => {
+      await domains.rename(active.value, domain, value, scope.value)
+      renaming.value = ''
+      await refreshDomainList(active.value)
+    })
+    showToast('Запись переименована')
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
 }
 
 async function add() {
@@ -202,10 +249,11 @@ async function checkDomain(domain: string) {
 
 <template>
   <section>
-    <div class="page-head">
+    <div class="page-heading">
       <div>
-        <h1>Домены</h1>
-        <p>Hostlist и автосбор media CDN YouTube.</p>
+        <span class="eyebrow">Списки трафика</span>
+        <h1>Домены и списки</h1>
+        <p>Исключения, собственные записи и автоматически собранные узлы Googlevideo.</p>
       </div>
       <div class="actions">
         <label v-if="scopes.enabled" class="field" style="margin:0">
@@ -234,7 +282,7 @@ async function checkDomain(domain: string) {
     <div class="panel">
       <div class="panel-h">
         <h2>{{ list?.title || labels[active] }}</h2>
-        <span class="chip">{{ list?.items?.length ?? 0 }}</span>
+      <span class="chip">{{ list?.items?.length ?? 0 }} записей</span>
       </div>
       <p v-if="isGooglevideo" class="panel-d">
         Автопробой TLS/CDN + обучение на трафике:
@@ -265,7 +313,7 @@ async function checkDomain(domain: string) {
           @click="clearAll">Очистить</button>
       </form>
 
-      <div class="field" style="margin-top:0.9rem">
+    <div class="field bulk-import" style="margin-top:0.9rem">
         <span>Импорт списком</span>
         <textarea v-model="bulk"
           :disabled="busyActive || autoLocked"
@@ -293,10 +341,19 @@ async function checkDomain(domain: string) {
       </div>
     </div>
 
+    <div class="domain-toolbar">
+      <label class="search-field"><span class="sr-only">Поиск по списку</span><input v-model="searchInput" type="search" :placeholder="`Поиск: ${meta.itemName.toLocaleLowerCase()}…`"></label>
+      <span class="meta">{{ filteredItems.length }} из {{ list?.items?.length || 0 }}</span>
+    </div>
     <div class="domain-list">
-      <div v-for="item in (list?.items || [])" :key="item.value" class="domain-item">
+      <div v-for="item in visibleItems" :key="item.value" class="domain-item">
         <div>
-          <code>{{ item.value }}</code>
+          <div v-if="renaming === item.value" class="rename-row">
+            <input v-model="renameValue" :disabled="busyActive" aria-label="Новое имя записи" @keydown.enter.prevent="rename(item.value)">
+            <button type="button" class="primary" :disabled="busyActive || !renameValue.trim()" @click="rename(item.value)">Сохранить</button>
+            <button type="button" class="ghost" :disabled="busyActive" @click="renaming = ''">Отмена</button>
+          </div>
+          <code v-else>{{ item.value }}</code>
           <div v-if="isGooglevideo && (item.ip || item.source)" class="panel-d" style="margin:0.35rem 0 0">
             <span v-if="item.ip">{{ item.ip }}</span>
             <span v-if="item.source"> · {{ item.source }}</span>
@@ -314,6 +371,7 @@ async function checkDomain(domain: string) {
           </div>
         </div>
         <div class="row">
+          <button v-if="renaming !== item.value" type="button" class="ghost" :disabled="busyActive || autoLocked" @click="beginRename(item.value)">Переименовать</button>
           <button v-if="active === 'custom_rkn'" type="button" class="ghost" :disabled="busyActive"
             :class="{ 'is-busy': busyButton === `domain-check-${item.value}` }"
             @click="checkDomain(item.value)">Проверить</button>
@@ -324,6 +382,12 @@ async function checkDomain(domain: string) {
           {{ (domainChecks[item.value].results || []).map(r => r.verdict || r.text).join(' · ') || domainChecks[item.value].message || 'Готово' }}
         </p>
       </div>
+      <p v-if="filteredItems.length > pageSize" class="pagination" aria-live="polite">
+        <button type="button" :disabled="page <= 1" @click="page--">Назад</button>
+        <span>Страница {{ page }} из {{ pageCount }}</span>
+        <button type="button" :disabled="page >= pageCount" @click="page++">Дальше</button>
+      </p>
+      <p v-if="filteredItems.length === 0 && (list?.items?.length || 0) > 0" class="panel-d">По запросу ничего не найдено.</p>
       <p v-if="domainsLoaded && !(list?.items || []).length" class="panel-d">
         {{ isGooglevideo ? 'Список пуст — узлы появятся после просмотра YouTube.' : 'Список пуст.' }}
       </p>
