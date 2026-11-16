@@ -85,8 +85,18 @@ func TestInstallUpdateUninstall(t *testing.T) {
 	if err := os.MkdirAll(a.Paths.ZapretRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	legacySnapshot := filepath.Join(a.Paths.StateDir, "pre_update_bin", "zator")
+	if err := os.MkdirAll(filepath.Dir(legacySnapshot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacySnapshot, []byte("old binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.Install(); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacySnapshot); !os.IsNotExist(err) {
+		t.Fatalf("legacy rollback binary must be removed from persistent state, err=%v", err)
 	}
 	if !a.Installed() {
 		t.Fatalf("установка неполная: %+v", a.Config)

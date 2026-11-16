@@ -31,6 +31,16 @@ func updateTempRoot(p paths.Paths) string {
 
 func updateBackupDir(p paths.Paths) string { return filepath.Join(updateTempRoot(p), "backup") }
 
+// removeLegacyPreUpdateBinary deletes rollback snapshots from the old flash path.
+// Current snapshots live exclusively under the runtime temp directory.
+func (a *App) removeLegacyPreUpdateBinary() error {
+	legacy := filepath.Join(a.Paths.StateDir, "pre_update_bin")
+	if err := os.RemoveAll(legacy); err != nil {
+		return fmt.Errorf("удаление старого снимка бинарника из state: %w", err)
+	}
+	return nil
+}
+
 // CreatePreUpdateBackup снимает product-backup перед update (config+lists+orchestra)
 // и снимок бинарника bin/zator (ModeSmart его не откатывает).
 func (a *App) CreatePreUpdateBackup() (backup.Info, error) {
@@ -45,7 +55,9 @@ func (a *App) CreatePreUpdateBackup() (backup.Info, error) {
 	if err := a.snapshotPreUpdateVersion(); err != nil {
 		return info, fmt.Errorf("снимок version.env: %w", err)
 	}
-	_ = os.RemoveAll(filepath.Join(a.Paths.StateDir, "pre_update_bin"))
+	if err := a.removeLegacyPreUpdateBinary(); err != nil {
+		return info, err
+	}
 	a.RememberPreUpdateBackup(info.Name)
 	return info, nil
 }

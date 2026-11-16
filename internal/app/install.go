@@ -37,6 +37,9 @@ func (a *App) Install() error {
 	if err := a.Save(); err != nil {
 		return err
 	}
+	if err := a.removeLegacyPreUpdateBinary(); err != nil {
+		return err
+	}
 	// Best-effort: ставим iptables/ipset сразу. Жёсткая проверка — в InstallZapret.
 	if a.isRouterHost() {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
@@ -66,6 +69,9 @@ func (a *App) Update() error {
 		return err
 	}
 	if err := a.Save(); err != nil {
+		return err
+	}
+	if err := a.removeLegacyPreUpdateBinary(); err != nil {
 		return err
 	}
 	if a.isRouterHost() {
