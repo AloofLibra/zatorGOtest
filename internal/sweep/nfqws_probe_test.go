@@ -204,7 +204,7 @@ NFQWS2_OPT="
 	if err != nil {
 		t.Fatal(err)
 	}
-	if probe.WorkDir() != filepath.Join(p.StateDir, "supersweep-probe") {
+	if probe.WorkDir() != filepath.Join(paths.RuntimeTempDir(p.ZatorRoot), "supersweep-probe") {
 		t.Errorf("WorkDir = %s", probe.WorkDir())
 	}
 	if probe.OrchestraDir() != filepath.Join(probe.WorkDir(), "orchestra") {

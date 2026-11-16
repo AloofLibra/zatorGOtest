@@ -90,7 +90,7 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 
 	lan, wan, ifaceErr := a.ApplyDetectedIfaces()
 	if ifaceErr != nil {
-		if isRouterHost() {
+		if a.isRouterHost() {
 			return res, fmt.Errorf("IFACE_WAN/LAN: %w", ifaceErr)
 		}
 		fmt.Fprintf(log, "предупреждение IFACE: %v\n", ifaceErr)

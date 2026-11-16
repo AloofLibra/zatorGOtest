@@ -430,8 +430,9 @@ func (u *Updater) CheckLatest(ctx context.Context) (*CheckResult, error) {
 	res := CompareLatest(cur, l, u.webUIInstalled())
 	res.CheckedAt = u.now()
 	if len(raw) > 0 {
-		_ = os.MkdirAll(TempDir(), 0o755)
-		_ = fsutil.AtomicWriteFile(LatestCachePath(u.Paths), raw, 0o644)
+		cachePath := LatestCachePath(u.Paths)
+		_ = os.MkdirAll(filepath.Dir(cachePath), 0o755)
+		_ = fsutil.AtomicWriteFile(cachePath, raw, 0o644)
 	}
 	return &res, nil
 }

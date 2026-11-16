@@ -27,6 +27,10 @@ func setupEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ZATOR_ROOT", filepath.Join(t.TempDir(), "zator"))
 	t.Setenv("ZAPRET2_ROOT", filepath.Join(t.TempDir(), "zapret2"))
+	if bundle := os.Getenv("ZATOR_TEST_BUNDLE_DIR"); bundle != "" {
+		t.Setenv("Z2R_OFFLINE", "1")
+		t.Setenv("ZATOR_BUNDLE_DIR", bundle)
+	}
 }
 
 func TestVersion(t *testing.T) {

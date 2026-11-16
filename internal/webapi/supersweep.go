@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,14 +11,19 @@ import (
 	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/paths"
 	"github.com/AloofLibra/zator/internal/sweep"
 )
 
 // sweepDir — каталог прогресса суперавтопрогона.
-func (s *Server) sweepDir() string { return filepath.Join(os.TempDir(), "zator", "supersweep") }
+func (s *Server) sweepDir() string {
+	return filepath.Join(paths.RuntimeTempDir(s.paths.ZatorRoot), "supersweep")
+}
 
 // probeDir — рабочий каталог изолированного nfqws2.
-func (s *Server) probeDir() string { return filepath.Join(os.TempDir(), "zator", "supersweep-probe") }
+func (s *Server) probeDir() string {
+	return filepath.Join(paths.RuntimeTempDir(s.paths.ZatorRoot), "supersweep-probe")
+}
 
 // sweepRunningLocked — true, если sweeper уже создан и Running (без ленивого New).
 // Вызывать под runtimeMu или без — берёт sweepMu сам.
@@ -71,7 +75,7 @@ func (s *Server) sweeperOrDefault() (Sweeper, error) {
 
 	cfg := sweep.Config{
 		Dir:        s.sweepDir(),
-		ArchiveDir: filepath.Join(os.TempDir(), "zator"),
+		ArchiveDir: paths.RuntimeTempDir(s.paths.ZatorRoot),
 		Store:      s.store,
 		ProbeStore: probeStore,
 		Probe:      probe,

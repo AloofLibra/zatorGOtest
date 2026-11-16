@@ -135,7 +135,7 @@ func WriteVersion(p paths.Paths, v Version) error {
 
 // LatestCachePath возвращает путь к кэшу latest.json.
 func LatestCachePath(p paths.Paths) string {
-	return filepath.Join(TempDir(), LatestCacheName)
+	return filepath.Join(paths.RuntimeTempDir(p.ZatorRoot), "deploy", LatestCacheName)
 }
 
 // ReadCachedLatest читает кэш последнего CheckLatest; при отсутствии — (nil, nil).

@@ -20,6 +20,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.x"
+      - name: Prepare split resource fixture for install tests
+        run: |
+          bundle="$RUNNER_TEMP/zator-install-test"
+          mkdir -p "$bundle/vendor"
+          VER=ci-test COMMIT="$GITHUB_SHA" bash scripts/pack-release.sh "$bundle"
+          echo "ZATOR_TEST_BUNDLE_DIR=$bundle" >> "$GITHUB_ENV"
       - name: Test
         run: go test -mod=mod ./...
       - name: Vet

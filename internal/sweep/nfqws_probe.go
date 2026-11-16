@@ -78,7 +78,7 @@ func NewNfqwsProbe(cfg NfqwsProbeConfig) (*NfqwsProbe, error) {
 		return nil, fmt.Errorf("%w: не задан Config", ErrConfig)
 	}
 	if cfg.WorkDir == "" {
-		cfg.WorkDir = filepath.Join(os.TempDir(), "zator", "supersweep-probe")
+		cfg.WorkDir = filepath.Join(paths.RuntimeTempDir(cfg.Paths.ZatorRoot), "supersweep-probe")
 	}
 	if cfg.OrchestraDir == "" {
 		cfg.OrchestraDir = filepath.Join(cfg.WorkDir, "orchestra")

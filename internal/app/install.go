@@ -38,7 +38,7 @@ func (a *App) Install() error {
 		return err
 	}
 	// Best-effort: ставим iptables/ipset сразу. Жёсткая проверка — в InstallZapret.
-	if isRouterHost() {
+	if a.isRouterHost() {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 		defer cancel()
 		_, _ = a.EnsureDependencies(ctx)
@@ -68,7 +68,7 @@ func (a *App) Update() error {
 	if err := a.Save(); err != nil {
 		return err
 	}
-	if isRouterHost() {
+	if a.isRouterHost() {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 		defer cancel()
 		_, _ = a.EnsureDependencies(ctx)
@@ -169,6 +169,9 @@ func (a *App) syncAssets() error {
 		}
 	}
 	if err := a.migrateLegacyTelemetry(); err != nil {
+		return err
+	}
+	if err := a.migrateOrchestraCacheToState(); err != nil {
 		return err
 	}
 	return a.ensureOrchestraState()
@@ -284,7 +287,7 @@ func (a *App) seedZapretConfig(template []byte) error {
 		changed, e := a.ensureNetworkIfaces(c)
 		if e != nil {
 			// На сборочном хосте (Windows) маршрутов роутера нет — не валим install.
-			if !isRouterHost() {
+			if !a.isRouterHost() {
 				return nil
 			}
 			return fmt.Errorf("автоопределение IFACE_WAN/LAN: %w", e)
@@ -406,7 +409,14 @@ func copyDirKeepExisting(src, dst string) error {
 // EnsureStockFakes распаковывает встроенные blob в FakeDir. Пользовательский
 // custom_tls.bin сохраняется при обновлении, как в Bash-версии.
 func (a *App) EnsureStockFakes() error {
-	return os.MkdirAll(a.Paths.FakeDir, 0o755)
+	if err := os.MkdirAll(a.Paths.FakeDir, 0o755); err != nil {
+		return err
+	}
+	source, err := fs.Sub(uiembed.FilesAt(a.Paths), "fake")
+	if err != nil {
+		return err
+	}
+	return copyFSKeepCustomTLS(source, a.Paths.FakeDir)
 }
 
 func copyFSKeepCustomTLS(src fs.FS, dst string) error {

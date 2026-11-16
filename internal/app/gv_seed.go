@@ -113,7 +113,7 @@ func (a *App) probeGooglevideoCandidates(ctx context.Context, fqdn string, candi
 	opts.WaitBoth = true
 	opts.DialContext = netcheck.BindPortRangeDialer(firewall.SuperSweepPortFirst, firewall.SuperSweepPortLast)
 	coord, err := sweep.New(sweep.Config{
-		Dir:         filepath.Join(os.TempDir(), "zator", "supersweep"),
+		Dir:         filepath.Join(paths.RuntimeTempDir(a.Paths.ZatorRoot), "supersweep"),
 		Store:       orchestra.NewStore(a.Paths.StateOrchestraDir()),
 		ProbeStore:  probeStore,
 		Probe:       probe,

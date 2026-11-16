@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"runtime"
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/netiface"
@@ -32,6 +31,6 @@ func (a *App) ensureNetworkIfaces(cfg *config.Config) (changed bool, err error) 
 	return true, nil
 }
 
-func isRouterHost() bool {
-	return runtime.GOOS != "windows" && runtime.GOOS != "darwin"
+func (a *App) isRouterHost() bool {
+	return a.Platform.Kind == platform.KindOpenWRT || a.Platform.Kind == platform.KindEntware
 }

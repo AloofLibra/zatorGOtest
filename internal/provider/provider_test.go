@@ -356,7 +356,7 @@ func TestDefaultsFromPaths(t *testing.T) {
 	if d.ASNDBFile != filepath.Join(p.DataDir, "providers", "asn.txt") {
 		t.Errorf("ASNDBFile = %s", d.ASNDBFile)
 	}
-	if filepath.Dir(d.CacheFile()) != filepath.Join(p.StateDir, "cache") {
+	if filepath.Dir(d.CacheFile()) != filepath.Join(paths.RuntimeTempDir(p.ZatorRoot), "cache") {
 		t.Errorf("CacheFile = %s", d.CacheFile())
 	}
 	if d.ASNRemoteURL != DefaultASNRemoteURL || d.ASNTTL != DefaultASNTTL {
