@@ -31,6 +31,17 @@ func newClient(t *testing.T) (*Client, paths.Paths) {
 	return c, p
 }
 
+func TestNewUsesBashRecommendationsSourceAndAllowsOverride(t *testing.T) {
+	t.Setenv(EnvRecsURL, "")
+	if got := New(paths.Paths{}).RecsURL; got != LegacyRecsURL {
+		t.Fatalf("default recommendations URL = %q, want %q", got, LegacyRecsURL)
+	}
+	t.Setenv(EnvRecsURL, "https://example.test/recs.tsv")
+	if got := New(paths.Paths{}).RecsURL; got != "https://example.test/recs.tsv" {
+		t.Fatalf("override recommendations URL = %q", got)
+	}
+}
+
 func setProvider(t *testing.T, p paths.Paths, name string) {
 	t.Helper()
 	d := provider.New(p)

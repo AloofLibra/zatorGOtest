@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, formBody } from '../api/client'
 import {
-  applySetting, backups as backupsApi, fetchClientScopes, fetchSetting, updateClientScope,
+  applySetting, backups as backupsApi, fetchClientScopes, fetchRecommendations, fetchSetting, updateClientScope,
 } from '../api/endpoints'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { confirmDialog } from '../stores/confirm'
@@ -14,7 +14,7 @@ import {
   refreshTlsBlobSettings, refreshUdpGamesSettings, refreshWgBlobSettings, refreshWgStateSettings,
   refreshWssizeRampSettings,
 } from '../stores/settings'
-import type { ClientScopeMapping, WssizeRampSettings } from '../api/types'
+import type { ClientScopeMapping, Recommendations, WssizeRampSettings } from '../api/types'
 import { backups } from '../stores/backups'
 import { fetchAndApplyState } from '../stores/state'
 import { refreshAll, scopes, status } from '../stores/status'
@@ -104,6 +104,17 @@ const portProto = ref<'tcp' | 'udp'>('tcp')
 const portValue = ref('')
 const providerName = ref('')
 const providerCity = ref('')
+const recommendations = ref<Recommendations | null>(null)
+const recommendationsBusy = ref(false)
+const providerKnown = computed(() => {
+  const name = String(provider.value?.provider || '').trim()
+  return !!name && name !== 'Не определён' && name !== 'Unknown'
+})
+const providerDraftSaved = computed(() => {
+  const parts = String(provider.value?.provider || '').split(' - ')
+  return providerName.value.trim() === (parts[0] || '') && providerCity.value.trim() === parts.slice(1).join(' - ')
+})
+const recommendationProfiles = computed(() => Object.entries(recommendations.value?.profiles || {}))
 watch(provider, (p) => {
   const raw = String(p?.provider || '')
   if (raw === 'Не определён') {
@@ -278,6 +289,7 @@ async function saveProvider() {
       showToast('Провайдер сохранён')
       await refreshProvider()
       await refreshAll()
+      recommendations.value = null
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -528,9 +540,21 @@ async function redetectProvider() {
       showToast('Провайдер переопределён')
       await refreshProvider()
       await refreshAll()
+      recommendations.value = null
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
+  }
+}
+
+async function loadRecommendations() {
+  try {
+    recommendationsBusy.value = true
+    recommendations.value = await fetchRecommendations()
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  } finally {
+    recommendationsBusy.value = false
   }
 }
 
@@ -716,6 +740,34 @@ onMounted(async () => {
         <div class="actions" style="margin-top:0.8rem">
           <button type="button" class="primary" :disabled="busyActive || !providerName.trim()" @click="saveProvider">Сохранить</button>
           <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'provider-redetect' }" @click="redetectProvider">Определить заново</button>
+        </div>
+        <div style="border-top:1px solid var(--line);padding-top:0.9rem;margin-top:0.5rem">
+          <h3>Рекомендации стратегий</h3>
+          <p class="panel-d">В запросе передаётся название провайдера; сервер также видит IP роутера. Подсказки основаны на статистике успешных проверок и кешируются на сутки.</p>
+          <button type="button" :disabled="!providerKnown || !providerDraftSaved || recommendationsBusy || busyActive" @click="loadRecommendations">
+            {{ recommendationsBusy ? 'Загрузка…' : 'Загрузить рекомендации' }}
+          </button>
+          <p v-if="!providerKnown" class="panel-d">Сначала определите или сохраните провайдера.</p>
+          <p v-else-if="!providerDraftSaved" class="panel-d">Сначала сохраните изменённое название провайдера.</p>
+          <template v-if="recommendations">
+            <p class="panel-d">
+              <template v-if="recommendations.status === 'ready'">Статистика собрана с {{ recommendations.samples }} установок.</template>
+              <template v-else-if="recommendations.status === 'insufficient'">Пока мало данных: {{ recommendations.samples }} установок, требуется {{ recommendations.minimum }}.</template>
+              <template v-else-if="recommendations.status === 'stale'">Сервер временно недоступен; показан сохранённый результат.</template>
+              <template v-else-if="recommendations.status === 'unknown_provider'">Провайдер не определён.</template>
+              <template v-else>Рекомендации пока недоступны.</template>
+            </p>
+            <div v-for="[profileId, item] in recommendationProfiles" :key="profileId" class="domain-item">
+              <div>
+                <strong>Профиль {{ profileId }}</strong>
+                <span v-if="item.clone_recommended"> · клоны рекомендуются ({{ item.clone_pct }}% против {{ item.classic_pct }}%)</span>
+                <div v-if="item.top.length" class="panel-d">
+                  Лучшие стратегии: {{ item.top.map((x) => `${x.strategy} (${x.success_pct}%, ${x.mode})`).join(', ') }}
+                </div>
+                <div v-else class="panel-d">Нет достаточной статистики по стратегиям.</div>
+              </div>
+            </div>
+          </template>
         </div>
       </section>
 

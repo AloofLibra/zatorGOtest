@@ -50,9 +50,10 @@ const (
 	DefaultEndpoint = ""
 	// LegacyEndpoint — прежний сервер статистики (opt-in).
 	LegacyEndpoint = "https://alooflibra.fun/z4r/telemetry"
-	// DefaultRecsURL — пусто: подсказки только из локального кэша.
-	DefaultRecsURL = ""
-	// LegacyRecsURL — прежний удалённый TSV подсказок (opt-in через EnvRecsURL).
+	// DefaultRecsURL — источник подсказок Bash Zator; запрашивается только
+	// при явном открытии пользователем рекомендаций и кешируется на сутки.
+	DefaultRecsURL = LegacyRecsURL
+	// LegacyRecsURL — прежний удалённый TSV подсказок.
 	LegacyRecsURL    = "https://alooflibra.fun/z4r/recommendations.tsv"
 	DefaultChannelID = "z4r-sql-v3-modes"
 
