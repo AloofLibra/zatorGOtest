@@ -50,7 +50,13 @@ jobs:
           while read -r arch target; do
             Z2R_GV_SNIFFER_TARGET="$target" bash scripts/build-googlevideo-dns-sniffer.sh "assets/tools/bin/googlevideo-dns-sniffer-$arch"
           done <<'TARGETS'
+          arm arm-linux-musleabihf
           arm64 aarch64-linux-musl
+          mips mips-linux-musl
+          mipsle mipsel-linux-musl
+          386 x86-linux-musl
+          amd64 x86_64-linux-musl
+          riscv64 riscv64-linux-musl
           TARGETS
       - name: Verify embedded sniffer install
         run: go test -mod=mod ./internal/app -run '^TestInstallEmbeddedGooglevideoSniffer$'
@@ -66,8 +72,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - goarch: arm
+            goarm: "7"
+            name: arm
           - goarch: arm64
             name: arm64
+          - goarch: mips
+            gomips: softfloat
+            name: mips
+          - goarch: mipsle
+            gomips: softfloat
+            name: mipsel
+          - goarch: "386"
+            name: x86
+          - goarch: amd64
+            name: x86_64
+          - goarch: riscv64
+            name: riscv64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
