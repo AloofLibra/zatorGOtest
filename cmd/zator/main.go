@@ -32,6 +32,7 @@ const usage = `zator — управление zapret2 через Web UI
 Команды:
   version     показать версию
   status      показать состояние установки и платформу
+  errors      показать предупреждения служб и журнал ошибок nfqws2
   service     аварийный контроль служб: status|start|stop|restart <unit>
   locks       аварийный сброс фиксаций стратегий (с backup)
   restore     smart-восстановление из backup
@@ -61,6 +62,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "status":
 		return cmdStatus(stdout, stderr)
+	case "errors":
+		return cmdErrors(rest, stdout, stderr)
 	case "service":
 		return cmdService(rest, stdout, stderr)
 	case "wssize-hook":

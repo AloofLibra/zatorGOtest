@@ -58,6 +58,36 @@ func TestServiceWarningsAndValidation(t *testing.T) {
 	}
 }
 
+func TestErrorsCommandShowsServiceWarningsAndValidatesArgs(t *testing.T) {
+	setupEnv(t)
+	a := app.New()
+	a.WriteServiceWarnings([]string{"nfqws2 не запущен"})
+	if code, out, _ := runCmd(t, "errors"); code != 0 || !strings.Contains(out, "nfqws2 не запущен") || !strings.Contains(out, "Журнал ошибок nfqws2 недоступен") {
+		t.Fatalf("errors: code=%d out=%q", code, out)
+	}
+	if code, _, errOut := runCmd(t, "errors", "unexpected"); code != 2 || !strings.Contains(errOut, "использование: zator errors") {
+		t.Fatalf("invalid errors args: code=%d err=%q", code, errOut)
+	}
+}
+
+func TestWriteErrorLogBoundsOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nfqws2_1.err")
+	content := strings.Repeat("x", maxCLIErrorLogBytes+7)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if !writeErrorLog([]string{path}, &out) {
+		t.Fatal("expected error log to be found")
+	}
+	if got := len(out.Bytes()); got != len("Журнал ошибок nfqws2 ("+path+"):\n")+maxCLIErrorLogBytes+1 {
+		t.Fatalf("output size=%d; want header + %d bytes", got, maxCLIErrorLogBytes)
+	}
+	if !strings.HasSuffix(out.String(), strings.Repeat("x", maxCLIErrorLogBytes)+"\n") {
+		t.Fatal("output did not retain the tail of the log")
+	}
+}
+
 func TestLocksClearCreatesBackup(t *testing.T) {
 	setupEnv(t)
 	if code, _, errOut := runCmd(t, "install", "-zapret=false", "-skip-service", "-no-auth"); code != 0 {
