@@ -221,6 +221,7 @@ func (p *NfqwsProbe) Start(ctx context.Context, profile int) error {
 		return fmt.Errorf("%w: не задан FWTYPE", ErrProbe)
 	}
 	ssCfg.ProbeUID = p.cfg.UID
+	ssCfg.TrafficUID = firewall.ResolveTrafficUID()
 	wsCfg, err := firewall.WssizeConfigFromGetter(p.cfg.Config.Get, p.cfg.Paths.ZatorRoot)
 	if err != nil {
 		_ = p.stopLocked(context.Background())
@@ -302,6 +303,7 @@ func (p *NfqwsProbe) stopLocked(_ context.Context) error {
 				ssCfg.Wssize = &wsCfg
 			}
 			ssCfg.ProbeUID = p.cfg.UID
+			ssCfg.TrafficUID = firewall.ResolveTrafficUID()
 			if p.cfg.PortRangeFile != "" {
 				ssCfg.PortRangeFile = p.cfg.PortRangeFile
 			}

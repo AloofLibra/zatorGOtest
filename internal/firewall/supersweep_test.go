@@ -660,12 +660,14 @@ func TestSuperSweepNftTransaction(t *testing.T) {
 
 func TestSuperSweepWssizeMarksProbeBeforeQueue(t *testing.T) {
 	c := ssConfig(BackendNftables)
+	c.ProbeUID = 65534
+	c.TrafficUID = 0
 	w := testWssizeConfig(BackendNftables)
 	w.NFQWS2Enable = true
 	w.Marks = c.Marks
 	c.Wssize = &w
 	txn := c.NftTransaction()
-	mark := strings.Index(txn, `meta skuid 65533 tcp sport 62000-62999 tcp dport 443 ip daddr @z2r_googlevideo4`)
+	mark := strings.Index(txn, `meta skuid 0 tcp sport 62000-62999 tcp dport 443 ip daddr @z2r_googlevideo4`)
 	queue := strings.Index(txn, `queue num 65535 bypass comment "z2r_supersweep"`)
 	if mark < 0 || queue < 0 || mark > queue {
 		t.Fatalf("WSSIZE probe mark must be installed in output path before it reaches isolated NFQUEUE:\n%s", txn)
@@ -677,18 +679,28 @@ func TestSuperSweepWssizeMarksProbeBeforeQueue(t *testing.T) {
 
 func TestSuperSweepIptablesWssizeMarksProbeFirst(t *testing.T) {
 	c := ssConfig(BackendIptables)
+	c.ProbeUID = 65534
+	c.TrafficUID = 0
 	w := testWssizeConfig(BackendIptables)
 	w.NFQWS2Enable = true
 	w.Marks = c.Marks
 	c.Wssize = &w
 	var rules [][]string
+	var outRules [][]string
 	for _, r := range c.IptablesChainRules() {
 		if len(r) > 1 && r[1] == SSChainRaw {
 			rules = append(rules, r)
 		}
+		if len(r) > 1 && r[1] == SSChainOut {
+			outRules = append(outRules, r)
+		}
 	}
 	if len(rules) != 3 || !strings.Contains(strings.Join(rules[0], " "), "z2r_googlevideo4") || !strings.Contains(strings.Join(rules[1], " "), "--or-mark") {
 		t.Fatalf("expected WSSIZE mark before isolated DESYNC/SuperSweep mark: %#v", rules)
+	}
+	if len(outRules) == 0 || !strings.Contains(strings.Join(outRules[0], " "), "--uid-owner 0 -m set --match-set z2r_googlevideo4 dst") ||
+		!strings.Contains(strings.Join(outRules[0], " "), "--set-xmark 0x04000000/0x04000000") {
+		t.Fatalf("Go checker traffic must receive the WSSIZE mark in the root OUTPUT path: %#v", outRules)
 	}
 }
 

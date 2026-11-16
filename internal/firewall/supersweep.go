@@ -78,6 +78,9 @@ type SuperSweepConfig struct {
 	// ProbeUID — UID изолированного nfqws2 для -m owner / meta skuid
 	// (по умолчанию SuperSweepProbeUID; на Keenetic обычно nobody=65534).
 	ProbeUID uint32
+	// TrafficUID — UID Go-процесса, который открывает тестовые HTTP-соединения.
+	// Он отдельный от ProbeUID: nfqws2 запускается от nobody, а checker обычно от root.
+	TrafficUID uint32
 	// IptWait — аргументы ожидания xtables-блокировки (например "-w","5").
 	// nil: определяется автоматически при Start.
 	IptWait []string
@@ -284,6 +287,13 @@ func (c SuperSweepConfig) IptablesChainRules() [][]string {
 	}
 	if c.Wssize != nil && c.Wssize.Active() {
 		w := c.Wssize.withDefaults()
+		// HTTP checker runs in the Go daemon, not in the nfqws2 process.
+		// Mark its reserved Googlevideo sockets in the normal OUTPUT chain.
+		wssizeOut := []string{"-A", SSChainOut, "-m", "owner", "--uid-owner", strconv.Itoa(int(c.TrafficUID)),
+			"-m", "set", "--match-set", w.SetName, "dst", "-p", "tcp", "--dport", "443",
+			"-m", "mark", "!", "--mark", markPair(w.Marks.Desync, w.Marks.Desync),
+			"-j", "MARK", "--set-xmark", markPair(w.Marks.Wssize, w.Marks.Wssize)}
+		rules = append([][]string{wssizeOut}, rules...)
 		desync := markPair(w.Marks.Desync, w.Marks.Desync)
 		rules = append(rules,
 			[]string{"-A", SSChainRaw, "-m", "set", "--match-set", w.SetName, "dst", "-p", "tcp", "--dport", "443",
@@ -364,7 +374,7 @@ func (c SuperSweepConfig) NftTransaction() string {
 	if c.Wssize != nil && c.Wssize.Active() {
 		ws := c.Wssize.withDefaults()
 		w("add rule inet %s %s meta nfproto ipv4 meta skuid %d tcp sport %s tcp dport 443 ip daddr @%s meta mark & %s == 0 meta mark set meta mark | %s comment \"%s\"",
-			t, SuperSweepNftOutputChain, c.ProbeUID, ports, ws.SetName, FormatMark(ws.Marks.Wssize), FormatMark(ws.Marks.Wssize), SuperSweepComment)
+			t, SuperSweepNftOutputChain, c.TrafficUID, ports, ws.SetName, FormatMark(ws.Marks.Wssize), FormatMark(ws.Marks.Wssize), SuperSweepComment)
 	}
 	w("insert rule inet %s %s %s return%s", t, post, out, cm)
 	w("insert rule inet %s %s %s queue num %d bypass%s", t, post, out, c.QNum, cm)

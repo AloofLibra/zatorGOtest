@@ -30,3 +30,18 @@ func ResolveProbeUser() (name string, uid, gid uint32) {
 	}
 	return "", 0, 0
 }
+
+// ResolveTrafficUID returns the UID of the current Go process, which opens
+// the HTTP sockets inspected by SuperSweep. It is intentionally distinct
+// from ResolveProbeUser: only nfqws2 itself runs as the isolated probe user.
+func ResolveTrafficUID() uint32 {
+	u, err := user.Current()
+	if err != nil {
+		return 0
+	}
+	id, err := strconv.ParseUint(u.Uid, 10, 32)
+	if err != nil {
+		return 0
+	}
+	return uint32(id)
+}
