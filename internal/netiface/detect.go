@@ -13,8 +13,8 @@ import (
 
 // Info — текущие и рекомендуемые интерфейсы.
 type Info struct {
-	WAN       string   `json:"wan"`
-	LAN       string   `json:"lan"`
+	WAN       string `json:"wan"`
+	LAN       string `json:"lan"`
 	Suggested struct {
 		WAN string `json:"wan"`
 		LAN string `json:"lan"`
@@ -25,10 +25,10 @@ type Info struct {
 
 // Iface — сетевой интерфейс, пригодный для выбора в UI.
 type Iface struct {
-	Name   string   `json:"name"`
-	Up     bool     `json:"up"`
-	Addrs  []string `json:"addrs,omitempty"`
-	Kind   string   `json:"kind"` // wan_candidate|lan_candidate|other
+	Name  string   `json:"name"`
+	Up    bool     `json:"up"`
+	Addrs []string `json:"addrs,omitempty"`
+	Kind  string   `json:"kind"` // wan_candidate|lan_candidate|other
 }
 
 // Detector читает sysfs/proc относительно Root (по умолчанию "/").
@@ -199,6 +199,68 @@ func hasPrivateIPv4(addrs []string) bool {
 		}
 	}
 	return false
+}
+
+// DetectLANIPv4 mirrors the WebUI launcher: prefer the router bridge address,
+// then a private IPv4 on another interface, and finally any non-loopback IPv4.
+func DetectLANIPv4() string {
+	for _, name := range []string{"br-lan", "br0"} {
+		if ip := interfaceIPv4(name); ip != "" {
+			return ip
+		}
+	}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	var fallback string
+	for _, iface := range interfaces {
+		if iface.Name == "lo" || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		for _, ip := range interfaceIPv4s(iface) {
+			if ip.IsPrivate() {
+				return ip.String()
+			}
+			if fallback == "" && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
+				fallback = ip.String()
+			}
+		}
+	}
+	return fallback
+}
+
+func interfaceIPv4(name string) string {
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return ""
+	}
+	ips := interfaceIPv4s(*iface)
+	if len(ips) == 0 {
+		return ""
+	}
+	return ips[0].String()
+}
+
+func interfaceIPv4s(iface net.Interface) []net.IP {
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return nil
+	}
+	var ips []net.IP
+	for _, addr := range addrs {
+		var ip net.IP
+		switch value := addr.(type) {
+		case *net.IPNet:
+			ip = value.IP
+		case *net.IPAddr:
+			ip = value.IP
+		}
+		if ip4 := ip.To4(); ip4 != nil {
+			ips = append(ips, ip4)
+		}
+	}
+	return ips
 }
 
 func isLANName(name string) bool {

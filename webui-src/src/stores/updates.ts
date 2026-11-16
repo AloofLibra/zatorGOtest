@@ -19,7 +19,7 @@ export const updateCheckError = ref('')
 export const updateLastAttemptAt = ref<number | null>(null)
 export const updateLastSuccessAt = ref<number | null>(null)
 export const updateApplying = ref(false)
-export const updateMode = ref<UpdateMode>('full')
+export const updateMode = ref<UpdateMode>('app')
 
 let inFlight: Promise<void> | null = null
 let timer: number | undefined

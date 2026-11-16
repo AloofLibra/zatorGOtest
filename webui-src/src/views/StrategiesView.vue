@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { applySetting, clearLock, setLock, profileCheck } from '../api/endpoints'
+import { applySetting, setLock, profileCheck } from '../api/endpoints'
 import type { ProfileInfo } from '../api/types'
 import { gatedPanel, gatedReason, isProfileGated } from '../gating'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { fetchAndApplyState } from '../stores/state'
-import { locks, refreshAll, scope, scopes, statusLoaded, strategyChecks } from '../stores/status'
+import { locks, refreshAll, scope, scopes, status, statusLoaded, strategyChecks } from '../stores/status'
 import { refreshTlsBlobSettings, tlsBlobSettings } from '../stores/settings'
 import { restartSuffix, showToast } from '../stores/toast'
 import { confirmDialog } from '../stores/confirm'
@@ -16,6 +16,7 @@ const OVERRIDE_PROFILES = new Set(['1', '2', '3', '4', '8'])
 
 const router = useRouter()
 const route = useRoute()
+const autoModeEnabled = computed(() => status.value?.auto_mode === 'включен')
 /** Vue 3.4+ для input[type=number] кладёт в v-model number — всегда нормализуем в строку. */
 type DraftMap = Record<string, string | number>
 const draft = ref<DraftMap>({})
@@ -206,26 +207,6 @@ async function save(profile: string, p: ProfileInfo) {
   }
 }
 
-async function reset(profile: string, p: ProfileInfo) {
-  if (gated(p)) {
-    showToast(gatedReason(p), 'error')
-    return
-  }
-  try {
-    let prev = p.current_lock || 'auto'
-    await withBusy(`clear-${profile}`, async () => {
-      const res = await clearLock(profile, scope.value)
-      prev = res.previous || prev
-      draft.value[profile] = ''
-      delete strategyChecks[profile]
-      await refreshAll()
-    })
-    showToast(`Профиль ${profile}: ${prev}→auto`)
-  } catch (e) {
-    showToast((e as Error).message, 'error')
-  }
-}
-
 async function check(profile: string, p: ProfileInfo) {
   if (gated(p)) {
     showToast(gatedReason(p), 'error')
@@ -357,14 +338,12 @@ async function saveSniOverride(profile: string) {
           <input
             type="number" min="0" :max="p.max_strategy || 999"
             :value="draft[String(p.profile)] ?? ''"
-            :disabled="busyActive || gated(p)" placeholder="№"
+            :disabled="busyActive || gated(p) || autoModeEnabled" placeholder="№"
             @input="draft[String(p.profile)] = ($event.target as HTMLInputElement).value">
-          <button type="button" class="primary" :disabled="busyActive || gated(p)"
+          <button v-if="autoModeEnabled" type="button" class="ghost" disabled>Авто</button>
+          <button v-else type="button" class="primary" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `lock-${p.profile}` }"
             @click="save(String(p.profile), p)">Лок</button>
-          <button type="button" class="ghost" :disabled="busyActive || gated(p)"
-            :class="{ 'is-busy': busyButton === `clear-${p.profile}` }"
-            @click="reset(String(p.profile), p)">Авто</button>
           <button type="button" class="ghost" :disabled="busyActive || gated(p)"
             :class="{ 'is-busy': busyButton === `check-${p.profile}` }"
             @click="check(String(p.profile), p)">Check</button>

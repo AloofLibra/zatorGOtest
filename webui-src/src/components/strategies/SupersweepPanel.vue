@@ -24,7 +24,13 @@ const runScope = ref(props.scope || 'default')
 const domainsText = ref('')
 const tlsPref = ref('any')
 const quickProfile = ref(1)
-const quickAddress = ref('')
+const quickAddressDefaults: Record<number, string> = {
+  1: 'www.youtube.com',
+  2: 'rr2---sn-4g5ednly.googlevideo.com',
+  3: 'xhamster.com',
+  4: 'discord.com',
+}
+const quickAddress = ref(quickAddressDefaults[quickProfile.value])
 const states = {
   idle: 'Нет прогона', starting: 'Подготовка', running: 'Выполняется', applying: 'Применение результатов',
   done: 'Завершён', cancelled: 'Отменён', interrupted: 'Прерван',
@@ -45,6 +51,12 @@ let wasActive = false
 watch(() => props.scope, (v) => {
   if (v && !active.value) runScope.value = v
 }, { immediate: true })
+watch(quickProfile, (next, previous) => {
+  const current = quickAddress.value.trim()
+  if (!current || current === quickAddressDefaults[previous]) {
+    quickAddress.value = quickAddressDefaults[next] || ''
+  }
+})
 
 const count = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0
 const strategy = (value: unknown) => value === null || count(value)

@@ -16,6 +16,20 @@ umask 022
 
 die() { echo "zator-launcher: $*" >&2; exit 1; }
 
+detect_lan_ip() {
+  local iface iface_ip
+  if command -v ip >/dev/null 2>&1; then
+    for iface in br-lan br0; do
+      iface_ip="$(ip -4 addr show dev "$iface" 2>/dev/null | awk '/inet /{print $2; exit}' | cut -d/ -f1)"
+      if [ -n "$iface_ip" ]; then
+        echo "$iface_ip"
+        return 0
+      fi
+    done
+  fi
+  hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^127\.' | grep -E '^[0-9]+\.' | head -n 1
+}
+
 detect_arch() {
   m=$(uname -m 2>/dev/null || echo unknown)
   case "$m" in
@@ -111,6 +125,7 @@ if [ -f "$ZATOR_ROOT/config/zator.json" ]; then
   port=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$ZATOR_ROOT/config/zator.json" 2>/dev/null | head -n1)
 fi
 port="${port:-17682}"
-echo "zator-launcher: Web UI → http://$(hostname -I 2>/dev/null | awk '{print $1}'):${port}/"
-echo "zator-launcher: (или http://<IP роутера>:${port}/)"
+lan_ip="$(detect_lan_ip || true)"
+lan_ip="${lan_ip:-127.0.0.1}"
+echo "zator-launcher: Web UI → http://${lan_ip}:${port}/"
 exit 0

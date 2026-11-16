@@ -156,7 +156,7 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 	out := map[string]any{"ok": true, "up_to_date": false, "installed": 0, "restart_required": false}
 	mode := strings.TrimSpace(r.FormValue("mode"))
 	if mode == "" {
-		mode = deploy.ModeFull
+		mode = deploy.ModeApp
 	}
 	preCtx, preCancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer preCancel()
@@ -292,7 +292,7 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 func (s *Server) postUpdatePreflight(r *http.Request, p params) (map[string]any, error) {
 	mode := strings.TrimSpace(p.Get("mode"))
 	if mode == "" {
-		mode = "full"
+		mode = deploy.ModeApp
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()

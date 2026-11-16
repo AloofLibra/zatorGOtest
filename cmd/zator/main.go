@@ -19,6 +19,7 @@ import (
 	"github.com/AloofLibra/zator/internal/app"
 	"github.com/AloofLibra/zator/internal/backup"
 	"github.com/AloofLibra/zator/internal/deploy"
+	"github.com/AloofLibra/zator/internal/netiface"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/platform"
 	"github.com/AloofLibra/zator/internal/service"
@@ -295,7 +296,7 @@ func cmdDefault(stdout io.Writer) int {
 	}
 	if a.Installed() {
 		fmt.Fprintf(stdout, "zator %s установлен в %s\n", zator.Version(), a.Paths.ZatorRoot)
-		fmt.Fprintf(stdout, "Web UI: %s\n", a.WebUIURL(""))
+		fmt.Fprintf(stdout, "Web UI: %s\n", webUIURL(a, ""))
 		fmt.Fprintln(stdout, "Подробнее: zator status, запуск: zator webui")
 		return 0
 	}
@@ -316,7 +317,7 @@ func cmdStatus(stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "ZATOR_ROOT:  %s\n", a.Paths.ZatorRoot)
 	fmt.Fprintf(stdout, "ZAPRET2:     %s\n", a.Paths.ZapretRoot)
 	fmt.Fprintf(stdout, "Конфиг:      %s\n", a.ConfigPath)
-	fmt.Fprintf(stdout, "Web UI:      http://localhost:%d/\n", a.Config.Port)
+	fmt.Fprintf(stdout, "Web UI:      %s\n", webUIURL(a, ""))
 	fmt.Fprintf(stdout, "Auth:        enabled=%t password=%t\n", a.Config.AuthEnabled, a.Config.HasPassword())
 	fmt.Fprintf(stdout, "Источник:    %s\n", a.Config.ZapretSource)
 	return 0
@@ -369,7 +370,7 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 		}
 	case a.Config.HasPassword():
 		// Повторный install / refresh ассетов (в т.ч. из update) — сохраняем auth.
-	case a.Installed() && !a.Config.AuthEnabled:
+	case fileExists(a.ConfigPath) && !a.Config.AuthEnabled:
 		// Ранее сознательно -no-auth / auth disable — не навязываем пароль при refresh.
 	default:
 		pass, err := promptPassword(stderr, "Пароль Web UI: ", "Повтор пароля: ")
@@ -449,7 +450,7 @@ func cmdInstall(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 	}
-	fmt.Fprintf(stdout, "Web UI: %s\n", a.WebUIURL(""))
+	fmt.Fprintf(stdout, "Web UI: %s\n", webUIURL(a, ""))
 	if a.Config.AuthRequired() {
 		fmt.Fprintln(stdout, "Вход: пароль, заданный при установке.")
 	}
@@ -470,7 +471,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	force := fs.Bool("force", false, "скачать релиз даже если версия совпадает")
 	noBackup := fs.Bool("continue-without-backup", false, "продолжить без резервной копии при нехватке /tmp")
-	mode := fs.String("mode", deploy.ModeFull, "режим: app (Zator), config (ресурсы стратегий), full (всё)")
+	mode := fs.String("mode", deploy.ModeApp, "режим: app (только Zator, по умолчанию), config (ресурсы стратегий), full (всё)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -688,7 +689,7 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	fmt.Fprintf(stdout, "Web UI: %s\n", a.WebUIURL(""))
+	fmt.Fprintf(stdout, "Web UI: %s\n", webUIURL(a, *host))
 
 	select {
 	case err := <-errCh:
@@ -712,4 +713,21 @@ func webUIHost(override string, kind platform.Kind) string {
 		return "127.0.0.1"
 	}
 	return ""
+}
+
+func webUIURL(a *app.App, override string) string {
+	host := webUIHost(override, a.Platform.Kind)
+	if host == "" || host == "0.0.0.0" {
+		if ip := netiface.DetectLANIPv4(); ip != "" {
+			host = ip
+		} else {
+			host = "localhost"
+		}
+	}
+	return a.WebUIURL(host)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
