@@ -217,6 +217,14 @@ func (p *NfqwsProbe) Start(ctx context.Context, profile int) error {
 		return fmt.Errorf("%w: не задан FWTYPE", ErrProbe)
 	}
 	ssCfg.ProbeUID = p.cfg.UID
+	wsCfg, err := firewall.WssizeConfigFromGetter(p.cfg.Config.Get, p.cfg.Paths.ZatorRoot)
+	if err != nil {
+		_ = p.stopLocked(context.Background())
+		return fmt.Errorf("%w: WSSIZE config: %v", ErrProbe, err)
+	}
+	if wsCfg.Active() {
+		ssCfg.Wssize = &wsCfg
+	}
 	if p.cfg.PortRangeFile != "" {
 		ssCfg.PortRangeFile = p.cfg.PortRangeFile
 	}
@@ -286,6 +294,9 @@ func (p *NfqwsProbe) stopLocked(_ context.Context) error {
 	} else if p.cfg.Config != nil {
 		// Сироты после потери in-memory SuperSweep (incomplete Stop / crash).
 		if ssCfg, err := firewall.SuperSweepConfigFromGetter(p.cfg.Config.Get); err == nil && ssCfg.Backend != "" {
+			if wsCfg, werr := firewall.WssizeConfigFromGetter(p.cfg.Config.Get, p.cfg.Paths.ZatorRoot); werr == nil && wsCfg.Active() {
+				ssCfg.Wssize = &wsCfg
+			}
 			ssCfg.ProbeUID = p.cfg.UID
 			if p.cfg.PortRangeFile != "" {
 				ssCfg.PortRangeFile = p.cfg.PortRangeFile

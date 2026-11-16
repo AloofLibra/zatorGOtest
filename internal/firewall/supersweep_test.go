@@ -658,6 +658,40 @@ func TestSuperSweepNftTransaction(t *testing.T) {
 	}
 }
 
+func TestSuperSweepWssizeMarksProbeBeforeQueue(t *testing.T) {
+	c := ssConfig(BackendNftables)
+	w := testWssizeConfig(BackendNftables)
+	w.NFQWS2Enable = true
+	w.Marks = c.Marks
+	c.Wssize = &w
+	txn := c.NftTransaction()
+	mark := strings.Index(txn, `meta skuid 65533 tcp sport 62000-62999 tcp dport 443 ip daddr @z2r_googlevideo4`)
+	queue := strings.Index(txn, `queue num 65535 bypass comment "z2r_supersweep"`)
+	if mark < 0 || queue < 0 || mark > queue {
+		t.Fatalf("WSSIZE probe mark must be installed in output path before it reaches isolated NFQUEUE:\n%s", txn)
+	}
+	if c.NftRuleCount() != 12 || len(strings.Split(strings.TrimSpace(txn), "\n")) != 13 {
+		t.Fatalf("unexpected rule count with WSSIZE: rules=%d lines=%d", c.NftRuleCount(), len(strings.Split(strings.TrimSpace(txn), "\n")))
+	}
+}
+
+func TestSuperSweepIptablesWssizeMarksProbeFirst(t *testing.T) {
+	c := ssConfig(BackendIptables)
+	w := testWssizeConfig(BackendIptables)
+	w.NFQWS2Enable = true
+	w.Marks = c.Marks
+	c.Wssize = &w
+	var rules [][]string
+	for _, r := range c.IptablesChainRules() {
+		if len(r) > 1 && r[1] == SSChainRaw {
+			rules = append(rules, r)
+		}
+	}
+	if len(rules) != 3 || !strings.Contains(strings.Join(rules[0], " "), "z2r_googlevideo4") || !strings.Contains(strings.Join(rules[1], " "), "--or-mark") {
+		t.Fatalf("expected WSSIZE mark before isolated DESYNC/SuperSweep mark: %#v", rules)
+	}
+}
+
 func TestSuperSweepNftStartStop(t *testing.T) {
 	table := nftEmptyTable
 	exists := false

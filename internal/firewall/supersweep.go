@@ -65,6 +65,8 @@ type SuperSweepConfig struct {
 	// Marks — метки: Desync, DesyncPostnat, Filter, ClientScopeMask
 	// (SuperSweep по умолчанию 0x08000000).
 	Marks MarkSet
+	// Wssize — активная конфигурация WSSIZE для маркировки проб до NFQUEUE.
+	Wssize *WssizeConfig
 	// Postnat — NAT-хуки zapret2 (см. PostnatFromGetter).
 	Postnat bool
 	// NftTable — таблица zapret2 (по умолчанию zapret2).
@@ -157,7 +159,19 @@ func (c SuperSweepConfig) Validate() error {
 	if c.QNum < 1 || c.QNum > 65535 {
 		return fmt.Errorf("%w: invalid queue number %d", ErrSuperSweepInvalid, c.QNum)
 	}
-	return c.Marks.CheckSuperSweep()
+	if err := c.Marks.CheckSuperSweep(); err != nil {
+		return err
+	}
+	if c.Wssize != nil && c.Wssize.Active() {
+		w := c.Wssize.withDefaults()
+		if err := w.Validate(); err != nil {
+			return err
+		}
+		if w.Backend != c.Backend || w.NftTable != c.NftTable || w.Postnat != c.Postnat || w.Marks != c.Marks {
+			return fmt.Errorf("%w: WSSIZE and SuperSweep firewall settings differ", ErrSuperSweepInvalid)
+		}
+	}
+	return nil
 }
 
 // CheckEphemeralRange сверяет диапазон эфемерных портов ядра (first, last) с
@@ -254,13 +268,11 @@ func (c SuperSweepConfig) IptablesChainRules() [][]string {
 	d, ss := c.markDesync(), c.markSS()
 	q := strconv.Itoa(c.QNum)
 	raw := FormatMark(c.Marks.Desync | c.Marks.SuperSweep)
-	return [][]string{
+	rules := [][]string{
 		{"-A", SSChainOut, "-p", "tcp", "--sport", c.iptPorts(), "--dport", "443",
 			"-m", "mark", "!", "--mark", d, "-j", "MARK", "--set-xmark", ss},
 		{"-A", SSChainOut, "-j", "CONNMARK", "--or-mark", FormatMark(c.Marks.SuperSweep)},
 		{"-A", SSChainOut, "-j", "ACCEPT"},
-		{"-A", SSChainRaw, "-j", "MARK", "--or-mark", raw},
-		{"-A", SSChainRaw, "-j", "ACCEPT"},
 		{"-A", SSChainPre, "-j", "CONNMARK", "--restore-mark",
 			"--nfmask", FormatMark(c.Marks.SuperSweep), "--ctmask", FormatMark(c.Marks.SuperSweep)},
 		// ACCEPT завершает mangle-хук и обходит рабочий NFQUEUE-путь.
@@ -270,6 +282,19 @@ func (c SuperSweepConfig) IptablesChainRules() [][]string {
 		{"-A", SSChainIn, "-j", "NFQUEUE", "--queue-num", q, "--queue-bypass"},
 		{"-A", SSChainIn, "-j", "ACCEPT"},
 	}
+	if c.Wssize != nil && c.Wssize.Active() {
+		w := c.Wssize.withDefaults()
+		desync := markPair(w.Marks.Desync, w.Marks.Desync)
+		rules = append(rules,
+			[]string{"-A", SSChainRaw, "-m", "set", "--match-set", w.SetName, "dst", "-p", "tcp", "--dport", "443",
+				"-m", "mark", "!", "--mark", desync, "-j", "MARK", "--set-xmark", markPair(w.Marks.Wssize, w.Marks.Wssize)},
+		)
+	}
+	rules = append(rules,
+		[]string{"-A", SSChainRaw, "-j", "MARK", "--or-mark", raw},
+		[]string{"-A", SSChainRaw, "-j", "ACCEPT"},
+	)
+	return rules
 }
 
 // IptablesInstallCommands возвращает полную последовательность команд установки
@@ -308,10 +333,14 @@ func (c SuperSweepConfig) NftChains() (post, pre string) {
 // NftRuleCount — ожидаемое число собственных nft-правил (10, с NAT-хуками 11).
 func (c SuperSweepConfig) NftRuleCount() int {
 	post, _ := c.NftChains()
+	n := 10
 	if post == "postnat_hook" {
-		return 11
+		n++
 	}
-	return 10
+	if c.Wssize != nil && c.Wssize.Active() {
+		n++
+	}
+	return n
 }
 
 // NftTransaction возвращает атомарную nft-транзакцию установки: вставки в
@@ -332,6 +361,11 @@ func (c SuperSweepConfig) NftTransaction() string {
 	// После mangle OUTPUT policy routing затирает ранний mark и отправляет пробы
 	// в VPN: route-цепочка пересчитывает только наши потоки.
 	w("create chain inet %s %s { type route hook output priority -1; policy accept; }", t, SuperSweepNftOutputChain)
+	if c.Wssize != nil && c.Wssize.Active() {
+		ws := c.Wssize.withDefaults()
+		w("add rule inet %s %s meta nfproto ipv4 meta skuid %d tcp sport %s tcp dport 443 ip daddr @%s meta mark & %s == 0 meta mark set meta mark | %s comment \"%s\"",
+			t, SuperSweepNftOutputChain, c.ProbeUID, ports, ws.SetName, FormatMark(ws.Marks.Wssize), FormatMark(ws.Marks.Wssize), SuperSweepComment)
+	}
 	w("insert rule inet %s %s %s return%s", t, post, out, cm)
 	w("insert rule inet %s %s %s queue num %d bypass%s", t, post, out, c.QNum, cm)
 	w("insert rule inet %s %s %s ct mark set ct mark | %s%s", t, post, out, ss, cm)
