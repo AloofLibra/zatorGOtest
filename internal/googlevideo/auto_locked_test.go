@@ -222,3 +222,63 @@ func TestSeederProbeWritesLearnedSource(t *testing.T) {
 		t.Fatalf("verified result = %+v err=%v", got, err)
 	}
 }
+
+func TestSeederBatchProbeWritesOnlyReturnedCandidate(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.tsv")
+	var tried []int
+	s := NewSeeder(SeederConfig{
+		LivePath: live, DefaultStrat: 44, MaxStrat: 44, TailMax: 3,
+		ListHosts: func() ([]string, error) { return []string{"rr1---sn-new.googlevideo.com"}, nil },
+		ProbeBatch: func(_ context.Context, fqdn string, candidates []int, onTry func(int)) (int, string, error) {
+			if fqdn != "rr1---sn-new.googlevideo.com" || len(candidates) == 0 {
+				t.Fatalf("batch target/candidates = %q/%v", fqdn, candidates)
+			}
+			for _, candidate := range candidates {
+				onTry(candidate)
+				tried = append(tried, candidate)
+				if candidate == 3 {
+					return candidate, "TLS and download verified", nil
+				}
+			}
+			return 0, "no candidate passed", nil
+		},
+	})
+	s.tick(context.Background())
+	got, err := ParseAutoLockedTSV(live)
+	if err != nil || len(got) != 1 || got[0].Strategy != 3 || got[0].Source != SourceLearned {
+		t.Fatalf("batch result = %+v err=%v", got, err)
+	}
+	if len(tried) < 2 || tried[len(tried)-1] != 3 {
+		t.Fatalf("tried strategies = %v", tried)
+	}
+	if status := s.Status(); status.LastResult != "ok" || status.LastStrat != 3 || status.Pending != 0 {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestSeederBatchProbeFailureDoesNotWriteLockAndIsRateLimited(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.tsv")
+	calls := 0
+	s := NewSeeder(SeederConfig{
+		LivePath:  live,
+		ListHosts: func() ([]string, error) { return []string{"rr1---sn-new.googlevideo.com"}, nil },
+		ProbeBatch: func(context.Context, string, []int, func(int)) (int, string, error) {
+			calls++
+			return 0, "no strategy passed", nil
+		},
+	})
+	s.tick(context.Background())
+	s.tick(context.Background())
+	got, err := ParseAutoLockedTSV(live)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("failed batch wrote a lock: %+v err=%v", got, err)
+	}
+	if calls != 1 {
+		t.Fatalf("probe calls = %d, want one within retry interval", calls)
+	}
+	if status := s.Status(); status.LastResult != "fail" || status.LastError != "no strategy passed" {
+		t.Fatalf("status = %+v", status)
+	}
+}

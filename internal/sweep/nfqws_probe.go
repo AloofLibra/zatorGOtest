@@ -475,7 +475,7 @@ func (p *NfqwsProbe) buildArgs(luaDir string) ([]string, error) {
 	opt = append(opt, "--filter-l7=tls",
 		"--payload=tls_client_hello,http_req,http_reply,unknown,tls_server_hello",
 		"--out-range=-s34228", "--in-range=-s32768",
-		fmt.Sprintf("--lua-desync=circular_locked:key=%d", p.profile))
+		fmt.Sprintf("--lua-desync=circular_locked:key=%d:allow_nohost=1", p.profile))
 	block, ok := p.cfg.Config.AutoStandardBlock(fmt.Sprintf("%d", p.profile))
 	if !ok {
 		return nil, fmt.Errorf("%w: не найден стандартный профиль %d", ErrProbe, p.profile)

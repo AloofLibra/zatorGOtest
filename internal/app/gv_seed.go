@@ -4,13 +4,18 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/fsutil"
 	"github.com/AloofLibra/zator/internal/googlevideo"
+	"github.com/AloofLibra/zator/internal/netcheck"
+	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/paths"
+	"github.com/AloofLibra/zator/internal/sweep"
 )
 
 var (
@@ -36,8 +41,6 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 	if gvSeeder != nil {
 		return
 	}
-	// Live probing would change the working profile lock; background mode only
-	// transfers a majority of learned locks and otherwise waits for a real probe.
 	seeder := googlevideo.NewSeeder(googlevideo.SeederConfig{
 		LivePath:  paths.LiveAutoLockedTSV(),
 		StatePath: a.Paths.AutoLockedTSV,
@@ -45,12 +48,13 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 			_, _ = a.SyncGooglevideoHosts()
 			return a.GooglevideoHosts().List()
 		},
-		Probe:        nil,
-		DefaultStrat: 41,
-		MaxStrat:     44,
-		TailMax:      8,
-		Interval:     45 * time.Second,
-		Cooldown:     2 * time.Second,
+		ProbeBatch:    a.probeGooglevideoCandidates,
+		DefaultStrat:  41,
+		MaxStrat:      44,
+		TailMax:       8,
+		Interval:      45 * time.Second,
+		Cooldown:      2 * time.Second,
+		RetryInterval: time.Hour,
 		OnSeeded: func(hostKey string, strategy int) {
 			_ = hostKey
 			_ = strategy
@@ -60,6 +64,68 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 	})
 	gvSeeder = seeder
 	seeder.Start(ctx)
+}
+
+// probeGooglevideoCandidates запускает одну ограниченную изолированную сессию
+// profile 2. Проба использует тот же nfqws2-конфиг/WSSIZE, что и SuperSweep,
+// но собственные очередь, lock-файлы и временный рабочий каталог.
+func (a *App) probeGooglevideoCandidates(ctx context.Context, fqdn string, candidates []int, onTry func(int)) (strategy int, detail string, retErr error) {
+	if a == nil || len(candidates) == 0 {
+		return 0, "", fmt.Errorf("googlevideo seed probe is not configured")
+	}
+	cfg, err := config.Load(a.Paths.ZapretConfig)
+	if err != nil {
+		return 0, "", fmt.Errorf("read zapret2 config: %w", err)
+	}
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, 20*time.Second)
+	media, err := netcheck.ResolveYouTubeMedia(resolveCtx, netcheck.DefaultYouTubeVideoID, netcheck.DefaultOptions())
+	resolveCancel()
+	if err != nil {
+		return 0, "", fmt.Errorf("resolve YouTube media for Googlevideo probe: %w", err)
+	}
+	workDir, err := os.MkdirTemp("/tmp", "z2r-gv-seed-")
+	if err != nil {
+		return 0, "", fmt.Errorf("create isolated Googlevideo probe directory: %w", err)
+	}
+	probeStarted := false
+	defer func() {
+		if !probeStarted || retErr == nil {
+			_ = os.RemoveAll(workDir)
+		}
+	}()
+	if err := os.Chmod(workDir, 0o755); err != nil {
+		return 0, "", fmt.Errorf("prepare isolated Googlevideo probe directory: %w", err)
+	}
+	orchestraDir := filepath.Join(workDir, "orchestra")
+	probeStore := orchestra.NewStore(orchestraDir)
+	probeStore.MaxStrategy = cfg.ProfileMaxStrategyOrDefault
+	probe, err := sweep.NewNfqwsProbe(sweep.NfqwsProbeConfig{
+		Paths:        a.Paths,
+		WorkDir:      workDir,
+		OrchestraDir: orchestraDir,
+		Config:       cfg,
+	})
+	if err != nil {
+		return 0, "", err
+	}
+	opts := netcheck.DefaultOptions()
+	opts.WaitBoth = true
+	opts.DialContext = netcheck.BindPortRangeDialer(firewall.SuperSweepPortFirst, firewall.SuperSweepPortLast)
+	coord, err := sweep.New(sweep.Config{
+		Dir:         filepath.Join(a.Paths.StateDir, "supersweep"),
+		Store:       orchestra.NewStore(a.Paths.StateOrchestraDir()),
+		ProbeStore:  probeStore,
+		Probe:       probe,
+		Checker:     netcheck.NewChecker(opts),
+		MaxStrategy: cfg.ProfileMaxStrategyOrDefault,
+	})
+	if err != nil {
+		return 0, "", err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	probeStarted = true
+	return coord.ProbeGooglevideoCandidates(probeCtx, fqdn, candidates, media, onTry)
 }
 
 // StopGooglevideoSeeder останавливает seed-воркер.

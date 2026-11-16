@@ -14,6 +14,7 @@ import (
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/fsutil"
+	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
 )
@@ -421,6 +422,107 @@ func (c *Coordinator) releaseLock() {
 	lock := c.lockDir()
 	removeIfExists(filepath.Join(lock, "pid"))
 	_ = os.Remove(lock)
+}
+
+// ProbeGooglevideoCandidates проверяет ограниченный список стратегий для
+// одного Googlevideo hostkey через изолированную profile-2 очередь. ProbeStore
+// обязателен и отделён от рабочего Store; общий lock не даёт пересечься с
+// SuperSweep. Проверенной считается только стратегия с успешными TLS 1.2/1.3
+// и 64-КБ загрузкой без повторной попытки.
+func (c *Coordinator) ProbeGooglevideoCandidates(ctx context.Context, fqdn string, candidates []int, media netcheck.YouTubeMedia, onTry func(int)) (selected int, detail string, retErr error) {
+	if c.cfg.ProbeStore == nil {
+		return 0, "", fmt.Errorf("%w: для Googlevideo probe нужен private ProbeStore", ErrConfig)
+	}
+	targets, dropped := SanitizeDomains([]string{fqdn})
+	if len(dropped) != 0 || len(targets) != 1 || targets[0].Domain != strings.ToLower(strings.TrimSuffix(fqdn, ".")) {
+		return 0, "", fmt.Errorf("%w: некорректный Googlevideo hostkey", ErrConfig)
+	}
+	if len(candidates) == 0 {
+		return 0, "", fmt.Errorf("%w: пустой список стратегий", ErrConfig)
+	}
+	targetHostKey, ok := googlevideo.SNIHostKey(fqdn)
+	if !ok {
+		return 0, "", fmt.Errorf("%w: некорректный Googlevideo hostkey", ErrConfig)
+	}
+	videoHostKey, _ := googlevideo.SNIHostKey(media.VideoHost)
+	audioHostKey, _ := googlevideo.SNIHostKey(media.AudioHost)
+	if targetHostKey != videoHostKey && targetHostKey != audioHostKey {
+		return 0, fmt.Sprintf("media_hostkey_mismatch: target=%s audio=%s video=%s", targetHostKey, audioHostKey, videoHostKey), nil
+	}
+	mediaChecker, ok := c.cfg.Checker.(MediaTargetCheckerWithTLS)
+	if !ok {
+		return 0, "", fmt.Errorf("%w: media checker unavailable", ErrConfig)
+	}
+	const profileGooglevideo = 2
+	maxStrategy := c.cfg.MaxStrategy(profileGooglevideo)
+	seen := make(map[int]bool, len(candidates))
+	for _, strategy := range candidates {
+		if strategy < 1 || strategy > maxStrategy || seen[strategy] {
+			return 0, "", fmt.Errorf("%w: некорректная стратегия Googlevideo %d", ErrConfig, strategy)
+		}
+		seen[strategy] = true
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, "", err
+	}
+	if err := c.acquireLock(); err != nil {
+		return 0, "", err
+	}
+	defer c.releaseLock()
+
+	if err := c.cfg.Probe.Start(ctx, profileGooglevideo); err != nil {
+		return 0, "", fmt.Errorf("%w: Googlevideo profile-2: %v", ErrProbe, err)
+	}
+	defer func() {
+		if err := c.cfg.Probe.Stop(); err != nil && retErr == nil {
+			selected = 0
+			retErr = fmt.Errorf("%w: очистка Googlevideo probe: %v", ErrProbe, err)
+		}
+	}()
+
+	for _, strategy := range candidates {
+		if err := ctx.Err(); err != nil {
+			return 0, "", err
+		}
+		if onTry != nil {
+			onTry(strategy)
+		}
+		if err := c.cfg.ProbeStore.SetLock(orchestra.ScopeDefault, "2", "tls", orchestra.Strategy(strategy)); err != nil {
+			return 0, "", fmt.Errorf("запись private Googlevideo lock %d: %w", strategy, err)
+		}
+		var err error
+		if c.cfg.Sleep != nil {
+			err = c.cfg.Sleep(ctx, DefaultSettle)
+		} else {
+			err = sleepCtx(ctx, DefaultSettle)
+		}
+		if err != nil {
+			return 0, "", err
+		}
+		if !c.cfg.Probe.Healthy(ctx) {
+			return 0, "", fmt.Errorf("%w: Googlevideo profile-2", ErrIsolationLost)
+		}
+		result := mediaChecker.CheckGooglevideoMediaURLsWithTLS(ctx, targets[0].URL, media, netcheck.PrefBoth)
+		if !c.cfg.Probe.Healthy(ctx) {
+			return 0, "", fmt.Errorf("%w: Googlevideo profile-2", ErrIsolationLost)
+		}
+		if result.TLS12Detail.CodeOK() && result.TLS13Detail.CodeOK() && result.Media != nil && result.Media.Class == netcheck.MediaPlay && result.Download != nil && result.Download.State == netcheck.DLOK && !result.Download.Retry {
+			return strategy, result.Text, nil
+		}
+		mediaClass := netcheck.MediaUnknown
+		if result.Media != nil {
+			mediaClass = result.Media.Class
+		}
+		detail = fmt.Sprintf("strategy %d: TLS12=%d TLS13=%d media=%s download=%s", strategy, result.TLS12Detail.Code, result.TLS13Detail.Code, mediaClass, downloadState(result.Download))
+	}
+	return 0, detail, nil
+}
+
+func downloadState(download *netcheck.Download) string {
+	if download == nil {
+		return "missing"
+	}
+	return download.State
 }
 
 // --- состояние и статус ---

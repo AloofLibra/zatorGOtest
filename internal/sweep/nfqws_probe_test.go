@@ -75,7 +75,7 @@ NFQWS2_OPT="
 	if !containsArg(args, "--filter-mark=0x04000000/0x04000000") || !containsArg(args, "--lua-desync=wssize_ramp:mode=full:wsize=1:scale=2:open=1") {
 		t.Fatalf("WSSIZE probe options must match the primary queue: %v", args)
 	}
-	if !containsArg(args, "--lua-desync=circular_locked:key=2") || !containsArg(args, "--ipset="+filepath.ToSlash(firewall.DefaultWssizeIPFile(p.ZatorRoot))) {
+	if !containsArg(args, "--lua-desync=circular_locked:key=2:allow_nohost=1") || !containsArg(args, "--ipset="+filepath.ToSlash(firewall.DefaultWssizeIPFile(p.ZatorRoot))) {
 		t.Fatalf("profile 2 strategy and Googlevideo set missing: %v", args)
 	}
 	for _, forbidden := range []string{"--hostlist=/profile1.txt", "--hostlist=/profile3.txt", "--lua-desync=circular_quality:key=2", "--lua-init=@/opt/zator/lua/client-scope-config.lua"} {

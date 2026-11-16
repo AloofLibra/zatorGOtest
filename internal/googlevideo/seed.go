@@ -23,6 +23,11 @@ type SeedStatus struct {
 // ProbeFunc пробует стратегию против FQDN; ok=true если TLS зелёный.
 type ProbeFunc func(ctx context.Context, fqdn string, strategy int) (ok bool, detail string, err error)
 
+// ProbeBatchFunc проверяет упорядоченный набор стратегий одной изолированной
+// сессией. onTry вызывается перед каждой стратегией для отображения прогресса.
+// Возвращается только стратегия, прошедшая все критерии проверки.
+type ProbeBatchFunc func(ctx context.Context, fqdn string, strategies []int, onTry func(int)) (strategy int, detail string, err error)
+
 // SeederConfig — параметры фонового seed.
 type SeederConfig struct {
 	// LivePath — /tmp/auto_locked.tsv
@@ -34,6 +39,8 @@ type SeederConfig struct {
 	// Probe — изолированная/живая TLS-проба (обязательна для реального пробоя;
 	// если nil — только transfer-seed без сети).
 	Probe ProbeFunc
+	// ProbeBatch — предпочтительная изолированная проба списка кандидатов.
+	ProbeBatch ProbeBatchFunc
 	// DefaultStrat / MaxStrat / TailMax — кандидаты.
 	DefaultStrat int
 	MaxStrat     int
@@ -42,6 +49,8 @@ type SeederConfig struct {
 	Interval time.Duration
 	// Cooldown после обработки одного sn.
 	Cooldown time.Duration
+	// RetryInterval — интервал повторной сетевой пробы неудачного hostkey.
+	RetryInterval time.Duration
 	// OnSeeded — после успешной записи (опционально: refresh ipv4/wssize).
 	OnSeeded func(hostKey string, strategy int)
 }
@@ -53,6 +62,7 @@ type Seeder struct {
 	mu     sync.Mutex
 	status SeedStatus
 	stop   context.CancelFunc
+	probed map[string]time.Time
 }
 
 // NewSeeder создаёт seeder (ещё не запущен).
@@ -75,9 +85,13 @@ func NewSeeder(cfg SeederConfig) *Seeder {
 	if cfg.Cooldown <= 0 {
 		cfg.Cooldown = 3 * time.Second
 	}
+	if cfg.RetryInterval <= 0 {
+		cfg.RetryInterval = time.Hour
+	}
 	return &Seeder{
 		cfg:    cfg,
 		status: SeedStatus{State: "idle"},
+		probed: make(map[string]time.Time),
 	}
 }
 
@@ -196,13 +210,16 @@ func (s *Seeder) tick(ctx context.Context) {
 	}
 
 	// 2) Узкий probe по кандидатам (один sn за тик).
-	hk := missing[0]
+	hk := s.nextProbeHost(missing)
+	if hk == "" {
+		return
+	}
 	fqdn := PickFQDNForHostKey(hosts, hk)
 	if fqdn == "" {
 		return
 	}
 	cands := CandidateStrategies(locks, s.cfg.DefaultStrat, s.cfg.MaxStrat, s.cfg.TailMax)
-	if s.cfg.Probe == nil {
+	if s.cfg.ProbeBatch == nil && s.cfg.Probe == nil {
 		// Never turn an untested default into a lock or transfer evidence.
 		s.setStatus(func(st *SeedStatus) {
 			st.LastHost = hk
@@ -212,6 +229,76 @@ func (s *Seeder) tick(ctx context.Context) {
 		})
 		return
 	}
+	if s.cfg.ProbeBatch != nil {
+		strategy, detail, err := s.cfg.ProbeBatch(ctx, fqdn, cands, func(strat int) {
+			s.setStatus(func(st *SeedStatus) {
+				st.State = "probing"
+				st.HostKey = hk
+				st.Strategy = strat
+			})
+		})
+		if err != nil {
+			s.setStatus(func(st *SeedStatus) {
+				st.State = "idle"
+				st.HostKey = ""
+				st.Strategy = 0
+				st.LastHost = hk
+				st.LastStrat = strategy
+				st.LastResult = "error"
+				st.LastError = err.Error()
+			})
+			return
+		}
+		if strategy == 0 {
+			s.markProbed(hk)
+			s.setStatus(func(st *SeedStatus) {
+				st.State = "idle"
+				st.HostKey = ""
+				st.Strategy = 0
+				st.LastHost = hk
+				st.LastStrat = 0
+				st.LastResult = "fail"
+				st.LastError = detail
+			})
+			return
+		}
+		if !containsStrategy(cands, strategy) {
+			s.setStatus(func(st *SeedStatus) {
+				st.State = "idle"
+				st.HostKey = ""
+				st.Strategy = 0
+				st.LastHost = hk
+				st.LastStrat = strategy
+				st.LastResult = "error"
+				st.LastError = "probe_returned_unrequested_strategy"
+			})
+			return
+		}
+		if err := s.commit(hk, strategy, SourceLearned); err != nil {
+			s.setStatus(func(st *SeedStatus) {
+				st.State = "idle"
+				st.LastResult = "error"
+				st.LastError = err.Error()
+			})
+			return
+		}
+		s.markProbed(hk)
+		s.setStatus(func(st *SeedStatus) {
+			st.State = "idle"
+			st.HostKey = ""
+			st.Strategy = 0
+			st.LastHost = hk
+			st.LastStrat = strategy
+			st.LastResult = "ok"
+			st.LastError = ""
+			st.Pending = max(0, st.Pending-1)
+		})
+		if s.cfg.OnSeeded != nil {
+			s.cfg.OnSeeded(hk, strategy)
+		}
+		return
+	}
+	s.markProbed(hk)
 
 	for _, strat := range cands {
 		if ctx.Err() != nil {
@@ -279,6 +366,33 @@ func (s *Seeder) tick(ctx context.Context) {
 		st.LastResult = "fail"
 		st.LastError = fmt.Sprintf("нет зелёной стратегии среди %d кандидатов", len(cands))
 	})
+}
+
+func (s *Seeder) nextProbeHost(missing []string) string {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, hk := range missing {
+		if last, ok := s.probed[hk]; !ok || now.Sub(last) >= s.cfg.RetryInterval {
+			return hk
+		}
+	}
+	return ""
+}
+
+func (s *Seeder) markProbed(hostKey string) {
+	s.mu.Lock()
+	s.probed[hostKey] = time.Now()
+	s.mu.Unlock()
+}
+
+func containsStrategy(strategies []int, value int) bool {
+	for _, strategy := range strategies {
+		if strategy == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Seeder) commit(hostKey string, strategy int, source string) error {
