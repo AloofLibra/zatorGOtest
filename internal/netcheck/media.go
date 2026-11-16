@@ -64,6 +64,12 @@ func probeMediaSegmentVersion(ctx context.Context, rawURL string, opts Options, 
 
 func probeMediaSegment(ctx context.Context, rawURL string, opts Options, offset, requested, total int64, expectedMIME string, version TLSVersion) Download {
 	opts = opts.withDefaults()
+	// Match the Bash media probe: curl --http1.1, 5s connect, 15s total,
+	// 10s low-speed window, and its YouTube app user agent.
+	opts.ConnectTimeout = 5 * time.Second
+	opts.DownloadMaxTime = 15 * time.Second
+	opts.DownloadStall = 10 * time.Second
+	opts.UserAgent = "com.google.visionos.youtube/1.04(RealityDevice17,1; U; CPU visionOS 26_6_0 like Mac OS X; US)"
 	out := Download{State: DLFail, Time: "-", Text: "invalid media range"}
 	_, err := validateYouTubeMediaURL(rawURL)
 	if err != nil || requested < MediaTinyMax || requested > maxMediaRange || total < MediaTinyMax*4 || offset < 0 {
@@ -95,6 +101,7 @@ func probeMediaSegment(ctx context.Context, rawURL string, opts Options, offset,
 			}
 		}
 		tr := opts.transport(minTLS, maxTLS, st)
+		tr.ForceAttemptHTTP2 = false
 		client := opts.client(tr)
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, current.String(), nil)
