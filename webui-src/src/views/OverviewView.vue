@@ -4,8 +4,7 @@ import { runCheck, serviceAction } from '../api/endpoints'
 import CheckResults from '../components/ui/CheckResults.vue'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { confirmDialog } from '../stores/confirm'
-import { refreshAll, scope, status, statusCheck, statusCheckRan, statusCheckAt, statusLoaded, versionInfo, versionInfoCheckedAt, versionInfoFresh } from '../stores/status'
-import { applyUpdate, refreshUpdateCheck, updateApplying, updateCheckError, updateCheckResult, updateCheckState, updateLastSuccessAt } from '../stores/updates'
+import { refreshAll, scope, status, statusCheck, statusCheckRan, statusCheckAt, statusLoaded, versionInfo, versionInfoFresh } from '../stores/status'
 import { showToast } from '../stores/toast'
 
 const running = computed(() => Boolean(status.value?.zapret2_running))
@@ -26,25 +25,6 @@ const pinnedCount = computed(() => profiles.value.filter((p) => {
 const disabledProfiles = computed(() => profiles.value.filter((p) => String(p.current_lock) === '0').length)
 const autoMode = computed(() => status.value?.auto_mode || '—')
 const watchdog = computed(() => health.value?.watchdog ?? status.value?.nfqws_watchdog)
-const hasCachedRelease = computed(() => Boolean(versionInfo.value?.latest_release || versionInfo.value?.latest_zator_date || versionInfo.value?.latest_webui_date))
-const updateAvailable = computed(() => updateCheckState.value === 'success'
-  ? !!updateCheckResult.value?.update_available
-  : !!(updateCheckResult.value?.update_available || versionInfo.value?.update_available))
-const updateRelease = computed(() => updateCheckResult.value?.release || versionInfo.value?.latest_release || '')
-const updateFreshness = computed(() => {
-  if (updateCheckState.value === 'checking') return 'Проверяем обновления…'
-  if (updateCheckState.value === 'success') return updateLastSuccessAt.value ? `Проверено ${dateTime(updateLastSuccessAt.value)}` : 'Проверено сейчас'
-  if (updateCheckState.value === 'error') return updateLastSuccessAt.value
-    ? `Последняя успешная проверка ${dateTime(updateLastSuccessAt.value)} · данные могут устареть`
-    : 'Последняя проверка не удалась'
-  return hasCachedRelease.value ? 'Показаны кэшированные данные' : 'Ещё не проверено'
-})
-const checkedVersionText = computed(() => {
-  if (!versionInfo.value) return 'Состояние версии недоступно'
-  return versionInfoFresh.value
-    ? `Установлено ${versionInfo.value.zator_version || '—'}`
-    : `Последние локальные данные от ${dateTime(versionInfoCheckedAt.value)}`
-})
 const configPending = computed(() => !!versionInfo.value?.config_update_pending)
 const checkTime = ref<number | null>(statusCheckAt.value)
 
@@ -98,11 +78,6 @@ async function svc(action: 'start' | 'stop' | 'restart') {
   }
 }
 
-async function checkUpdates() {
-  await refreshUpdateCheck()
-  if (updateCheckState.value === 'success') showToast(updateAvailable.value ? 'Найден выпуск ZatorGO' : 'Новых выпусков не найдено', 'info')
-  else if (updateCheckError.value) showToast(updateCheckError.value, 'error')
-}
 </script>
 
 <template>
@@ -134,22 +109,8 @@ async function checkUpdates() {
       </section>
 
       <section class="update-card" aria-labelledby="updates-title">
-        <div class="section-heading"><div><h2 id="updates-title">Обновления</h2><p>{{ updateFreshness }}</p></div>
-          <button type="button" class="text-button" :disabled="updateCheckState === 'checking'" :class="{ 'is-busy': updateCheckState === 'checking' }" @click="checkUpdates">Проверить сейчас</button>
-        </div>
-        <div class="update-row" :class="updateCheckState === 'error' ? 'is-warning' : updateAvailable ? 'is-info' : 'is-neutral'">
-          <span class="update-mark">↗</span>
-          <div class="update-copy">
-            <strong v-if="updateCheckState === 'checking'">Проверяем версию ZatorGO</strong>
-            <strong v-else-if="updateCheckState === 'error'">Не удалось проверить ZatorGO</strong>
-            <strong v-else-if="updateAvailable">Доступно обновление ZatorGO</strong>
-            <strong v-else-if="updateCheckState === 'success'">Новых выпусков ZatorGO не найдено</strong>
-            <strong v-else>Версия ZatorGO не проверена</strong>
-            <small>{{ checkedVersionText }}<template v-if="updateAvailable && updateRelease"> → {{ updateRelease }}</template><template v-else-if="hasCachedRelease && updateCheckState === 'never'"> · {{ updateRelease || 'кэш релизов' }}</template></small>
-            <small v-if="updateCheckError" class="error-text">{{ updateCheckError }}</small>
-          </div>
-          <button v-if="updateAvailable" type="button" class="primary" :disabled="updateApplying" :class="{ 'is-busy': updateApplying }" @click="applyUpdate('app')">Обновить</button>
-          <router-link v-else class="text-button" to="/settings/updates">Подробнее</router-link>
+        <div class="section-heading"><div><h2 id="updates-title">Конфигурация</h2><p>Обновление шаблонов и стратегических ресурсов</p></div>
+          <router-link class="text-button" to="/settings/updates">Настроить</router-link>
         </div>
         <div class="update-row" :class="versionInfoFresh ? configPending ? 'is-info' : 'is-neutral' : 'is-muted'">
           <span class="update-mark">⌘</span>

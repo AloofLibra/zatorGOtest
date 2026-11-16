@@ -6,7 +6,7 @@ import { logout as apiLogout } from './api/endpoints'
 import { clearLoginGate, forceLogin, needLogin } from './stores/auth'
 import { fetchAndApplyState } from './stores/state'
 import { authRequired, status, statusLoaded, versionInfo } from './stores/status'
-import { hydrateUpdateCheck, startUpdateScheduler, stopUpdateScheduler } from './stores/updates'
+import { applyUpdate, hydrateUpdateCheck, startUpdateScheduler, stopUpdateScheduler, updateApplying, updateCheckResult, updateCheckState } from './stores/updates'
 import { showToast } from './stores/toast'
 import { theme, type ThemeMode } from './stores/theme'
 import ToastHost from './components/ui/ToastHost.vue'
@@ -31,6 +31,8 @@ const themes: { id: ThemeMode; label: string }[] = [
 const active = computed(() => String(route.name || 'status'))
 const title = computed(() => [...primaryTabs, ...extraTabs].find((tab) => tab.name === active.value)?.label || 'Обзор')
 const running = computed(() => Boolean(status.value?.zapret2_running))
+const releaseVersion = computed(() => updateCheckState.value === 'success' && updateCheckResult.value?.update_available
+  ? (updateCheckResult.value.release || versionInfo.value?.latest_release || '') : '')
 const healthOverall = computed(() => status.value?.health?.overall || 'unknown')
 const warnCount = computed(() => status.value?.service_warnings?.length || 0)
 const healthLabel = computed(() => ({
@@ -134,13 +136,19 @@ onUnmounted(stopUpdateScheduler)
         <div><strong>{{ running ? 'Служба запущена' : statusLoaded ? 'Служба остановлена' : 'Состояние неизвестно' }}</strong>
           <small>{{ warnCount ? `${warnCount} предупреждений` : healthLabel }}</small></div>
       </div>
-      <div class="rail-foot">ZatorGO <span>{{ versionInfo?.zator_version || '' }}</span></div>
+      <div class="rail-foot">ZatorGO Control Center</div>
     </aside>
 
     <div class="workspace">
       <header class="topbar">
         <div class="breadcrumbs"><span>Панель управления</span><b>/</b><strong>{{ title }}</strong></div>
         <div class="top-controls">
+          <div class="version-control" aria-label="Версия ZatorGO">
+            <router-link to="/settings/updates" class="version-current" title="Текущая версия ZatorGO">{{ versionInfo?.zator_version || 'ZatorGO' }}</router-link>
+            <span v-if="releaseVersion" class="version-arrow" aria-hidden="true">→</span>
+            <button v-if="releaseVersion" type="button" class="version-new" :disabled="updateApplying" :class="{ 'is-busy': updateApplying }" :aria-label="`Обновить ZatorGO до ${releaseVersion}`" @click="applyUpdate('app')">{{ releaseVersion }}</button>
+            <span v-else-if="updateCheckState === 'checking'" class="version-checking" aria-label="Проверяем обновления">···</span>
+          </div>
           <div class="top-health" :class="healthOverall"><span class="status-dot" /><span>{{ running ? 'zapret2 работает' : statusLoaded ? 'zapret2 остановлен' : healthLabel }}</span></div>
           <label class="theme-control"><span class="sr-only">Цветовая тема</span><select :value="theme" @change="setTheme(($event.target as HTMLSelectElement).value as ThemeMode)"><option v-for="option in themes" :key="option.id" :value="option.id">{{ option.label }}</option></select></label>
           <button v-if="authRequired" type="button" class="icon-button logout-btn" aria-label="Выйти" title="Выйти" :disabled="logoutBusy" @click="logout">↗</button>

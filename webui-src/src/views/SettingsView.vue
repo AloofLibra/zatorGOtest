@@ -42,10 +42,10 @@ const sections = [
 ]
 
 const settingGroups = [
-  { id: 'grp-system', title: 'Система', desc: 'Обновления, провайдер, телеметрия и резервные копии.' },
-  { id: 'grp-bypass', title: 'Обход DPI', desc: 'Режимы стратегий, TLS/WG blob и wssize.' },
-  { id: 'grp-net', title: 'Сеть', desc: 'Firewall, интерфейсы WAN/LAN, порты NFQUEUE и client scopes.' },
-  { id: 'grp-svc', title: 'Сервис', desc: 'Сырой конфиг zapret2 и журнал ошибок.' },
+  { id: 'grp-bypass', key: 'bypass', title: 'Обход DPI', desc: 'Режимы стратегий, TLS/WG blob и wssize.', first: 'sec-modes' },
+  { id: 'grp-net', key: 'network', title: 'Сеть', desc: 'Firewall, интерфейсы WAN/LAN, порты NFQUEUE и client scopes.', first: 'sec-firewall' },
+  { id: 'grp-system', key: 'system', title: 'Система', desc: 'Обновления, провайдер, телеметрия и резервные копии.', first: 'sec-updates' },
+  { id: 'grp-svc', key: 'diagnostics', title: 'Диагностика', desc: 'Сырой конфиг zapret2 и журнал ошибок.', first: 'sec-config' },
 ]
 
 const modes = [
@@ -593,19 +593,26 @@ const panelAliases: Record<string, string> = {
 
 function panelIdFromRoute(): string {
   const raw = String(route.params.panel || (route.hash || '').replace(/^#/, '') || '')
-  if (!raw) return ''
+  if (!raw) return 'sec-modes'
   return panelAliases[raw] || (raw.startsWith('sec-') ? raw : `sec-${raw}`)
 }
+const activeCategory = computed(() => {
+  const id = panelIdFromRoute()
+  const section = sections.find((item) => item.id === id)
+  const group = section?.group
+  return group === 'Обход' ? 'bypass' : group === 'Сеть' ? 'network' : group === 'Сервис' ? 'diagnostics' : 'system'
+})
 
 function scrollToPanel(forceId?: string) {
   const id = forceId || panelIdFromRoute()
   if (!id || !settingsLoaded.value) return
   const el = document.getElementById(id)
   if (!el) return
-  // Учёт sticky status-strip + settings-nav
+  // Offset for the pinned application header and category navigation.
   const nav = document.querySelector('.settings-nav') as HTMLElement | null
-  const strip = document.querySelector('.status-strip') as HTMLElement | null
-  const offset = (nav?.offsetHeight || 0) + (strip?.offsetHeight || 0) + 12
+  const strip = document.querySelector('.topbar') as HTMLElement | null
+  const mobileNavOffset = window.matchMedia('(max-width: 900px)').matches ? (nav?.offsetHeight || 0) : 0
+  const offset = mobileNavOffset + (strip?.offsetHeight || 0) + 16
   const top = el.getBoundingClientRect().top + window.scrollY - offset
   window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
 }
@@ -646,28 +653,26 @@ onMounted(async () => {
     <div class="page-head">
       <div>
         <h1>Настройки</h1>
-        <p>Система, обход DPI, сеть и сервис — якоря сверху.</p>
+        <p>Система, обход DPI, сеть и диагностика.</p>
       </div>
       <div class="actions">
         <button type="button" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'refresh-settings' }" @click="refresh">Обновить</button>
       </div>
     </div>
 
-    <nav class="settings-nav" aria-label="Разделы настроек">
-      <a
-        v-for="s in sections"
-        :key="s.id"
-        href="#"
-        :class="{ 'is-active': panelIdFromRoute() === s.id }"
-        @click="goSection(s.id, $event)"
-      >{{ s.label }}</a>
-    </nav>
-
-    <div v-if="!settingsLoaded" class="loading">Загрузка…</div>
-    <template v-else>
+    <div class="settings-layout">
+      <nav class="settings-nav" aria-label="Категории настроек">
+        <a v-for="group in settingGroups" :key="group.key" href="#"
+          :class="{ 'is-active': activeCategory === group.key }"
+          @click="goSection(group.first, $event)">{{ group.title }}</a>
+      </nav>
+      <div class="settings-content">
+      <div v-if="!settingsLoaded" class="loading">Загрузка…</div>
+      <template v-else>
+      <div class="settings-category" v-show="activeCategory === 'system'">
       <div id="grp-system" class="settings-group">
-        <h2>{{ settingGroups[0].title }}</h2>
-        <p>{{ settingGroups[0].desc }}</p>
+        <h2>Система</h2>
+        <p>Обновления, провайдер, телеметрия и резервные копии.</p>
       </div>
 
       <section id="sec-updates" class="panel">
@@ -771,9 +776,11 @@ onMounted(async () => {
         </div>
       </section>
 
+      </div>
+      <div class="settings-category" v-show="activeCategory === 'bypass'">
       <div id="grp-bypass" class="settings-group">
-        <h2>{{ settingGroups[1].title }}</h2>
-        <p>{{ settingGroups[1].desc }}</p>
+        <h2>Обход DPI</h2>
+        <p>Режимы стратегий, TLS/WG blob и wssize.</p>
       </div>
 
       <section id="sec-modes" class="panel">
@@ -867,9 +874,11 @@ onMounted(async () => {
         </template>
       </section>
 
+      </div>
+      <div class="settings-category" v-show="activeCategory === 'network'">
       <div id="grp-net" class="settings-group">
-        <h2>{{ settingGroups[2].title }}</h2>
-        <p>{{ settingGroups[2].desc }}</p>
+        <h2>Сеть</h2>
+        <p>Firewall, интерфейсы WAN/LAN, порты NFQUEUE и client scopes.</p>
       </div>
 
       <section id="sec-firewall" class="panel">
@@ -983,9 +992,11 @@ onMounted(async () => {
         </div>
       </section>
 
+      </div>
+      <div class="settings-category" v-show="activeCategory === 'diagnostics'">
       <div id="grp-svc" class="settings-group">
-        <h2>{{ settingGroups[3].title }}</h2>
-        <p>{{ settingGroups[3].desc }}</p>
+        <h2>Диагностика</h2>
+        <p>Сырой конфиг zapret2 и журнал ошибок.</p>
       </div>
 
       <section id="sec-config" class="panel">
@@ -1013,6 +1024,9 @@ onMounted(async () => {
           <pre class="error-log">{{ errors.content || '(пусто)' }}</pre>
         </template>
       </section>
+      </div>
     </template>
+      </div>
+    </div>
   </section>
 </template>
