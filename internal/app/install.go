@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -420,6 +421,11 @@ func copyFSKeepCustomTLS(src fs.FS, dst string) error {
 		if err != nil {
 			return err
 		}
+		if current, err := os.ReadFile(target); err == nil && bytes.Equal(current, data) {
+			return nil // avoid flash writes for unchanged embedded assets
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
 		mode := os.FileMode(0o644)
 		if strings.HasSuffix(strings.ToLower(name), ".sh") {
 			mode = 0o755
@@ -440,6 +446,11 @@ func copyFS(src fs.FS, dst string) error {
 		}
 		data, err := fs.ReadFile(src, name)
 		if err != nil {
+			return err
+		}
+		if current, err := os.ReadFile(target); err == nil && bytes.Equal(current, data) {
+			return nil // avoid flash writes for unchanged embedded assets
+		} else if err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		mode := os.FileMode(0o644)

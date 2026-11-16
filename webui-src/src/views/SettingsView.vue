@@ -435,23 +435,41 @@ async function checkUpdates() {
 }
 
 async function applyUpdates() {
+  try {
+  const pre = await api<{ preflight?: { ram_available: number; tmp_available: number; tmp_required: number; tmp_base_required: number; flash_available: number; flash_required: number; can_rollback: boolean; can_proceed_without_backup: boolean; can_update: boolean } }>(
+    '/api/settings', { ...formBody({ setting: 'update_preflight', mode: 'full' }) },
+  )
+  if (!pre.preflight?.can_update) {
+    showToast('Недостаточно свободной flash памяти для обновления', 'error')
+    return
+  }
+  if (!pre.preflight.can_proceed_without_backup) {
+    showToast(`Для самого обновления в /tmp нужно около ${pre.preflight.tmp_base_required} байт`, 'error')
+    return
+  }
+  const noBackup = !pre.preflight.can_rollback
   const ok = await confirmDialog({
     title: 'Установить обновление ZatorGO?',
-    message: ['Будут скачаны файлы релиза. Может занять несколько минут.'],
+    message: noBackup
+      ? [`Доступно RAM: ${pre.preflight.ram_available}; /tmp: ${pre.preflight.tmp_available}; flash: ${pre.preflight.flash_available} байт. Для полного отката в /tmp нужно около ${pre.preflight.tmp_required}. Продолжить без резервной копии на свой риск?`]
+      : [`Будут скачаны файлы релиза. RAM: ${pre.preflight.ram_available}; /tmp: ${pre.preflight.tmp_available}; flash: ${pre.preflight.flash_available} байт.`],
   })
   if (!ok) return
-  try {
     await withBusy('upd-apply', async () => {
       const res = await api<{
+        needs_confirmation?: boolean
+        warning?: string
         up_to_date?: boolean
         installed?: number
         release?: string
         restart_required?: boolean
       }>(
         '/api/settings',
-        { ...formBody({ setting: 'update_apply' }), timeoutMs: 200_000 },
+        { ...formBody({ setting: 'update_apply', mode: 'full', continue_without_backup: noBackup ? '1' : '0' }), timeoutMs: 200_000 },
       )
-      if (res.up_to_date) {
+      if ('needs_confirmation' in res && res.needs_confirmation) {
+        showToast(res.warning || 'Свободного места в /tmp стало недостаточно; обновление не начато', 'warning')
+      } else if (res.up_to_date) {
         showToast('Уже актуально')
         await fetchAndApplyState()
       } else if (res.restart_required) {

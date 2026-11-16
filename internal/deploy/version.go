@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"bufio"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,6 +25,9 @@ const (
 
 // Dir возвращает каталог состояния deploy.
 func Dir(p paths.Paths) string { return filepath.Join(p.StateDir, DirName) }
+
+// TempDir is reserved for downloads and staging, which must not accumulate on flash.
+func TempDir() string { return filepath.Join(os.TempDir(), "zator-deploy") }
 
 // VersionPath возвращает путь к version.env.
 func VersionPath(p paths.Paths) string { return filepath.Join(Dir(p), VersionFileName) }
@@ -123,7 +127,7 @@ func WriteVersion(p paths.Paths, v Version) error {
 
 // LatestCachePath возвращает путь к кэшу latest.json.
 func LatestCachePath(p paths.Paths) string {
-	return filepath.Join(Dir(p), LatestCacheName)
+	return filepath.Join(TempDir(), LatestCacheName)
 }
 
 // ReadCachedLatest читает кэш последнего CheckLatest; при отсутствии — (nil, nil).

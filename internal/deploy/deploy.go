@@ -338,7 +338,7 @@ func (u *Updater) FetchLatest(ctx context.Context) (*Latest, []byte, error) {
 	if u.Offline {
 		return nil, nil, ErrOffline
 	}
-	dir := Dir(u.Paths)
+	dir := TempDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, nil, err
 	}
@@ -393,7 +393,8 @@ func (u *Updater) CheckLatest(ctx context.Context) (*CheckResult, error) {
 	res := CompareLatest(cur, l, u.webUIInstalled())
 	res.CheckedAt = u.now()
 	if len(raw) > 0 {
-		_ = fsutil.AtomicWriteFile(filepath.Join(Dir(u.Paths), LatestCacheName), raw, 0o644)
+		_ = os.MkdirAll(TempDir(), 0o755)
+		_ = fsutil.AtomicWriteFile(LatestCachePath(u.Paths), raw, 0o644)
 	}
 	return &res, nil
 }
@@ -427,7 +428,7 @@ func (u *Updater) DownloadAsset(ctx context.Context, l *Latest, variant string) 
 	if err != nil {
 		return "", err
 	}
-	dir := Dir(u.Paths)
+	dir := TempDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -446,10 +447,10 @@ func (u *Updater) DownloadAsset(ctx context.Context, l *Latest, variant string) 
 	return dest, nil
 }
 
-// Unpack безопасно распаковывает архив в новый staging-каталог внутри
-// StateDir/deploy и возвращает его путь (вызывающий удаляет каталог).
+// Unpack безопасно распаковывает архив во временный staging-каталог и
+// возвращает его путь (вызывающий удаляет каталог).
 func (u *Updater) Unpack(archive string) (string, error) {
-	dir := Dir(u.Paths)
+	dir := TempDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -680,12 +681,12 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 		plan = append(plan, planned{e, target})
 	}
 
-	backupDir, err := os.MkdirTemp(Dir(u.Paths), "rollback-")
+	backupDir, err := os.MkdirTemp(TempDir(), "rollback-")
 	if err != nil {
-		if mkErr := os.MkdirAll(Dir(u.Paths), 0o755); mkErr != nil {
+		if mkErr := os.MkdirAll(TempDir(), 0o755); mkErr != nil {
 			return nil, mkErr
 		}
-		if backupDir, err = os.MkdirTemp(Dir(u.Paths), "rollback-"); err != nil {
+		if backupDir, err = os.MkdirTemp(TempDir(), "rollback-"); err != nil {
 			return nil, err
 		}
 	}

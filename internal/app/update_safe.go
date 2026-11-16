@@ -18,10 +18,12 @@ const (
 	preUpdateVersionRel = "pre_update_bin/version.env"
 )
 
+func updateBackupDir() string { return filepath.Join(os.TempDir(), "zator-update", "backup") }
+
 // CreatePreUpdateBackup снимает product-backup перед update (config+lists+orchestra)
 // и снимок бинарника bin/zator (ModeSmart его не откатывает).
 func (a *App) CreatePreUpdateBackup() (backup.Info, error) {
-	mgr := backup.NewIn(a.Paths, a.Paths.BackupDir)
+	mgr := backup.NewIn(a.Paths, updateBackupDir())
 	info, err := mgr.Create(backup.CreateOptions{IncludeLists: true})
 	if err != nil {
 		return backup.Info{}, err
@@ -37,7 +39,7 @@ func (a *App) CreatePreUpdateBackup() (backup.Info, error) {
 }
 
 func (a *App) preUpdateBinaryPath() string {
-	return filepath.Join(a.Paths.StateDir, filepath.FromSlash(preUpdateBinRel))
+	return filepath.Join(os.TempDir(), "zator-update", filepath.FromSlash(preUpdateBinRel))
 }
 
 func (a *App) snapshotPreUpdateBinary() error {
@@ -90,7 +92,7 @@ func (a *App) restorePreUpdateBinary() error {
 }
 
 func (a *App) preUpdateVersionPath() string {
-	return filepath.Join(a.Paths.StateDir, filepath.FromSlash(preUpdateVersionRel))
+	return filepath.Join(os.TempDir(), "zator-update", filepath.FromSlash(preUpdateVersionRel))
 }
 
 func (a *App) snapshotPreUpdateVersion() error {
@@ -187,7 +189,7 @@ func (a *App) RollbackPreUpdateBackup() error {
 	if name == "" {
 		return fmt.Errorf("нет pre-update backup для отката")
 	}
-	mgr := backup.NewIn(a.Paths, a.Paths.BackupDir)
+	mgr := backup.NewIn(a.Paths, updateBackupDir())
 	if _, err := mgr.Restore(name, backup.RestoreOptions{Mode: backup.ModeSmart}); err != nil {
 		return fmt.Errorf("rollback %s: %w", name, err)
 	}

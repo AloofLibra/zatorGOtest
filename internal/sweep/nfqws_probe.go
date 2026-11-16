@@ -29,7 +29,7 @@ var probeStrategyArg = regexp.MustCompile(`:strategy=[0-9]+(?:$|:)`)
 type NfqwsProbeConfig struct {
 	Paths paths.Paths
 
-	// WorkDir — каталог pid/args/lua (по умолчанию StateDir/supersweep-probe).
+	// WorkDir — каталог pid/args/lua (по умолчанию /tmp/zator/supersweep-probe).
 	WorkDir string
 	// OrchestraDir — приватное хранилище локов ProbeStore
 	// (по умолчанию WorkDir/orchestra).
@@ -78,7 +78,7 @@ func NewNfqwsProbe(cfg NfqwsProbeConfig) (*NfqwsProbe, error) {
 		return nil, fmt.Errorf("%w: не задан Config", ErrConfig)
 	}
 	if cfg.WorkDir == "" {
-		cfg.WorkDir = filepath.Join(cfg.Paths.StateDir, "supersweep-probe")
+		cfg.WorkDir = filepath.Join(os.TempDir(), "zator", "supersweep-probe")
 	}
 	if cfg.OrchestraDir == "" {
 		cfg.OrchestraDir = filepath.Join(cfg.WorkDir, "orchestra")

@@ -304,14 +304,29 @@ func (u *Updater) installBinary(ctx context.Context, data []byte, tag, tracking 
 		return err
 	}
 	final := filepath.Join(binDir, "zator")
-	tmp := final + ".new"
+	if err := os.MkdirAll(TempDir(), 0o755); err != nil {
+		return err
+	}
+	tmpFile, err := os.CreateTemp(TempDir(), "zator-new-*")
+	if err != nil {
+		return err
+	}
+	tmp := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := tmpFile.Chmod(0o755); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
 	defer os.Remove(tmp)
-	if err := os.WriteFile(tmp, data, 0o755); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, 0o755); err != nil {
-		return err
-	}
 	backup, hadBinary, err := snapshotFile(final)
 	if err != nil {
 		return err
@@ -340,9 +355,15 @@ func (u *Updater) installBinary(ctx context.Context, data []byte, tag, tracking 
 		return errors.Join(cause, undoErr)
 	}
 	if err := os.Rename(tmp, final); err != nil {
-		// ETXTBSY / занятый inode: Linux обычно допускает rename запущенного бинарника.
-		if werr := os.WriteFile(final, data, 0o755); werr != nil {
+		// /tmp may be a different filesystem; keep the destination write atomic
+		// through a same-directory short-lived file only as a cross-device fallback.
+		dstTmp := final + ".new"
+		if werr := os.WriteFile(dstTmp, data, 0o755); werr != nil {
 			return rollback(fmt.Errorf("deploy: замена бинарника: %v; fallback: %w", err, werr))
+		}
+		if werr := os.Rename(dstTmp, final); werr != nil {
+			_ = os.Remove(dstTmp)
+			return rollback(werr)
 		}
 	}
 	// Новый бинарник сам разложит актуальные assets (webui и пр.).
@@ -403,8 +424,7 @@ func (u *Updater) installBinary(ctx context.Context, data []byte, tag, tracking 
 	return nil
 }
 
-// snapshotFile creates a same-filesystem hard link so rollback needs no full
-// binary copy in RAM or on flash.
+// snapshotFile stores the previous binary backup under tmpfs.
 func snapshotFile(path string) (string, bool, error) {
 	st, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -416,7 +436,10 @@ func snapshotFile(path string) (string, bool, error) {
 	if !st.Mode().IsRegular() {
 		return "", false, fmt.Errorf("deploy: нельзя обновить небезопасный файл %s", path)
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".zator-rollback-*")
+	if err := os.MkdirAll(TempDir(), 0o755); err != nil {
+		return "", false, err
+	}
+	f, err := os.CreateTemp(TempDir(), "zator-rollback-*")
 	if err != nil {
 		return "", false, err
 	}
@@ -425,21 +448,39 @@ func snapshotFile(path string) (string, bool, error) {
 		_ = os.Remove(backup)
 		return "", false, err
 	}
-	if err := os.Remove(backup); err != nil {
-		return "", false, err
-	}
-	if err := os.Link(path, backup); err != nil {
+	if err := copyFile(path, backup, 0o700); err != nil {
+		_ = os.Remove(backup)
 		return "", false, fmt.Errorf("deploy: snapshot бинарника: %w", err)
 	}
 	return backup, true, nil
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	return errors.Join(copyErr, closeErr)
 }
 
 func restoreSnapshot(backup, target string) error {
 	if err := os.Rename(backup, target); err == nil {
 		return nil
 	}
-	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+	tmp := target + ".restore"
+	if err := copyFile(backup, tmp, 0o755); err != nil {
 		return err
 	}
-	return os.Rename(backup, target)
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Remove(backup)
 }

@@ -154,17 +154,56 @@ func (s *Server) nfqws2ErrorsGet() map[string]any {
 
 func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, error) {
 	out := map[string]any{"ok": true, "up_to_date": false, "installed": 0, "restart_required": false}
+	mode := strings.TrimSpace(r.FormValue("mode"))
+	if mode == "" {
+		mode = "full"
+	}
+	preCtx, preCancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer preCancel()
+	u := deploy.New(s.paths)
+	off := deploy.ResolveOfflineBundle(os.Getenv)
+	var check *deploy.CheckResult
+	var checkErr error
+	if !off.Offline {
+		check, checkErr = u.CheckLatest(preCtx)
+	}
+	if checkErr != nil && check == nil {
+		return nil, errf(http.StatusBadGateway, "Не удалось проверить обновление: "+checkErr.Error())
+	}
+	var latest *deploy.Latest
+	if check != nil {
+		latest = check.Latest
+	}
+	preflight, err := deploy.CheckPreflight(s.paths, latest, mode)
+	if err != nil {
+		return nil, errf(http.StatusInternalServerError, "Проверка места: "+err.Error())
+	}
+	out["preflight"] = preflight
+	if !preflight.CanUpdate {
+		return nil, errf(http.StatusInsufficientStorage, fmt.Sprintf("Недостаточно flash: свободно %d байт, ориентировочно нужно %d", preflight.FlashAvailable, preflight.FlashRequired))
+	}
+	if !preflight.CanProceedWithoutBackup {
+		return nil, errf(http.StatusInsufficientStorage, fmt.Sprintf("Недостаточно /tmp даже для загрузки и распаковки обновления: свободно %d байт, ориентировочно нужно %d", preflight.TmpAvailable, preflight.TmpBaseRequired))
+	}
+	if !preflight.CanRollback && r.FormValue("continue_without_backup") != "1" {
+		return map[string]any{"ok": false, "needs_confirmation": true, "warning": "В /tmp недостаточно места для резервной копии. Можно продолжить без отката на свой риск.", "preflight": preflight}, nil
+	}
+	rollbackAvailable := false
 	// Создать полный pre-update backup до Apply; при ошибке обновление не начинать.
-	if s.app != nil {
+	if s.app != nil && preflight.CanRollback {
 		info, err := s.app.CreatePreUpdateBackup()
 		if err != nil {
 			return nil, errf(http.StatusInternalServerError, "Обновление отменено: pre-update backup не создан: "+err.Error())
 		}
 		out["pre_update_backup"] = info.Name
+		rollbackAvailable = true
+	} else if s.app != nil {
+		out["rollback_available"] = false
+		out["warning"] = "Обновление выполняется без резервной копии; откат может быть невозможен."
 	}
 	rollbackFailure := func(status int, message string, cause error) (map[string]any, error) {
 		detail := message + cause.Error()
-		if s.app != nil {
+		if s.app != nil && rollbackAvailable {
 			if rerr := s.app.RollbackPreUpdateBackup(); rerr != nil {
 				detail += "; rollback: " + rerr.Error()
 				s.app.WriteServiceWarnings([]string{cause.Error(), "rollback: " + rerr.Error()})
@@ -174,15 +213,12 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		}
 		return nil, errf(status, detail)
 	}
-	u := deploy.New(s.paths)
-	off := deploy.ResolveOfflineBundle(os.Getenv)
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
 
 	var (
 		installed int
 		upToDate  bool
-		err       error
 	)
 	if off.Offline && off.Bundle != nil {
 		out["offline"] = true
@@ -205,9 +241,8 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 			u.Offline = true
 		}
 		rep, rerr := u.Run(ctx, deploy.RunOptions{Variant: deploy.VariantFull})
-		err = rerr
-		if err != nil {
-			return rollbackFailure(http.StatusBadGateway, "Обновление не удалось: ", err)
+		if rerr != nil {
+			return rollbackFailure(http.StatusBadGateway, "Обновление не удалось: ", rerr)
 		}
 		if rep != nil {
 			upToDate = rep.UpToDate
@@ -228,7 +263,10 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 				verifyOK = false
 				out["post_update_verify"] = "fail"
 				out["post_update_verify_detail"] = err.Error()
-				if rerr := s.app.RollbackPreUpdateBackup(); rerr != nil {
+				if !rollbackAvailable {
+					out["rollback"] = "unavailable"
+					out["restart_skipped"] = "post-update verify failed; backup was unavailable"
+				} else if rerr := s.app.RollbackPreUpdateBackup(); rerr != nil {
 					out["rollback"] = "fail"
 					out["rollback_detail"] = rerr.Error()
 					s.app.WriteServiceWarnings([]string{err.Error(), "rollback: " + rerr.Error()})
@@ -253,6 +291,34 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		}
 	}
 	return out, nil
+}
+
+func (s *Server) postUpdatePreflight(r *http.Request, p params) (map[string]any, error) {
+	mode := strings.TrimSpace(p.Get("mode"))
+	if mode == "" {
+		mode = "full"
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	u := deploy.New(s.paths)
+	off := deploy.ResolveOfflineBundle(os.Getenv)
+	var check *deploy.CheckResult
+	var err error
+	if !off.Offline {
+		check, err = u.CheckLatest(ctx)
+	}
+	if err != nil && check == nil {
+		return nil, errf(http.StatusBadGateway, "Проверка релиза: "+err.Error())
+	}
+	var latest *deploy.Latest
+	if check != nil {
+		latest = check.Latest
+	}
+	report, err := deploy.CheckPreflight(s.paths, latest, mode)
+	if err != nil {
+		return nil, errf(http.StatusBadRequest, err.Error())
+	}
+	return map[string]any{"ok": true, "preflight": report}, nil
 }
 
 // schedulePostUpdateRestarts — отложенный рестарт webui + zapret2 (новый Lua в nfqws2).

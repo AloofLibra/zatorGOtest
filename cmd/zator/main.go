@@ -451,6 +451,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	force := fs.Bool("force", false, "скачать релиз даже если версия совпадает")
+	noBackup := fs.Bool("continue-without-backup", false, "продолжить без резервной копии при нехватке /tmp")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -464,13 +465,55 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "zator не установлен в %s — сначала: zator install\n", a.Paths.ZatorRoot)
 		return 1
 	}
-	if info, err := a.CreatePreUpdateBackup(); err != nil {
-		fmt.Fprintf(stderr, "обновление отменено: pre-update backup не создан: %v\n", err)
+	u := deploy.New(a.Paths)
+	off := deploy.ResolveOfflineBundle(os.Getenv)
+	var check *deploy.CheckResult
+	var checkErr error
+	if !off.Offline {
+		check, checkErr = u.CheckLatest(context.Background())
+	}
+	if checkErr != nil && check == nil {
+		fmt.Fprintf(stderr, "не удалось проверить обновление: %v\n", checkErr)
 		return 1
+	}
+	var latest *deploy.Latest
+	if check != nil {
+		latest = check.Latest
+	}
+	preflight, err := deploy.CheckPreflight(a.Paths, latest, "full")
+	if err != nil {
+		fmt.Fprintf(stderr, "проверка места: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Память: доступно RAM %d, /tmp %d, flash %d байт; оценка /tmp %d, flash %d байт\n",
+		preflight.RAMAvailable, preflight.TmpAvailable, preflight.FlashAvailable, preflight.TmpRequired, preflight.FlashRequired)
+	if !preflight.CanUpdate {
+		fmt.Fprintf(stderr, "обновление отменено: недостаточно flash (свободно %d, нужно около %d байт)\n", preflight.FlashAvailable, preflight.FlashRequired)
+		return 1
+	}
+	if !preflight.CanProceedWithoutBackup {
+		fmt.Fprintf(stderr, "обновление отменено: недостаточно /tmp для самого архива и staging (свободно %d, нужно около %d байт)\n", preflight.TmpAvailable, preflight.TmpBaseRequired)
+		return 1
+	}
+	if !preflight.CanRollback && !*noBackup {
+		fmt.Fprintf(stderr, "В /tmp недостаточно места для резервной копии (свободно %d, ориентировочно нужно %d байт). Для продолжения на свой риск повторите с -continue-without-backup.\n", preflight.TmpAvailable, preflight.TmpRequired)
+		return 1
+	}
+	if preflight.CanRollback {
+		if info, err := a.CreatePreUpdateBackup(); err != nil {
+			fmt.Fprintf(stderr, "обновление отменено: pre-update backup не создан: %v\n", err)
+			return 1
+		} else {
+			fmt.Fprintf(stdout, "pre-update backup: %s\n", info.Name)
+		}
 	} else {
-		fmt.Fprintf(stdout, "pre-update backup: %s\n", info.Name)
+		fmt.Fprintln(stderr, "ПРЕДУПРЕЖДЕНИЕ: обновление продолжится без резервной копии; откат может быть невозможен.")
 	}
 	rollback := func() {
+		if !preflight.CanRollback {
+			fmt.Fprintln(stderr, "откат недоступен: обновление начато без резервной копии")
+			return
+		}
 		if rerr := a.RollbackPreUpdateBackup(); rerr != nil {
 			fmt.Fprintf(stderr, "rollback: %v\n", rerr)
 		} else {
@@ -485,8 +528,6 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "zator %s: встроенные ресурсы обновлены\n", zator.Version())
 
-	u := deploy.New(a.Paths)
-	off := deploy.ResolveOfflineBundle(os.Getenv)
 	if off.Offline {
 		if off.Bundle == nil {
 			fmt.Fprintln(stdout, "офлайн-режим: бандл не найден (ZATOR_BUNDLE_DIR / vendor+zator-*.tar.gz)")

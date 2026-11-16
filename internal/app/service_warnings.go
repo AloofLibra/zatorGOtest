@@ -9,16 +9,20 @@ import (
 )
 
 const (
-	serviceWarningsFile   = "service_warnings.txt"
-	postUpdateBackupFile  = "pre_update_backup.name"
-	postUpdateVerifyFile  = "post_update_verify.txt"
-	blockFullRestoreFile  = "block_full_restore.flag"
+	serviceWarningsFile  = "service_warnings.txt"
+	postUpdateBackupFile = "pre_update_backup.name"
+	postUpdateVerifyFile = "post_update_verify.txt"
+	blockFullRestoreFile = "block_full_restore.flag"
 )
+
+func updateStatusPath(name string) string {
+	return filepath.Join(os.TempDir(), "zator", "update", name)
+}
 
 // WriteServiceWarnings сохраняет soft-ошибки install/start для UI Overview.
 func (a *App) WriteServiceWarnings(msgs []string) {
-	_ = os.MkdirAll(a.Paths.StateDir, 0o755)
-	path := filepath.Join(a.Paths.StateDir, serviceWarningsFile)
+	path := updateStatusPath(serviceWarningsFile)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	if len(msgs) == 0 {
 		_ = os.Remove(path)
 		return
@@ -28,12 +32,12 @@ func (a *App) WriteServiceWarnings(msgs []string) {
 
 // ClearServiceWarnings снимает marker после успешного старта zapret2.
 func (a *App) ClearServiceWarnings() {
-	_ = os.Remove(filepath.Join(a.Paths.StateDir, serviceWarningsFile))
+	_ = os.Remove(updateStatusPath(serviceWarningsFile))
 }
 
 // ServiceWarnings читает сохранённые предупреждения служб.
 func (a *App) ServiceWarnings() []string {
-	b, err := os.ReadFile(filepath.Join(a.Paths.StateDir, serviceWarningsFile))
+	b, err := os.ReadFile(updateStatusPath(serviceWarningsFile))
 	if err != nil {
 		return nil
 	}
@@ -49,14 +53,14 @@ func (a *App) ServiceWarnings() []string {
 
 // RememberPreUpdateBackup запоминает имя архива до update (для отката UI).
 func (a *App) RememberPreUpdateBackup(name string) {
-	_ = os.MkdirAll(a.Paths.StateDir, 0o755)
-	_ = fsutil.AtomicWriteFile(filepath.Join(a.Paths.StateDir, postUpdateBackupFile), []byte(name+"\n"), 0o644)
-	_ = fsutil.AtomicWriteFile(filepath.Join(a.Paths.StateDir, blockFullRestoreFile), []byte("1\n"), 0o644)
+	_ = os.MkdirAll(filepath.Join(os.TempDir(), "zator", "update"), 0o755)
+	_ = fsutil.AtomicWriteFile(updateStatusPath(postUpdateBackupFile), []byte(name+"\n"), 0o644)
+	_ = fsutil.AtomicWriteFile(updateStatusPath(blockFullRestoreFile), []byte("1\n"), 0o644)
 }
 
 // LastPreUpdateBackup возвращает имя последнего pre-update бэкапа.
 func (a *App) LastPreUpdateBackup() string {
-	b, err := os.ReadFile(filepath.Join(a.Paths.StateDir, postUpdateBackupFile))
+	b, err := os.ReadFile(updateStatusPath(postUpdateBackupFile))
 	if err != nil {
 		return ""
 	}
@@ -65,13 +69,13 @@ func (a *App) LastPreUpdateBackup() string {
 
 // BlockFullRestore — после update ModeFull из старого архива запрещён.
 func (a *App) BlockFullRestore() bool {
-	_, err := os.Stat(filepath.Join(a.Paths.StateDir, blockFullRestoreFile))
+	_, err := os.Stat(updateStatusPath(blockFullRestoreFile))
 	return err == nil
 }
 
 // ClearBlockFullRestore снимает запрет (ручной clear или успешный smart restore).
 func (a *App) ClearBlockFullRestore() {
-	_ = os.Remove(filepath.Join(a.Paths.StateDir, blockFullRestoreFile))
+	_ = os.Remove(updateStatusPath(blockFullRestoreFile))
 }
 
 // WritePostUpdateVerify сохраняет итог post-update проверки (ok|fail).
@@ -85,18 +89,18 @@ func (a *App) WritePostUpdateVerify(ok bool, detail string) {
 
 // WritePostUpdateVerifyStatus пишет произвольный статус (ok|fail|warn).
 func (a *App) WritePostUpdateVerifyStatus(status, detail string) {
-	_ = os.MkdirAll(a.Paths.StateDir, 0o755)
+	_ = os.MkdirAll(filepath.Join(os.TempDir(), "zator", "update"), 0o755)
 	status = strings.TrimSpace(status)
 	if status == "" {
 		status = "fail"
 	}
-	_ = fsutil.AtomicWriteFile(filepath.Join(a.Paths.StateDir, postUpdateVerifyFile),
+	_ = fsutil.AtomicWriteFile(updateStatusPath(postUpdateVerifyFile),
 		[]byte(status+"\n"+strings.TrimSpace(detail)+"\n"), 0o644)
 }
 
 // PostUpdateVerifyStatus — "ok"|"fail"|"warn"|"" .
 func (a *App) PostUpdateVerifyStatus() (status, detail string) {
-	b, err := os.ReadFile(filepath.Join(a.Paths.StateDir, postUpdateVerifyFile))
+	b, err := os.ReadFile(updateStatusPath(postUpdateVerifyFile))
 	if err != nil {
 		return "", ""
 	}

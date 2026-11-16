@@ -74,7 +74,7 @@ type HTTPDoer interface {
 }
 
 // CacheDir возвращает каталог кэша провайдера для раскладки p.
-func CacheDir(p paths.Paths) string { return filepath.Join(p.StateDir, "cache") }
+func CacheDir(_ paths.Paths) string { return filepath.Join(os.TempDir(), "zator", "cache") }
 
 // CachePath возвращает путь к provider.txt.
 func CachePath(p paths.Paths) string { return filepath.Join(CacheDir(p), CacheFileName) }

@@ -48,6 +48,7 @@ func init() {
 		"config_raw":        (*Server).postConfigRaw,
 		"config":            (*Server).postConfigRaw,
 		"update_apply":      (*Server).postUpdateApply,
+		"update_preflight":  (*Server).postUpdatePreflight,
 		"strategy_register": (*Server).postStrategyRegister,
 	}
 	for _, t := range toggles {

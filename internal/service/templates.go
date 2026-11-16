@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -336,9 +337,7 @@ func (m *manager) templateData(u Unit) TemplateData {
 		runDir = "/opt/var/run"
 	}
 	d.PIDFile = runDir + "/" + string(u) + ".pid"
-	if m.cfg.Paths.StateDir != "" {
-		d.LogFile = slash(filepath.Join(m.cfg.Paths.StateDir, string(u)+".log"))
-	}
+	d.LogFile = slash(filepath.Join(os.TempDir(), "zator", "logs", string(u)+".log"))
 	return d
 }
 
