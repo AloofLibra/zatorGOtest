@@ -258,3 +258,47 @@ func TestInstallKeepsLocksAndSeedsZapretConfig(t *testing.T) {
 		t.Errorf("config затёрт: %q", data)
 	}
 }
+
+func TestUpdatePreservesUserStateAndFiles(t *testing.T) {
+	a := newTestApp(t)
+	if err := os.MkdirAll(a.Paths.ZapretRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Install(); err != nil {
+		t.Fatal(err)
+	}
+	backup := filepath.Join(a.Paths.BackupDir, "z2r_backup_20261116_120000.tar")
+	files := map[string]string{
+		a.Paths.ZapretConfig:    "CUSTOM_USER_CONFIG=kept\n",
+		a.Paths.LockedTSV:       "2\ttls\t16\n",
+		a.Paths.LockedManualTSV: "3\ttls\t7\n",
+		a.Paths.AutoLockedTSV:   "4\ttls\t12\n",
+		filepath.Join(a.Paths.StateOrchestraDir(), "mode_override.tsv"):                 "2\tclone\n",
+		filepath.Join(a.Paths.StateOrchestraDir(), "blob_override.tsv"):                 "2\tcustom\n",
+		filepath.Join(a.Paths.StateOrchestraDir(), "sni_override.tsv"):                  "2\tvideo.example\n",
+		filepath.Join(a.Paths.StateOrchestraDir(), "clonesize.tsv"):                     "2\t1200\n",
+		filepath.Join(a.Paths.StateOrchestraDir(), "scopes", "clients", "profile2.tsv"): "scope data\n",
+		filepath.Join(a.Paths.ListsDir, "netrogat.txt"):                                 "private.example\n",
+		filepath.Join(a.Paths.ExtraStratsDir, "TCP_Custom.txt"):                         "user.example\n",
+		filepath.Join(a.Paths.FakeDir, "custom_tls.bin"):                                "user TLS blob bytes",
+		filepath.Join(a.Paths.StateDir, "supersweep", "last-report.tsv"):                "completed report\n",
+		backup: "backup archive bytes",
+	}
+	for path, want := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(want), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.Update(); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range files {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Errorf("Update changed or removed %s: got %q, err=%v; want %q", path, got, err, want)
+		}
+	}
+}
