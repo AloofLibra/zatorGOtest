@@ -167,13 +167,14 @@ func (s *Server) tlsBlobGet(cfg *config.Config) (any, error) {
 	blobMap, _ := s.store.OverrideMap(orchestra.OverrideBlob)
 	sniMap, _ := s.store.OverrideMap(orchestra.OverrideSNI)
 	sizeMap, _ := s.store.OverrideMap(orchestra.OverrideCloneSize)
+	modeMap, _ := s.store.OverrideMap(orchestra.OverrideMode)
 	for _, id := range orchestra.OverrideProfiles {
 		k := strconv.Itoa(id)
 		blobs[k] = blobDisplay(blobMap[k])
 		snis[k] = sniMap[k]
 		sizes[k] = sizeMap[k]
-		mode, err := s.store.GetFakeMode(k)
-		if err != nil {
+		mode := modeMap[k]
+		if mode == "" {
 			mode = orchestra.ModeClassic
 		}
 		modes[k] = mode

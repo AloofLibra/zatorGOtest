@@ -10,32 +10,35 @@
 //   - Manager — менеджер слушателя (внешний C-сниффер или режим ubus).
 package googlevideo
 
-import (
-	"strconv"
-	"strings"
-)
+import "strings"
 
 // ParseIPv4 разбирает строгую десятичную запись a.b.c.d: ровно четыре октета
 // 0..255 без ведущих нулей, пробелов и прочих символов.
 func ParseIPv4(s string) (o [4]int, ok bool) {
-	if s == "" || strings.Trim(s, "0123456789.") != "" {
+	if s == "" {
 		return o, false
 	}
-	parts := strings.Split(s, ".")
-	if len(parts) != 4 {
-		return o, false
-	}
-	for i, p := range parts {
-		if p == "" || len(p) > 3 || (len(p) > 1 && p[0] == '0') {
-			return o, false
+	part, value, digits := 0, 0, 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == '.' {
+			if part == len(o) || digits == 0 || digits > 3 || digits > 1 && s[i-digits] == '0' {
+				return [4]int{}, false
+			}
+			o[part] = value
+			part++
+			value, digits = 0, 0
+			continue
 		}
-		n, err := strconv.Atoi(p)
-		if err != nil || n > 255 {
-			return o, false
+		if s[i] < '0' || s[i] > '9' || digits == 3 {
+			return [4]int{}, false
 		}
-		o[i] = n
+		value = value*10 + int(s[i]-'0')
+		if value > 255 {
+			return [4]int{}, false
+		}
+		digits++
 	}
-	return o, true
+	return o, part == len(o)
 }
 
 // PublicIPv4 сообщает, что s — строгий IPv4 вне зарезервированных диапазонов

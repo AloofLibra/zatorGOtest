@@ -764,31 +764,11 @@ func (m *Manager) RestoreFile(archive string, opts RestoreOptions) (*Result, err
 		})
 	}
 
-	// Config (до записи файлов: ошибка не должна оставить частичное состояние).
-	switch opts.Mode {
-	case ModeFull:
-		data, err := os.ReadFile(oldCfg)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil, ErrNoConfig
-			}
-			return nil, err
-		}
-		if err := writeLocked(m.Paths.ZapretConfig, data); err != nil {
+	if err := m.restoreConfig(oldCfg, opts.Mode, snapshot, writeLocked, res); err != nil {
+		if !errors.Is(err, ErrNoConfig) {
 			rollback()
-			return nil, err
 		}
-		res.ConfigReplaced = true
-	case ModeSmart:
-		if err := snapshot(m.Paths.ZapretConfig); err != nil {
-			return nil, err
-		}
-		applied, err := m.smartApply(oldCfg, m.Paths.ZapretConfig)
-		if err != nil {
-			rollback()
-			return nil, err
-		}
-		res.SmartApplied = applied
+		return nil, err
 	}
 
 	files, err := m.restoreStateSnap(tmp, snapshot)
@@ -798,6 +778,33 @@ func (m *Manager) RestoreFile(archive string, opts RestoreOptions) (*Result, err
 		return res, err
 	}
 	return res, nil
+}
+
+func (m *Manager) restoreConfig(oldCfg string, mode Mode, snapshot func(string) error, writeLocked func(string, []byte) error, res *Result) error {
+	switch mode {
+	case ModeFull:
+		data, err := os.ReadFile(oldCfg)
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrNoConfig
+		}
+		if err != nil {
+			return err
+		}
+		if err := writeLocked(m.Paths.ZapretConfig, data); err != nil {
+			return err
+		}
+		res.ConfigReplaced = true
+	case ModeSmart:
+		if err := snapshot(m.Paths.ZapretConfig); err != nil {
+			return err
+		}
+		applied, err := m.smartApply(oldCfg, m.Paths.ZapretConfig)
+		if err != nil {
+			return err
+		}
+		res.SmartApplied = applied
+	}
+	return nil
 }
 
 type snapEntry struct {

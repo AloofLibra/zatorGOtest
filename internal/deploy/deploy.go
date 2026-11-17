@@ -700,37 +700,24 @@ func (r *ApplyResult) finishTransaction(commit bool) error {
 	return finish(commit)
 }
 
-type undoOp struct {
-	target string
-	backup string // "" — файла не было
-}
-
-// Apply проверяет staging по манифесту и раскладывает файлы. До проверки всех
-// файлов на диск ничего не пишется. При ошибке заменённые файлы возвращаются
-// на место, созданные — удаляются.
-func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error) {
+func (u *Updater) planFiles(staging string) ([]plannedFile, *ApplyResult, map[string]string, error) {
 	entries, err := LoadManifest(staging)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	if err := VerifyStaging(staging, entries); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	managed, err := readManagedHashes(u.Paths)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	managedChanged := false
-	type planned struct {
-		e      ManifestEntry
-		target string
-	}
-	var plan []planned
+	var plan []plannedFile
 	res := &ApplyResult{}
 	for _, e := range entries {
 		target, skip, err := u.resolveDest(e.Dest)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 		if skip {
 			res.Skipped++
@@ -741,8 +728,30 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 		} else {
 			res.HasCore = true
 		}
-		plan = append(plan, planned{e, target})
+		plan = append(plan, plannedFile{e, target})
 	}
+	return plan, res, managed, nil
+}
+
+type undoOp struct {
+	target string
+	backup string // "" — файла не было
+}
+
+type plannedFile struct {
+	entry  ManifestEntry
+	target string
+}
+
+// Apply проверяет staging по манифесту и раскладывает файлы. До проверки всех
+// файлов на диск ничего не пишется. При ошибке заменённые файлы возвращаются
+// на место, созданные — удаляются.
+func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error) {
+	plan, res, managed, err := u.planFiles(staging)
+	if err != nil {
+		return nil, err
+	}
+	managedChanged := false
 
 	backupDir, err := os.MkdirTemp(TempDir(), "rollback-")
 	if err != nil {
@@ -787,80 +796,11 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 	}
 
 	for i, pl := range plan {
-		e, target := pl.e, pl.target
-		st, statErr := os.Lstat(target)
-		exists := statErr == nil
-		if exists && st.Mode()&os.ModeSymlink != 0 {
-			return nil, withRollback(fmt.Errorf("deploy: %s — символическая ссылка, замена отклонена", target))
-		}
-		if exists && e.Class == ClassKeepIfExists {
-			res.Kept++
-			continue
-		}
-		if e.Class == ClassUpdateIfUnmodified && exists {
-			currentSHA, hashErr := fetch.SHA256File(target)
-			if hashErr != nil {
-				return nil, withRollback(hashErr)
-			}
-			if currentSHA == e.SHA256 {
-				res.Unchanged++
-				if managed[e.Path] != e.SHA256 {
-					managed[e.Path] = e.SHA256
-					managedChanged = true
-				}
-				continue
-			}
-			baseline, tracked := managed[e.Path]
-			if !tracked || !strings.EqualFold(currentSHA, baseline) {
-				// No trustworthy baseline or local edits: preserve this file.
-				res.Kept++
-				continue
-			}
-		}
-		if exists && st.Mode().IsRegular() {
-			if sum, err := fetch.SHA256File(target); err == nil && sum == e.SHA256 {
-				res.Unchanged++
-				continue
-			}
-		}
-		if exists && !st.Mode().IsRegular() {
-			return nil, withRollback(fmt.Errorf("deploy: %s не является обычным файлом", target))
-		}
-		data, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(e.Path)))
+		changed, err := u.applyPlannedFile(staging, backupDir, i, pl, managed, res, &undo)
 		if err != nil {
 			return nil, withRollback(err)
 		}
-		op := undoOp{target: target}
-		if exists {
-			op.backup = filepath.Join(backupDir, fmt.Sprintf("%d", i))
-			old, err := os.ReadFile(target)
-			if err != nil {
-				return nil, withRollback(err)
-			}
-			if err := os.WriteFile(op.backup, old, 0o600); err != nil {
-				return nil, withRollback(err)
-			}
-		}
-		perm := os.FileMode(0o644)
-		if e.Exec {
-			perm = 0o755
-		}
-		undo = append(undo, op)
-		if err := fsutil.AtomicWriteFile(target, data, perm); err != nil {
-			return nil, withRollback(fmt.Errorf("deploy: установка %s: %w", target, err))
-		}
-		if err := os.Chmod(target, perm); err != nil && perm == 0o755 {
-			return nil, withRollback(err)
-		}
-		res.Installed++
-		res.Files = append(res.Files, target)
-		if e.Class == ClassUpdateIfUnmodified {
-			managed[e.Path] = e.SHA256
-			managedChanged = true
-		}
-		if u.ScriptDest != "" && target == u.ScriptDest {
-			res.ScriptUpdated = true
-		}
+		managedChanged = managedChanged || changed
 	}
 	if managedChanged {
 		ledger := managedHashesPath(u.Paths)
@@ -914,6 +854,83 @@ func (u *Updater) Apply(staging string, opts ApplyOptions) (*ApplyResult, error)
 		cleanupBackup = false
 	}
 	return res, nil
+}
+
+func (u *Updater) applyPlannedFile(staging, backupDir string, index int, pl plannedFile, managed map[string]string, res *ApplyResult, undo *[]undoOp) (managedChanged bool, err error) {
+	e, target := pl.entry, pl.target
+	st, statErr := os.Lstat(target)
+	exists := statErr == nil
+	if exists && st.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("deploy: %s — символическая ссылка, замена отклонена", target)
+	}
+	if exists && e.Class == ClassKeepIfExists {
+		res.Kept++
+		return false, nil
+	}
+	if e.Class == ClassUpdateIfUnmodified && exists {
+		currentSHA, hashErr := fetch.SHA256File(target)
+		if hashErr != nil {
+			return false, hashErr
+		}
+		if currentSHA == e.SHA256 {
+			res.Unchanged++
+			if managed[e.Path] != e.SHA256 {
+				managed[e.Path] = e.SHA256
+				return true, nil
+			}
+			return false, nil
+		}
+		baseline, tracked := managed[e.Path]
+		if !tracked || !strings.EqualFold(currentSHA, baseline) {
+			res.Kept++
+			return false, nil
+		}
+	}
+	if exists && st.Mode().IsRegular() && e.Class != ClassUpdateIfUnmodified {
+		if sum, err := fetch.SHA256File(target); err == nil && sum == e.SHA256 {
+			res.Unchanged++
+			return false, nil
+		}
+	}
+	if exists && !st.Mode().IsRegular() {
+		return false, fmt.Errorf("deploy: %s не является обычным файлом", target)
+	}
+	data, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(e.Path)))
+	if err != nil {
+		return false, err
+	}
+	op := undoOp{target: target}
+	if exists {
+		op.backup = filepath.Join(backupDir, fmt.Sprintf("%d", index))
+		old, err := os.ReadFile(target)
+		if err != nil {
+			return false, err
+		}
+		if err := os.WriteFile(op.backup, old, 0o600); err != nil {
+			return false, err
+		}
+	}
+	perm := os.FileMode(0o644)
+	if e.Exec {
+		perm = 0o755
+	}
+	*undo = append(*undo, op)
+	if err := fsutil.AtomicWriteFile(target, data, perm); err != nil {
+		return false, fmt.Errorf("deploy: установка %s: %w", target, err)
+	}
+	if err := os.Chmod(target, perm); err != nil && perm == 0o755 {
+		return false, err
+	}
+	res.Installed++
+	res.Files = append(res.Files, target)
+	if e.Class == ClassUpdateIfUnmodified {
+		managed[e.Path] = e.SHA256
+		managedChanged = true
+	}
+	if u.ScriptDest != "" && target == u.ScriptDest {
+		res.ScriptUpdated = true
+	}
+	return managedChanged, nil
 }
 
 // mergeVersion строит итоговую version.env: данные архива заменяют только те

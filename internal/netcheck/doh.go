@@ -73,6 +73,11 @@ var ErrDoHUnavailable = errors.New("netcheck: DoH-резолверы недос�
 
 var labelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
+var dohClients = [2]*http.Client{
+	newDoHClient(false),
+	newDoHClient(true),
+}
+
 // ValidDomain проверяет имя для DNS-запроса (как фильтр в z2r_doh_a_lookup).
 func ValidDomain(domain string) bool {
 	if len(domain) == 0 || len(domain) > 253 {
@@ -119,11 +124,17 @@ func (d *DoH) httpClient(s DoHSource) *http.Client {
 	if d.Client != nil {
 		return d.Client
 	}
+	if s.Insecure {
+		return dohClients[1]
+	}
+	return dohClients[0]
+}
+
+func newDoHClient(insecure bool) *http.Client {
 	tr := &http.Transport{
 		Proxy:              nil,
-		TLSClientConfig:    &tls.Config{InsecureSkipVerify: s.Insecure, MinVersion: tls.VersionTLS12}, //nolint:gosec // доступ по IP.
+		TLSClientConfig:    &tls.Config{InsecureSkipVerify: insecure, MinVersion: tls.VersionTLS12}, //nolint:gosec // доступ по IP.
 		ForceAttemptHTTP2:  true,
-		DisableKeepAlives:  true,
 		DisableCompression: true,
 		DialContext:        (&net.Dialer{Timeout: DefaultConnectTimeout}).DialContext,
 	}
@@ -146,9 +157,6 @@ func (d *DoH) ua() string {
 
 func (d *DoH) do(ctx context.Context, s DoHSource, req *http.Request) ([]byte, error) {
 	cl := d.httpClient(s)
-	if t, ok := cl.Transport.(*http.Transport); ok && d.Client == nil {
-		defer t.CloseIdleConnections()
-	}
 	resp, err := cl.Do(req)
 	if err != nil {
 		return nil, err

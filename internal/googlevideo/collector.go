@@ -423,10 +423,26 @@ func (c *Collector) isReported(host, ip string, now int64) bool {
 
 // spoolFiles возвращает pending.tsv, его .sending.* и pending.retry.* из того же каталога.
 func (c *Collector) spoolFiles() []string {
+	dir := filepath.Dir(c.cfg.PendingFile)
+	entries, err := os.ReadDir(dir)
 	files := []string{c.cfg.PendingFile}
-	files = append(files, c.retryFiles()...)
-	files = append(files, c.sendingFiles()...)
-	return files
+	if err != nil {
+		return files
+	}
+	var retry, sending []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(name, "pending.retry.") {
+			retry = append(retry, filepath.Join(dir, name))
+		} else if strings.HasPrefix(name, filepath.Base(c.cfg.PendingFile)+".sending.") {
+			sending = append(sending, filepath.Join(dir, name))
+		}
+	}
+	files = append(files, retry...)
+	return append(files, sending...)
 }
 
 func (c *Collector) retryFiles() []string {
@@ -465,25 +481,37 @@ func (c *Collector) isQueued(host, ip string) bool {
 }
 
 func (c *Collector) appendPending(row PendingRow) error {
+	_, err := c.appendPendingBatch([]PendingRow{row})
+	return err
+}
+
+func (c *Collector) appendPendingBatch(rows []PendingRow) (int, error) {
+	if len(rows) == 0 {
+		return 0, nil
+	}
 	if err := os.MkdirAll(filepath.Dir(c.cfg.PendingFile), 0o755); err != nil {
-		return err
+		return 0, err
 	}
 	f, err := os.OpenFile(c.cfg.PendingFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, werr := f.WriteString(row.TSV() + "\n")
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
+	written := 0
+	for _, row := range rows {
+		if _, err := f.WriteString(row.TSV() + "\n"); err != nil {
+			_ = f.Close()
+			return written, err
+		}
+		written++
 	}
-	if werr != nil {
-		return werr
+	if err := f.Close(); err != nil {
+		return written, err
 	}
 	lines := readLines(c.cfg.PendingFile)
 	if len(lines) > MaxStateRows {
-		return writeLines(c.cfg.PendingFile, tail(lines, MaxStateRows))
+		return written, writeLines(c.cfg.PendingFile, tail(lines, MaxStateRows))
 	}
-	return nil
+	return written, nil
 }
 
 // --- запросы состояния ---
@@ -602,8 +630,21 @@ func (c *Collector) QueueLocal() (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now().Unix()
-	queued := 0
 	maxAge := int64(ObservationMaxAge / time.Second)
+	cutoff := now - int64(ReportedRetention/time.Second)
+	reported := make(map[[2]string]struct{})
+	for _, r := range ReadReportedFile(c.cfg.ReportedFile) {
+		if r.ReportedAt >= cutoff {
+			reported[[2]string{r.Host, r.IP}] = struct{}{}
+		}
+	}
+	queued := make(map[[2]string]struct{})
+	for _, file := range c.spoolFiles() {
+		for _, r := range ReadPendingFile(file) {
+			queued[[2]string{r.Host, r.IP}] = struct{}{}
+		}
+	}
+	var pending []PendingRow
 	for _, r := range ReadLocalFile(c.cfg.LocalFile) {
 		observed := r.Observed
 		if observed <= 0 {
@@ -618,13 +659,15 @@ func (c *Collector) QueueLocal() (int, error) {
 		if !PublicIPv4(r.IP) || !ValidHostname(r.Host) {
 			continue
 		}
-		if c.isReported(r.Host, r.IP, now) || c.isQueued(r.Host, r.IP) {
+		key := [2]string{r.Host, r.IP}
+		if _, ok := reported[key]; ok {
 			continue
 		}
-		if err := c.appendPending(PendingRow{IP: r.IP, Observed: observed, Host: r.Host}); err != nil {
-			return queued, err
+		if _, ok := queued[key]; ok {
+			continue
 		}
-		queued++
+		queued[key] = struct{}{}
+		pending = append(pending, PendingRow{IP: r.IP, Observed: observed, Host: r.Host})
 	}
-	return queued, nil
+	return c.appendPendingBatch(pending)
 }

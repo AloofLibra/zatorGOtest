@@ -174,16 +174,20 @@ func containsEntry(lines []string, v string) bool {
 }
 
 // customRknRestore возвращает в TCP_Custom домены, оставшиеся только в locked.tsv.
-func (s *Server) customRknRestore(path string, lines []string) ([]string, bool) {
-	recs, err := s.store.ListLocks(orchestra.ScopeDefault)
-	if err != nil {
-		return lines, false
+func restoreCustomRkn(path string, lines []string, recs []orchestra.Record) ([]string, bool) {
+	seen := make(map[string]struct{}, len(lines))
+	for _, line := range listEntries(lines) {
+		seen[line] = struct{}{}
 	}
 	changed := false
 	for _, r := range recs {
-		if !orchestra.IsCustomDomain(r.Profile) || containsEntry(lines, r.Profile) {
+		if !orchestra.IsCustomDomain(r.Profile) {
 			continue
 		}
+		if _, ok := seen[r.Profile]; ok {
+			continue
+		}
+		seen[r.Profile] = struct{}{}
 		lines = append(lines, r.Profile)
 		changed = true
 	}
@@ -212,15 +216,36 @@ func (s *Server) domainsList(d listDef, scope string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	var locks []orchestra.Record
 	if d.custom {
-		lines, _ = s.customRknRestore(path, lines)
+		locks, err = s.store.ListLocks(scope)
+		if err != nil {
+			locks = nil
+		}
+		restoreLocks := locks
+		if scope != orchestra.ScopeDefault {
+			restoreLocks, _ = s.store.ListLocks(orchestra.ScopeDefault)
+		}
+		lines, _ = restoreCustomRkn(path, lines, restoreLocks)
+	}
+	strategies := make(map[string]orchestra.Strategy, len(locks))
+	for _, lock := range locks {
+		if !orchestra.IsCustomDomain(lock.Profile) || lock.Proto != orchestra.ProtoTLS {
+			continue
+		}
+		if current, ok := strategies[lock.Profile]; ok && current != lock.Strategy {
+			strategies[lock.Profile] = orchestra.StrategyAuto
+		} else if !ok {
+			strategies[lock.Profile] = lock.Strategy
+		}
 	}
 	items := []map[string]any{}
 	for _, e := range listEntries(lines) {
 		item := map[string]any{"value": e}
 		if d.custom {
 			n := 0
-			if st, err := s.store.GetLock(scope, e, "tls"); err == nil && !st.IsAuto() {
+			key := strings.ToLower(e)
+			if st, ok := strategies[key]; ok && !st.IsAuto() {
 				n = int(st)
 			}
 			item["strategy"] = n
@@ -371,7 +396,9 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		return nil, errf(http.StatusInternalServerError, "Не удалось прочитать список: "+err.Error())
 	}
 	if d.custom {
-		lines, _ = s.customRknRestore(path, lines)
+		if locks, err := s.store.ListLocks(orchestra.ScopeDefault); err == nil {
+			lines, _ = restoreCustomRkn(path, lines, locks)
+		}
 	}
 	save := func(l []string) error {
 		if err := writeListLines(path, l); err != nil {
@@ -475,32 +502,7 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		if err := s.autoGuard(d); err != nil {
 			return nil, err
 		}
-		added, dups, skipped := 0, 0, 0
-		fields := strings.FieldsFunc(p.Raw("domain"), func(r rune) bool {
-			return r == '\n' || r == '\r' || r == '\t' || r == ' ' || r == ',' || r == ';'
-		})
-		for _, f := range fields {
-			if strings.HasPrefix(f, "#") {
-				continue
-			}
-			value, err := d.normalize(f)
-			if err != nil {
-				skipped++
-				continue
-			}
-			if containsEntry(lines, value) {
-				dups++
-				continue
-			}
-			lines = append(lines, value)
-			added++
-		}
-		if added > 0 {
-			if err := save(lines); err != nil {
-				return nil, err
-			}
-		}
-		return map[string]any{"ok": true, "added": added, "duplicates": dups, "skipped": skipped}, nil
+		return s.importDomains(d, p.Raw("domain"), lines, save)
 
 	case "clear":
 		if err := s.autoGuard(d); err != nil {
@@ -573,6 +575,40 @@ func (s *Server) domainsAction(r *http.Request, d listDef, p params, scope strin
 		return map[string]any{"ok": true, "check": s.checkDomain(r, domain)}, nil
 	}
 	return nil, errf(http.StatusBadRequest, "Неизвестное действие: "+action)
+}
+
+func (s *Server) importDomains(d listDef, raw string, lines []string, save func([]string) error) (map[string]any, error) {
+	added, dups, skipped := 0, 0, 0
+	known := make(map[string]struct{}, len(lines))
+	for _, entry := range listEntries(lines) {
+		known[entry] = struct{}{}
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == '\t' || r == ' ' || r == ',' || r == ';'
+	})
+	for _, field := range fields {
+		if strings.HasPrefix(field, "#") {
+			continue
+		}
+		value, err := d.normalize(field)
+		if err != nil {
+			skipped++
+			continue
+		}
+		if _, ok := known[value]; ok {
+			dups++
+			continue
+		}
+		known[value] = struct{}{}
+		lines = append(lines, value)
+		added++
+	}
+	if added > 0 {
+		if err := save(lines); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{"ok": true, "added": added, "duplicates": dups, "skipped": skipped}, nil
 }
 
 func (s *Server) googlevideoAction(p params) (map[string]any, error) {

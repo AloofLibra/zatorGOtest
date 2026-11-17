@@ -633,51 +633,7 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 		c.releaseLock()
 	}()
 
-	gvURL := "https://" + netcheck.FallbackClusterDomain + "/"
-	if c.cfg.ResolveMedia != nil && (r.p.QuickProfile == 0 || r.p.QuickProfile == 2) && ctx.Err() == nil {
-		media, err := c.cfg.ResolveMedia(ctx)
-		if err != nil {
-			r.p.MediaStatus = err.Error()
-			c.logf("YouTube media probe: UNKNOWN (%s)", r.p.MediaStatus)
-		} else {
-			r.mediaURLs = &media
-			r.p.MediaStatus = "ready"
-			c.logf("YouTube media URLs готовы: audio=%s video=%s", media.AudioHost, media.VideoHost)
-		}
-	}
-	if c.cfg.GVURL != nil {
-		if u := c.cfg.GVURL(ctx); u != "" {
-			gvURL = u
-		}
-	}
-	specs := r.specs(gvURL)
-	phases := Phases
-	if r.p.QuickProfile != 0 {
-		if r.p.QuickProfile == 3 {
-			specs = nil
-			phases = []string{WorkerRKN}
-		} else {
-			name := profileWorkers[r.p.QuickProfile]
-			var selected []workerSpec
-			for _, spec := range specs {
-				if spec.name != name {
-					continue
-				}
-				if r.p.QuickAddress != "" && len(r.targets) > 0 {
-					spec.url = r.targets[0].URL
-				}
-				selected = append(selected, spec)
-			}
-			specs = selected
-			phases = []string{name}
-		}
-	}
-	r.writeRegistry(specs)
-	r.collectPrev()
-	if r.p.MediaStatus != "" {
-		_ = fsutil.AtomicWriteFile(r.path(fileMediaStatus), []byte(r.p.MediaStatus+"\n"), 0o644)
-	}
-
+	specs, phases := r.prepareWorkers(ctx)
 	if ctx.Err() == nil {
 		r.alive = strings.Join(phases, ",")
 		if err := r.setState(StateRunning); err != nil {
@@ -723,6 +679,56 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 
 	rep, _ := ReadReport(c.cfg.Dir, ReportOptions{Final: true})
 	return rep, r.firstErr()
+}
+
+func (r *run) prepareWorkers(ctx context.Context) ([]workerSpec, []string) {
+	c := r.c
+	gvURL := "https://" + netcheck.FallbackClusterDomain + "/"
+	if c.cfg.ResolveMedia != nil && (r.p.QuickProfile == 0 || r.p.QuickProfile == 2) && ctx.Err() == nil {
+		media, err := c.cfg.ResolveMedia(ctx)
+		if err != nil {
+			r.p.MediaStatus = err.Error()
+			c.logf("YouTube media probe: UNKNOWN (%s)", r.p.MediaStatus)
+		} else {
+			r.mediaURLs = &media
+			r.p.MediaStatus = "ready"
+			c.logf("YouTube media URLs готовы: audio=%s video=%s", media.AudioHost, media.VideoHost)
+		}
+	}
+	if c.cfg.GVURL != nil {
+		if u := c.cfg.GVURL(ctx); u != "" {
+			gvURL = u
+		}
+	}
+	specs := r.specs(gvURL)
+	phases := Phases
+	if r.p.QuickProfile != 0 {
+		if r.p.QuickProfile == 3 {
+			specs = nil
+			phases = []string{WorkerRKN}
+		} else {
+			name := profileWorkers[r.p.QuickProfile]
+			var selected []workerSpec
+			for _, spec := range specs {
+				if spec.name != name {
+					continue
+				}
+				if r.p.QuickAddress != "" && len(r.targets) > 0 {
+					spec.url = r.targets[0].URL
+				}
+				selected = append(selected, spec)
+			}
+			specs = selected
+			phases = []string{name}
+		}
+	}
+	r.writeRegistry(specs)
+	r.collectPrev()
+	if r.p.MediaStatus != "" {
+		_ = fsutil.AtomicWriteFile(r.path(fileMediaStatus), []byte(r.p.MediaStatus+"\n"), 0o644)
+	}
+
+	return specs, phases
 }
 
 func (r *run) sleep(ctx context.Context, d time.Duration) error {

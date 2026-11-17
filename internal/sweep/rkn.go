@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/AloofLibra/zator/internal/netcheck"
 )
@@ -29,8 +28,9 @@ func NormalizeTestURL(in string) (rawURL, domain string, ok bool) {
 	if s == "" || strings.ContainsAny(s, " \t\r\n\"'`\\<>") {
 		return "", "", false
 	}
+	hasScheme := strings.Contains(s, "://")
 	full := s
-	if !strings.Contains(s, "://") {
+	if !hasScheme {
 		full = "https://" + s
 	}
 	u, err := url.Parse(full)
@@ -38,11 +38,11 @@ func NormalizeTestURL(in string) (rawURL, domain string, ok bool) {
 		return "", "", false
 	}
 	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if !validRKNDomain(host) {
+	if !strings.Contains(host, ".") || !netcheck.ValidDomain(host) || strings.Trim(host, "0123456789.-") == "" {
 		return "", "", false
 	}
 	// Голый домен без пути — канонический https://domain/.
-	if !strings.Contains(s, "://") && u.Path == "" && u.RawQuery == "" && u.Fragment == "" {
+	if !hasScheme && u.Path == "" && u.RawQuery == "" && u.Fragment == "" {
 		return "https://" + host + "/", host, true
 	}
 	port := u.Port()
@@ -56,13 +56,6 @@ func NormalizeTestURL(in string) (rawURL, domain string, ok bool) {
 	return u.String(), host, true
 }
 
-func validRKNDomain(host string) bool {
-	if !strings.Contains(host, ".") || !netcheck.ValidDomain(host) {
-		return false
-	}
-	return strings.IndexFunc(host, unicode.IsLetter) >= 0
-}
-
 // SanitizeDomains нормализует и дедуплицирует домены (последний ввод домена
 // заменяет прежний URL). Возвращает цели и отброшенные строки.
 func SanitizeDomains(in []string) (targets []DomainTarget, dropped []string) {
@@ -70,19 +63,25 @@ func SanitizeDomains(in []string) (targets []DomainTarget, dropped []string) {
 	for _, s := range in {
 		fields = append(fields, strings.Fields(s)...)
 	}
-	for _, f := range fields {
+	seen := make(map[string]struct{}, len(fields))
+	for i := len(fields) - 1; i >= 0; i-- {
+		f := fields[i]
 		u, d, ok := NormalizeTestURL(f)
 		if !ok {
 			dropped = append(dropped, f)
 			continue
 		}
-		kept := targets[:0:0]
-		for _, t := range targets {
-			if t.Domain != d {
-				kept = append(kept, t)
-			}
+		if _, dup := seen[d]; dup {
+			continue
 		}
-		targets = append(kept, DomainTarget{Domain: d, URL: u})
+		seen[d] = struct{}{}
+		targets = append(targets, DomainTarget{Domain: d, URL: u})
+	}
+	for i, j := 0, len(targets)-1; i < j; i, j = i+1, j-1 {
+		targets[i], targets[j] = targets[j], targets[i]
+	}
+	for i, j := 0, len(dropped)-1; i < j; i, j = i+1, j-1 {
+		dropped[i], dropped[j] = dropped[j], dropped[i]
 	}
 	return targets, dropped
 }
@@ -184,7 +183,7 @@ func (d DomainWinner) Verdict() string {
 func DomainWinners(rows []CoverageRow) []DomainWinner {
 	idx := map[string]int{}
 	var out []DomainWinner
-	speed := map[string]int64{}
+	var speeds []int64
 	for _, r := range rows {
 		rank := 2
 		switch r.Token {
@@ -197,16 +196,16 @@ func DomainWinners(rows []CoverageRow) []DomainWinner {
 		if !seen {
 			idx[r.Domain] = len(out)
 			out = append(out, DomainWinner{Domain: r.Domain, Strategy: r.Strategy, Rank: rank})
-			speed[r.Domain] = r.Speed
+			speeds = append(speeds, r.Speed)
 			continue
 		}
 		cur := out[i]
 		better := rank < cur.Rank ||
-			(rank == cur.Rank && r.Speed > speed[r.Domain]) ||
-			(rank == cur.Rank && r.Speed == speed[r.Domain] && r.Strategy < cur.Strategy)
+			(rank == cur.Rank && r.Speed > speeds[i]) ||
+			(rank == cur.Rank && r.Speed == speeds[i] && r.Strategy < cur.Strategy)
 		if better {
 			out[i] = DomainWinner{Domain: r.Domain, Strategy: r.Strategy, Rank: rank}
-			speed[r.Domain] = r.Speed
+			speeds[i] = r.Speed
 		}
 	}
 	return out

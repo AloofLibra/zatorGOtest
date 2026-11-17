@@ -242,12 +242,10 @@ func (s *Server) blobExists(name string) bool {
 	return err == nil && !st.IsDir()
 }
 
-func regexpMust(pattern string) *regexp.Regexp { return regexp.MustCompile(pattern) }
-
 var (
-	maxruDeclRe = regexpMust(`(?m)^(\s*--blob=maxru:@\S*/)[^/\s]+`)
-	wgDeclRe    = regexpMust(`(--blob=fakewgblob:@\S*/)[^/\s]+`)
-	wgRepeatsRe = regexpMust(`blob=fakewgblob:repeats=[0-9]+`)
+	maxruDeclRe = regexp.MustCompile(`(?m)^(\s*--blob=maxru:@\S*/)[^/\s]+`)
+	wgDeclRe    = regexp.MustCompile(`(--blob=fakewgblob:@\S*/)[^/\s]+`)
+	wgRepeatsRe = regexp.MustCompile(`blob=fakewgblob:repeats=[0-9]+`)
 )
 
 // editOpt применяет fn к тексту NFQWS2_OPT.
@@ -341,7 +339,7 @@ func (s *Server) postTLSBlobProfile(r *http.Request, p params) (map[string]any, 
 	case !s.blobExists(v):
 		return nil, errf(http.StatusBadRequest, "Файл блоба не существует: "+v)
 	}
-	slot := regexpMust(`(?m)^(\s*--blob=z2r_prof_` + profile + `:@\S*/)[^/\s]+`)
+	slot := regexp.MustCompile(`(?m)^(\s*--blob=z2r_prof_` + profile + `:@\S*/)[^/\s]+`)
 	err = s.editConfigs(func(c *config.Config) error {
 		return editOpt(c, func(opt string) (string, error) {
 			if !slot.MatchString(opt) {

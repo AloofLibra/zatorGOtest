@@ -99,12 +99,17 @@ func (c *Config) AddUserPorts(proto string, tokens []string) (added, skipped []s
 		return nil, nil, fmt.Errorf("%w: proto %q", ErrInvalid, proto)
 	}
 	cur := c.GetDefault(name, "")
+	seen := make(map[string]struct{})
+	for _, token := range strings.Split(cur, ",") {
+		seen[token] = struct{}{}
+	}
 	var fresh []string
 	for _, t := range tokens {
-		if t == "" || CSVContains(cur, t) || containsStr(fresh, t) {
+		if _, exists := seen[t]; t == "" || exists {
 			skipped = append(skipped, t)
 			continue
 		}
+		seen[t] = struct{}{}
 		fresh = append(fresh, t)
 		added = append(added, t)
 	}

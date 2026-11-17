@@ -234,75 +234,82 @@ func (s *Seeder) tick(ctx context.Context) {
 		return
 	}
 	if s.cfg.ProbeBatch != nil {
-		s.markProbed(hk)
-		strategy, detail, err := s.cfg.ProbeBatch(ctx, fqdn, cands, func(strat int) {
-			s.setStatus(func(st *SeedStatus) {
-				st.State = "probing"
-				st.HostKey = hk
-				st.Strategy = strat
-			})
+		s.probeBatch(ctx, hk, fqdn, cands)
+		return
+	}
+	s.markProbed(hk)
+	s.probeSequential(ctx, hk, fqdn, cands)
+}
+
+func (s *Seeder) probeBatch(ctx context.Context, hk, fqdn string, cands []int) {
+	s.markProbed(hk)
+	strategy, detail, err := s.cfg.ProbeBatch(ctx, fqdn, cands, func(strat int) {
+		s.setStatus(func(st *SeedStatus) {
+			st.State = "probing"
+			st.HostKey = hk
+			st.Strategy = strat
 		})
-		if err != nil {
-			s.setStatus(func(st *SeedStatus) {
-				st.State = "idle"
-				st.HostKey = ""
-				st.Strategy = 0
-				st.LastHost = hk
-				st.LastStrat = strategy
-				st.LastResult = "error"
-				st.LastError = err.Error()
-			})
-			return
-		}
-		if strategy == 0 {
-			s.setStatus(func(st *SeedStatus) {
-				st.State = "idle"
-				st.HostKey = ""
-				st.Strategy = 0
-				st.LastHost = hk
-				st.LastStrat = 0
-				st.LastResult = "fail"
-				st.LastError = detail
-			})
-			return
-		}
-		if !containsStrategy(cands, strategy) {
-			s.setStatus(func(st *SeedStatus) {
-				st.State = "idle"
-				st.HostKey = ""
-				st.Strategy = 0
-				st.LastHost = hk
-				st.LastStrat = strategy
-				st.LastResult = "error"
-				st.LastError = "probe_returned_unrequested_strategy"
-			})
-			return
-		}
-		if err := s.commit(hk, strategy, SourceLearned); err != nil {
-			s.setStatus(func(st *SeedStatus) {
-				st.State = "idle"
-				st.LastResult = "error"
-				st.LastError = err.Error()
-			})
-			return
-		}
+	})
+	if err != nil {
 		s.setStatus(func(st *SeedStatus) {
 			st.State = "idle"
 			st.HostKey = ""
 			st.Strategy = 0
 			st.LastHost = hk
 			st.LastStrat = strategy
-			st.LastResult = "ok"
-			st.LastError = ""
-			st.Pending = max(0, st.Pending-1)
+			st.LastResult = "error"
+			st.LastError = err.Error()
 		})
-		if s.cfg.OnSeeded != nil {
-			s.cfg.OnSeeded(hk, strategy)
-		}
 		return
 	}
-	s.markProbed(hk)
+	if strategy == 0 {
+		s.setStatus(func(st *SeedStatus) {
+			st.State = "idle"
+			st.HostKey = ""
+			st.Strategy = 0
+			st.LastHost = hk
+			st.LastStrat = 0
+			st.LastResult = "fail"
+			st.LastError = detail
+		})
+		return
+	}
+	if !containsStrategy(cands, strategy) {
+		s.setStatus(func(st *SeedStatus) {
+			st.State = "idle"
+			st.HostKey = ""
+			st.Strategy = 0
+			st.LastHost = hk
+			st.LastStrat = strategy
+			st.LastResult = "error"
+			st.LastError = "probe_returned_unrequested_strategy"
+		})
+		return
+	}
+	if err := s.commit(hk, strategy, SourceLearned); err != nil {
+		s.setStatus(func(st *SeedStatus) {
+			st.State = "idle"
+			st.LastResult = "error"
+			st.LastError = err.Error()
+		})
+		return
+	}
+	s.setStatus(func(st *SeedStatus) {
+		st.State = "idle"
+		st.HostKey = ""
+		st.Strategy = 0
+		st.LastHost = hk
+		st.LastStrat = strategy
+		st.LastResult = "ok"
+		st.LastError = ""
+		st.Pending = max(0, st.Pending-1)
+	})
+	if s.cfg.OnSeeded != nil {
+		s.cfg.OnSeeded(hk, strategy)
+	}
+}
 
+func (s *Seeder) probeSequential(ctx context.Context, hk, fqdn string, cands []int) {
 	for _, strat := range cands {
 		if ctx.Err() != nil {
 			return

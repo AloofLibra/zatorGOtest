@@ -196,11 +196,6 @@ func CandidateStrategies(locks []AutoLock, defaultStrat, maxStrat, tailMax int) 
 		seen[n] = struct{}{}
 		out = append(out, n)
 	}
-	if transfer, n := MostCommonStrategy(locks); n >= 1 {
-		add(transfer)
-	}
-	add(defaultStrat)
-	// Топ по частоте (кроме уже добавленных).
 	type pair struct{ s, n int }
 	var ranked []pair
 	counts := map[int]int{}
@@ -209,9 +204,17 @@ func CandidateStrategies(locks []AutoLock, defaultStrat, maxStrat, tailMax int) 
 			counts[l.Strategy]++
 		}
 	}
+	best, bestN := 0, 0
 	for s, n := range counts {
+		if n > bestN || n == bestN && (best == 0 || s < best) {
+			best, bestN = s, n
+		}
 		ranked = append(ranked, pair{s, n})
 	}
+	if bestN > 0 {
+		add(best)
+	}
+	add(defaultStrat)
 	sort.Slice(ranked, func(i, j int) bool {
 		if ranked[i].n != ranked[j].n {
 			return ranked[i].n > ranked[j].n

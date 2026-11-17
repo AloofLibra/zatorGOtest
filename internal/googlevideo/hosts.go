@@ -65,7 +65,9 @@ func (h *HostsFile) Path() string { return h.path }
 func (h *HostsFile) List() ([]string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.readLocked()
+	hosts, err := h.readLocked()
+	sort.Strings(hosts)
+	return hosts, err
 }
 
 func (h *HostsFile) readLocked() ([]string, error) {
@@ -96,7 +98,6 @@ func (h *HostsFile) readLocked() ([]string, error) {
 		seen[host] = struct{}{}
 		out = append(out, host)
 	}
-	sort.Strings(out)
 	return out, sc.Err()
 }
 
