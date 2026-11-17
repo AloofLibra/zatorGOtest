@@ -8,10 +8,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/AloofLibra/zator/internal/app"
+	"github.com/AloofLibra/zator/internal/deploy"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/platform"
 )
@@ -31,6 +33,33 @@ func setupEnv(t *testing.T) {
 		t.Setenv("Z2R_OFFLINE", "1")
 		t.Setenv("ZATOR_BUNDLE_DIR", bundle)
 	}
+}
+
+func setupInstallEnv(t *testing.T) {
+	t.Helper()
+	setupEnv(t)
+	bundle := os.Getenv("ZATOR_BUNDLE_DIR")
+	if bundle == "" {
+		bundle = os.Getenv("ZATOR_TEST_BUNDLE_DIR")
+	}
+	if bundle == "" {
+		_, file, _, ok := runtime.Caller(0)
+		if ok {
+			root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+			if b, found := deploy.FindBundle(root); found && b.AppArchive != "" && b.ConfigArchive != "" {
+				bundle = root
+			}
+		}
+	}
+	b, ok := deploy.FindBundle(bundle)
+	if !ok || b.AppArchive == "" || b.ConfigArchive == "" {
+		if os.Getenv("ZATOR_TEST_BUNDLE_DIR") != "" || os.Getenv("ZATOR_BUNDLE_DIR") != "" {
+			t.Fatalf("invalid install test bundle %q: app and config archives are required", bundle)
+		}
+		t.Skip("install integration tests require a prepared offline bundle")
+	}
+	t.Setenv("Z2R_OFFLINE", "1")
+	t.Setenv("ZATOR_BUNDLE_DIR", bundle)
 }
 
 func TestVersion(t *testing.T) {
@@ -116,7 +145,7 @@ func TestWriteErrorLogBoundsOutput(t *testing.T) {
 }
 
 func TestLocksClearCreatesBackup(t *testing.T) {
-	setupEnv(t)
+	setupInstallEnv(t)
 	if code, _, errOut := runCmd(t, "install", "-zapret=false", "-skip-service", "-no-auth"); code != 0 {
 		t.Fatalf("install: code=%d err=%s", code, errOut)
 	}
@@ -162,7 +191,7 @@ func TestDefaultNotInstalled(t *testing.T) {
 }
 
 func TestInstallStatusUninstall(t *testing.T) {
-	setupEnv(t)
+	setupInstallEnv(t)
 	if code, _, errOut := runCmd(t, "install", "-port", "18080", "-zapret=false", "-skip-service", "-password", "test-pass"); code != 0 {
 		t.Fatalf("install: %d %s", code, errOut)
 	}
@@ -199,7 +228,7 @@ func TestInstallInvalidSource(t *testing.T) {
 }
 
 func TestInstallNoAuth(t *testing.T) {
-	setupEnv(t)
+	setupInstallEnv(t)
 	if code, _, errOut := runCmd(t, "install", "-zapret=false", "-skip-service", "-no-auth"); code != 0 {
 		t.Fatalf("install: %d %s", code, errOut)
 	}
@@ -209,7 +238,7 @@ func TestInstallNoAuth(t *testing.T) {
 }
 
 func TestWebHandlerServesAPIAndStatic(t *testing.T) {
-	setupEnv(t)
+	setupInstallEnv(t)
 	if code, _, errOut := runCmd(t, "install", "-port", "18081", "-zapret=false", "-skip-service", "-no-auth"); code != 0 {
 		t.Fatalf("install: %d %s", code, errOut)
 	}

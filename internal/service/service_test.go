@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -293,6 +295,59 @@ func TestRenderKeeneticHook(t *testing.T) {
 		"exit 0\n"
 	if got != want {
 		t.Errorf("хук:\n%s\nожидалось:\n%s", got, want)
+	}
+}
+
+func TestRenderOutputHashes(t *testing.T) {
+	wantHashes := map[string]string{
+		"systemd-all":    "a22bc16cf486337de626d80bfd19a37d7ad4c87e2a69de560b9dd407e9c21616",
+		"systemd-wssize": "72dfc2ff8178fd091d36e3ea997dcf05d2e225cddf7850a252abcd435bb39976",
+		"systemd-fw":     "9fc66c47cc6767eb97e28aabc0093a8722d488e55cf6fdaa228cdbe3db2d99cb",
+		"systemd-none":   "f098a898dcefd35f99a020645dab08d27ac5d31a10e178569d7bac788e837aac",
+		"procd-all":      "a86ed72b3d8968f850999ef17e17f3795c51de7e9e6c45dc86cb41ca463ffc24",
+		"procd-wssize":   "31c5f6d393287f23fad065581fd9b5674eb3e30ca13300fb970f7ba36aa8d01b",
+		"procd-fw":       "b2fac92819d1c8105b6212e80f2c0045e97ba59091360dee1a49e6e3e0ca3cab",
+		"procd-none":     "89199227dd6949b0c135f5b0deefecfb4f66543b8b40219714f05673faa66ac0",
+		"sysv-all":       "32788959015c30f878ddb1c1f7914fb6f9f214e4a155301b282cc0e36ead6bac",
+		"sysv-wssize":    "732ba21f94a08e2bc9989ee9f2ab73f926b21f0c7e41da50f44a46425e2d572e",
+		"sysv-fw":        "d860d3a8561dcf18e12dd00aa5a20b9ef24e137c5433fd5f7da02a1a2afe9f77",
+		"sysv-none":      "459f95084a0e5476a5e75d09e276d903eb6a68744ddb70c804058c16364edc57",
+		"keenetic":       "255470adb071d29b475a14151a07cb31a3c6b158781f3d0432d877ddd10aa975",
+	}
+	all := TemplateData{
+		Name: "zator'", Description: "desc & <text>",
+		Command: []string{"/opt/bin/my zator", "arg's", "$(cmd)"},
+		PIDFile: "/var/run/name.pid", LogFile: "/tmp/a log",
+		InitScript: "/opt/init's", FWHook: "/opt/fw hook's", WssizeBin: "/opt/zator bin",
+		ZatorRoot: "/opt/zator root", ZapretRoot: "/opt/zapret2", Path: "/usr/bin:/bin", Start: 90,
+	}
+	noHooks := all
+	noHooks.FWHook, noHooks.WssizeBin = "", ""
+	wssizeOnly := all
+	wssizeOnly.FWHook = ""
+	fwOnly := all
+	fwOnly.WssizeBin = ""
+	renders := []struct {
+		name   string
+		data   TemplateData
+		render func(TemplateData) (string, error)
+	}{
+		{"systemd-all", all, RenderSystemd}, {"systemd-wssize", wssizeOnly, RenderSystemd},
+		{"systemd-fw", fwOnly, RenderSystemd}, {"systemd-none", noHooks, RenderSystemd},
+		{"procd-all", all, RenderProcd}, {"procd-wssize", wssizeOnly, RenderProcd},
+		{"procd-fw", fwOnly, RenderProcd}, {"procd-none", noHooks, RenderProcd},
+		{"sysv-all", all, RenderSysV}, {"sysv-wssize", wssizeOnly, RenderSysV},
+		{"sysv-fw", fwOnly, RenderSysV}, {"sysv-none", noHooks, RenderSysV},
+		{"keenetic", all, RenderKeeneticHook},
+	}
+	for _, tc := range renders {
+		got, err := tc.render(tc.data)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if hash := fmt.Sprintf("%x", sha256.Sum256([]byte(got))); hash != wantHashes[tc.name] {
+			t.Errorf("%s output changed: %s", tc.name, hash)
+		}
 	}
 }
 

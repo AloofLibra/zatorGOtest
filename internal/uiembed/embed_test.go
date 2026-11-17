@@ -1,6 +1,7 @@
 package uiembed
 
 import (
+	"errors"
 	"io/fs"
 	"strings"
 	"testing"
@@ -18,8 +19,14 @@ func TestWebUIHasIndex(t *testing.T) {
 
 func TestStubFS(t *testing.T) {
 	data, err := fs.ReadFile(StubFS(), "index.html")
-	if err != nil || !strings.Contains(string(data), "zator") {
+	if err != nil || string(data) != `<!doctype html><html><head><meta charset="utf-8"><title>zator</title></head><body><h1>zator</h1><p>Web UI не установлен.</p></body></html>` {
 		t.Fatalf("stub: %v", err)
+	}
+}
+
+func TestMissingDirFS(t *testing.T) {
+	if _, err := fs.ReadFile(dirFS(t.TempDir()+"/missing"), "index.html"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing file error = %v, want fs.ErrNotExist", err)
 	}
 }
 

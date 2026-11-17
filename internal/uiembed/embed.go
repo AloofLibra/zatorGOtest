@@ -4,17 +4,18 @@
 package uiembed
 
 import (
+	"embed"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
-	"testing/fstest"
 
 	"github.com/AloofLibra/zator/internal/paths"
 )
 
-const stubIndex = `<!doctype html><html><head><meta charset="utf-8"><title>zator</title></head><body><h1>zator</h1><p>Web UI не установлен.</p></body></html>`
+//go:embed stub/index.html
+var stubAssets embed.FS
 
 func sourceAssets() string {
 	_, file, _, ok := runtime.Caller(0)
@@ -32,7 +33,7 @@ func dirFS(root string) fs.FS {
 	if st, err := os.Stat(root); err == nil && st.IsDir() {
 		return os.DirFS(root)
 	}
-	return fstest.MapFS{}
+	return embed.FS{}
 }
 
 func sourceOr(root, rel string) string {
@@ -52,8 +53,11 @@ func WebUIAt(p paths.Paths) fs.FS {
 	}
 	return dirFS(root)
 }
-func WebUI() fs.FS   { return WebUIAt(paths.Default()) }
-func StubFS() fs.FS  { return fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte(stubIndex)}} }
+func WebUI() fs.FS { return WebUIAt(paths.Default()) }
+func StubFS() fs.FS {
+	f, _ := fs.Sub(stubAssets, "stub")
+	return f
+}
 func HasWebUI() bool { _, err := fs.Stat(WebUI(), "index.html"); return err == nil }
 
 func ConfigDefaultAt(p paths.Paths) ([]byte, error) {

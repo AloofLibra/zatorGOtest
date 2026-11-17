@@ -1,12 +1,10 @@
 package service
 
 import (
-	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"text/template"
 )
 
 // Имена файлов и каталогов служб.
@@ -65,92 +63,178 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-const systemdTemplate = `[Unit]
-Description={{.Description}}
+// RenderSystemd формирует содержимое systemd unit.
+func RenderSystemd(d TemplateData) (string, error) {
+	var b strings.Builder
+	b.Grow(512)
+	b.WriteString(`[Unit]
+Description=`)
+	b.WriteString(d.Description)
+	b.WriteString(`
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=PATH={{.Path}}
-Environment=ZATOR_ROOT={{.ZatorRoot}}
-Environment=ZAPRET2_ROOT={{.ZapretRoot}}
-{{- if .FWHook}}
-ExecStartPre=-{{.FWHook}} start
-ExecStopPost=-{{.FWHook}} stop
-{{- end}}
-{{- if .WssizeBin}}
-ExecStartPre=-{{.WssizeBin}} wssize-hook start
-ExecStopPost=-{{.WssizeBin}} wssize-hook stop
-{{- end}}
-ExecStart={{.ExecStart}}
+Environment=PATH=`)
+	b.WriteString(d.Path)
+	b.WriteString(`
+Environment=ZATOR_ROOT=`)
+	b.WriteString(d.ZatorRoot)
+	b.WriteString(`
+Environment=ZAPRET2_ROOT=`)
+	b.WriteString(d.ZapretRoot)
+	if d.FWHook != "" {
+		b.WriteString(`
+ExecStartPre=-`)
+		b.WriteString(d.FWHook)
+		b.WriteString(` start
+ExecStopPost=-`)
+		b.WriteString(d.FWHook)
+		b.WriteString(` stop`)
+	}
+	if d.WssizeBin != "" {
+		b.WriteString(`
+ExecStartPre=-`)
+		b.WriteString(d.WssizeBin)
+		b.WriteString(` wssize-hook start
+ExecStopPost=-`)
+		b.WriteString(d.WssizeBin)
+		b.WriteString(` wssize-hook stop`)
+	}
+	b.WriteString(`
+ExecStart=`)
+	b.WriteString(d.ExecStart())
+	b.WriteString(`
 Restart=on-failure
 RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-`
+`)
+	return b.String(), nil
+}
 
-const procdTemplate = `#!/bin/sh /etc/rc.common
-# {{.Description}} (создано zator)
-START={{.Start}}
+// RenderProcd формирует init-скрипт procd (OpenWrt).
+func RenderProcd(d TemplateData) (string, error) {
+	var b strings.Builder
+	b.Grow(1024)
+	b.WriteString(`#!/bin/sh /etc/rc.common
+# `)
+	b.WriteString(d.Description)
+	b.WriteString(` (создано zator)
+START=`)
+	b.WriteString(strconv.Itoa(d.Start))
+	b.WriteString(`
 STOP=10
 USE_PROCD=1
-PATH={{.Path}}
+PATH=`)
+	b.WriteString(d.Path)
+	b.WriteString(`
 export PATH
-ZATOR_ROOT={{shq .ZatorRoot}}
-ZAPRET2_ROOT={{shq .ZapretRoot}}
+ZATOR_ROOT=`)
+	b.WriteString(shellQuote(d.ZatorRoot))
+	b.WriteString(`
+ZAPRET2_ROOT=`)
+	b.WriteString(shellQuote(d.ZapretRoot))
+	b.WriteString(`
 export ZATOR_ROOT ZAPRET2_ROOT
 
-start_service() {
-{{- if .FWHook}}
-	[ -x {{shq .FWHook}} ] && {{shq .FWHook}} start
-{{- end}}
-{{- if .WssizeBin}}
-	{{shq .WssizeBin}} wssize-hook start || logger -t zator-wssize 'failed to apply WSSIZE rules'
-{{- end}}
+start_service() {`)
+	if d.FWHook != "" {
+		q := shellQuote(d.FWHook)
+		b.WriteString(`
+	[ -x `)
+		b.WriteString(q)
+		b.WriteString(` ] && `)
+		b.WriteString(q)
+		b.WriteString(` start`)
+	}
+	if d.WssizeBin != "" {
+		q := shellQuote(d.WssizeBin)
+		b.WriteString(`
+	`)
+		b.WriteString(q)
+		b.WriteString(` wssize-hook start || logger -t zator-wssize 'failed to apply WSSIZE rules'`)
+	}
+	b.WriteString(`
 	procd_open_instance
-	procd_set_param command {{.ShellCommand}}
+	procd_set_param command `)
+	b.WriteString(d.ShellCommand())
+	b.WriteString(`
 	procd_set_param respawn
 	procd_set_param stdout 1
 	procd_set_param stderr 1
 	procd_close_instance
 }
 
-stop_service() {
-{{- if .FWHook}}
-	[ -x {{shq .FWHook}} ] && {{shq .FWHook}} stop
-{{- end}}
-{{- if .WssizeBin}}
-	{{shq .WssizeBin}} wssize-hook stop || logger -t zator-wssize 'failed to remove WSSIZE rules'
-{{- end}}
+stop_service() {`)
+	if d.FWHook != "" {
+		q := shellQuote(d.FWHook)
+		b.WriteString(`
+	[ -x `)
+		b.WriteString(q)
+		b.WriteString(` ] && `)
+		b.WriteString(q)
+		b.WriteString(` stop`)
+	}
+	if d.WssizeBin != "" {
+		q := shellQuote(d.WssizeBin)
+		b.WriteString(`
+	`)
+		b.WriteString(q)
+		b.WriteString(` wssize-hook stop || logger -t zator-wssize 'failed to remove WSSIZE rules'`)
+	}
+	b.WriteString(`
 	return 0
-}
-{{- if .FWHook}}
+}`)
+	if d.FWHook != "" {
+		q := shellQuote(d.FWHook)
+		b.WriteString(`
 
 restart_fw() {
-	[ -x {{shq .FWHook}} ] && {{shq .FWHook}} restart
-{{- if .WssizeBin}}
-	{{shq .WssizeBin}} wssize-hook restart || logger -t zator-wssize 'failed to apply WSSIZE rules'
-{{- end}}
+	[ -x `)
+		b.WriteString(q)
+		b.WriteString(` ] && `)
+		b.WriteString(q)
+		b.WriteString(` restart`)
+		if d.WssizeBin != "" {
+			b.WriteString(`
+	`)
+			b.WriteString(shellQuote(d.WssizeBin))
+			b.WriteString(` wssize-hook restart || logger -t zator-wssize 'failed to apply WSSIZE rules'`)
+		}
+		b.WriteString(`
 }
-EXTRA_COMMANDS="restart_fw"
-{{- end}}
-`
+EXTRA_COMMANDS="restart_fw"`)
+	}
+	b.WriteByte('\n')
+	return b.String(), nil
+}
 
-const sysvTemplate = `#!/bin/sh
-# {{.Description}} (создано zator)
-PATH={{.Path}}
-export PATH
-ZATOR_ROOT={{shq .ZatorRoot}}
-ZAPRET2_ROOT={{shq .ZapretRoot}}
-export ZATOR_ROOT ZAPRET2_ROOT
-NAME={{shq .Name}}
-PIDFILE={{shq .PIDFile}}
-LOGFILE={{shq .LogFile}}
-{{- if .FWHook}}
-FWHOOK={{shq .FWHook}}
-{{- end}}
+// RenderSysV формирует init-скрипт SysV/Entware.
+func RenderSysV(d TemplateData) (string, error) {
+	var b strings.Builder
+	b.Grow(2048)
+	b.WriteString("#!/bin/sh\n# ")
+	b.WriteString(d.Description)
+	b.WriteString(" (создано zator)\nPATH=")
+	b.WriteString(d.Path)
+	b.WriteString("\nexport PATH\nZATOR_ROOT=")
+	b.WriteString(shellQuote(d.ZatorRoot))
+	b.WriteString("\nZAPRET2_ROOT=")
+	b.WriteString(shellQuote(d.ZapretRoot))
+	b.WriteString("\nexport ZATOR_ROOT ZAPRET2_ROOT\nNAME=")
+	b.WriteString(shellQuote(d.Name))
+	b.WriteString("\nPIDFILE=")
+	b.WriteString(shellQuote(d.PIDFile))
+	b.WriteString("\nLOGFILE=")
+	b.WriteString(shellQuote(d.LogFile))
+	if d.FWHook != "" {
+		b.WriteString("\nFWHOOK=")
+		b.WriteString(shellQuote(d.FWHook))
+	}
+	b.WriteString(`
 
 is_running() {
 	[ -f "$PIDFILE" ] || return 1
@@ -158,13 +242,18 @@ is_running() {
 	[ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
-fw() {
-{{- if .FWHook}}
-	[ -x "$FWHOOK" ] && "$FWHOOK" "$1"
-{{- end}}
-{{- if .WssizeBin}}
-	{{shq .WssizeBin}} wssize-hook "$1" || echo "WSSIZE firewall hook failed" >&2
-{{- end}}
+fw() {`)
+	if d.FWHook != "" {
+		b.WriteString(`
+	[ -x "$FWHOOK" ] && "$FWHOOK" "$1"`)
+	}
+	if d.WssizeBin != "" {
+		b.WriteString(`
+	`)
+		b.WriteString(shellQuote(d.WssizeBin))
+		b.WriteString(` wssize-hook "$1" || echo "WSSIZE firewall hook failed" >&2`)
+	}
+	b.WriteString(`
 	return 0
 }
 
@@ -192,9 +281,13 @@ start() {
 	fi
 	# Keenetic/Entware: не глотать stderr — иначе webui падает молча, а install врёт «запущен».
 	if command -v nohup >/dev/null 2>&1; then
-		nohup {{.ShellCommand}} >>"$LOGFILE" 2>&1 &
+		nohup `)
+	b.WriteString(d.ShellCommand())
+	b.WriteString(` >>"$LOGFILE" 2>&1 &
 	else
-		{{.ShellCommand}} >>"$LOGFILE" 2>&1 &
+		`)
+	b.WriteString(d.ShellCommand())
+	b.WriteString(` >>"$LOGFILE" 2>&1 &
 	fi
 	echo $! > "$PIDFILE"
 	sleep 1
@@ -229,45 +322,26 @@ case "$1" in
 		;;
 	*) echo "usage: $0 {start|stop|restart|restart-fw|status}"; exit 1 ;;
 esac
-`
+`)
+	return b.String(), nil
+}
 
-const keeneticHookTemplate = `#!/bin/sh
+// RenderKeeneticHook формирует ndm-хук netfilter.d.
+func RenderKeeneticHook(d TemplateData) (string, error) {
+	var b strings.Builder
+	b.Grow(192)
+	b.WriteString(`#!/bin/sh
 # ndm пересобирает firewall при сетевых событиях: возвращаем правила zapret2.
 [ "$table" != "mangle" ] && [ "$table" != "nat" ] && exit 0
 PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export PATH
-{{shq .InitScript}} restart-fw
+`)
+	b.WriteString(shellQuote(d.InitScript))
+	b.WriteString(` restart-fw
 exit 0
-`
-
-var tmplFuncs = template.FuncMap{"shq": shellQuote}
-
-var (
-	systemdTmpl      = template.Must(template.New("systemd").Funcs(tmplFuncs).Parse(systemdTemplate))
-	procdTmpl        = template.Must(template.New("procd").Funcs(tmplFuncs).Parse(procdTemplate))
-	sysvTmpl         = template.Must(template.New("sysv").Funcs(tmplFuncs).Parse(sysvTemplate))
-	keeneticHookTmpl = template.Must(template.New("keenetic").Funcs(tmplFuncs).Parse(keeneticHookTemplate))
-)
-
-func render(t *template.Template, d TemplateData) (string, error) {
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, d); err != nil {
-		return "", fmt.Errorf("service: шаблон %s: %w", t.Name(), err)
-	}
-	return buf.String(), nil
+`)
+	return b.String(), nil
 }
-
-// RenderSystemd формирует содержимое systemd unit.
-func RenderSystemd(d TemplateData) (string, error) { return render(systemdTmpl, d) }
-
-// RenderProcd формирует init-скрипт procd (OpenWrt).
-func RenderProcd(d TemplateData) (string, error) { return render(procdTmpl, d) }
-
-// RenderSysV формирует init-скрипт SysV/Entware.
-func RenderSysV(d TemplateData) (string, error) { return render(sysvTmpl, d) }
-
-// RenderKeeneticHook формирует ndm-хук netfilter.d.
-func RenderKeeneticHook(d TemplateData) (string, error) { return render(keeneticHookTmpl, d) }
 
 // MerlinHookLine — строка для /jffs/scripts/firewall-start.
 func MerlinHookLine(initScript string) string {
