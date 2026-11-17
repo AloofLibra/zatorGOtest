@@ -775,6 +775,10 @@ type guarded struct {
 	profile int
 }
 
+type probeReinstaller interface {
+	Reinstall(context.Context) error
+}
+
 func (g guarded) CheckTarget(ctx context.Context, label, url string) netcheck.TargetResult {
 	return g.withProbe(ctx, label, url, func() netcheck.TargetResult {
 		return g.inner.CheckTarget(ctx, label, url)
@@ -806,21 +810,70 @@ func unknownMediaTarget(targetURL, videoID, reason string) netcheck.TargetResult
 }
 
 func (g guarded) withProbe(ctx context.Context, label, url string, check func() netcheck.TargetResult) netcheck.TargetResult {
-	probe := g.r.c.cfg.Probe
+	var recoveryErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		if !probe.Healthy(ctx) {
-			if err := probe.Start(ctx, g.profile); err != nil || !probe.Healthy(ctx) {
-				g.r.fail(fmt.Errorf("%w: профиль %d", ErrProbe, g.profile))
-				return netcheck.TargetResult{Label: label, Target: url}
+		if _, err := g.ensureHealthy(ctx); err != nil {
+			if ctx.Err() == nil {
+				g.r.fail(fmt.Errorf("%w: профиль %d: %v", ErrProbe, g.profile, err))
 			}
+			return netcheck.TargetResult{Label: label, Target: url}
 		}
 		res := check()
-		if probe.Healthy(ctx) {
+		recovered, err := g.ensureHealthy(ctx)
+		if err == nil && !recovered {
 			return res
 		}
+		recoveryErr = err
+		if ctx.Err() != nil {
+			return netcheck.TargetResult{Label: label, Target: url}
+		}
 	}
-	g.r.fail(fmt.Errorf("%w: профиль %d", ErrIsolationLost, g.profile))
+	if recoveryErr != nil {
+		g.r.fail(fmt.Errorf("%w: профиль %d: %v", ErrIsolationLost, g.profile, recoveryErr))
+	} else {
+		g.r.fail(fmt.Errorf("%w: профиль %d", ErrIsolationLost, g.profile))
+	}
 	return netcheck.TargetResult{Label: label, Target: url}
+}
+
+// ensureHealthy mirrors the classic Zator recovery for Keenetic ndm: tolerate
+// transient iptables contention, then reinstall probe transport before aborting.
+func (g guarded) ensureHealthy(ctx context.Context) (bool, error) {
+	probe := g.r.c.cfg.Probe
+	var lastErr error
+	sawUnhealthy := false
+	for attempt := 0; attempt < 3; attempt++ {
+		if probe.Healthy(ctx) {
+			return sawUnhealthy, nil
+		}
+		sawUnhealthy = true
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		lastErr = ErrIsolationLost
+		if attempt < 2 {
+			if err := g.r.sleep(ctx, time.Second); err != nil {
+				return false, err
+			}
+		}
+	}
+	if recoverer, ok := probe.(probeReinstaller); ok {
+		lastErr = recoverer.Reinstall(ctx)
+		if lastErr == nil && probe.Healthy(ctx) {
+			return true, nil
+		}
+		if lastErr == nil {
+			lastErr = ErrIsolationLost
+		}
+	}
+	// Full restart remains a fallback for dead nfqws2 processes and nftables,
+	// whose transport cannot be reinstalled independently.
+	if startErr := probe.Start(ctx, g.profile); startErr == nil && probe.Healthy(ctx) {
+		return true, nil
+	} else if startErr != nil {
+		lastErr = startErr
+	}
+	return false, fmt.Errorf("пробник не восстановлен после переустановки транспорта: %w", lastErr)
 }
 
 func (r *run) env(profile int) *Env {

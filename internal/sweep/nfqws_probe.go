@@ -267,6 +267,23 @@ func (p *NfqwsProbe) Healthy(ctx context.Context) bool {
 	return p.ss.Check(ctx) == nil
 }
 
+// Reinstall восстанавливает только iptables-транспорт пробника. На Keenetic
+// ndm может удалить его правила, пока процесс nfqws2 продолжает работать.
+func (p *NfqwsProbe) Reinstall(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.started || p.cmd == nil || p.cmd.Process == nil || p.ss == nil {
+		return firewall.ErrTransportInactive
+	}
+	if !probeProcessRunning(p.cmd.Process) {
+		return fmt.Errorf("%w: процесс nfqws2 завершился", ErrProbe)
+	}
+	if err := p.ss.Reinstall(ctx); err != nil {
+		return fmt.Errorf("%w: восстановление firewall: %v", ErrProbe, err)
+	}
+	return nil
+}
+
 // Stop реализует Probe.
 func (p *NfqwsProbe) Stop() error {
 	p.mu.Lock()

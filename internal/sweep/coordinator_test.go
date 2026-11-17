@@ -756,6 +756,33 @@ func TestCoordinator_UnhealthyProbe(t *testing.T) {
 	}
 }
 
+type recoveringProbe struct {
+	reinstalls int
+	healthy    bool
+}
+
+func (p *recoveringProbe) Start(context.Context, int) error { return nil }
+func (p *recoveringProbe) Healthy(context.Context) bool     { return p.healthy }
+func (p *recoveringProbe) Stop() error                      { return nil }
+func (p *recoveringProbe) Reinstall(context.Context) error {
+	p.reinstalls++
+	p.healthy = true
+	return nil
+}
+
+func TestGuardedProbeRecoveryReinstallsTransport(t *testing.T) {
+	probe := &recoveringProbe{}
+	c := &Coordinator{cfg: Config{
+		Probe: probe,
+		Sleep: func(ctx context.Context, _ time.Duration) error { return ctx.Err() },
+	}}
+	g := guarded{r: &run{c: c}, profile: 1}
+	recovered, err := g.ensureHealthy(context.Background())
+	if err != nil || !recovered || probe.reinstalls != 1 || !probe.healthy {
+		t.Fatalf("recovery = %t, err = %v, probe = %+v", recovered, err, probe)
+	}
+}
+
 func TestCoordinator_IsolationLostTwice(t *testing.T) {
 	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
@@ -777,7 +804,7 @@ func TestCoordinator_IsolationLostOnceIsRetried(t *testing.T) {
 	if err != nil || rep.State != StateDone {
 		t.Fatalf("%v %+v", err, rep)
 	}
-	// 4 фазы + РКН на 2 домена = 5 проверок + 1 повтор.
+	// 4 фазы + РКН на 2 домена = 5 проверок + 1 повтор потерянной изоляции.
 	if n := len(e.chk.callLog()); n != 6 {
 		t.Errorf("checks = %d, want 6", n)
 	}
