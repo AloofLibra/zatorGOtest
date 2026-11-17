@@ -181,6 +181,7 @@ func (a *App) ensureHostlistPlaceholders() error {
 		filepath.Join(a.Paths.ExtraStratsDir, "TCP_Custom.txt"),
 		filepath.Join(a.Paths.ExtraStratsDir, "TCP_Discord.txt"),
 		filepath.Join(a.Paths.ExtraStratsDir, "TCP_YT_list.txt"),
+		filepath.Join(a.Paths.ExtraStratsDir, "UDP_YT_list.txt"),
 		filepath.Join(a.Paths.ListsDir, "netrogat.txt"),
 		filepath.Join(a.Paths.ListsDir, "netrogat_substrings.txt"),
 		filepath.Join(a.Paths.ListsDir, "googlevideo-ipv4.txt"),

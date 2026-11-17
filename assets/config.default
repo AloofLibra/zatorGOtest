@@ -282,6 +282,52 @@ ${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WS
 
 --new
 
+#Стратегии для UDP_YT
+--filter-udp=443
+--hostlist=/opt/zator/extra_strats/UDP_YT_list.txt
+--hostlist=/opt/zator/extra_strats/TCP_RKN_list.txt
+--hostlist=/opt/zator/extra_strats/TCP_Custom.txt
+--hostlist-exclude=/opt/zator/lists/netrogat.txt
+--in-range=-d100
+--out-range=-d100
+--lua-desync=circular_locked:key=5:proto=udp:exclude_substrings=/opt/zator/lists/netrogat_substrings.txt
+--in-range=x
+--payload=quic_initial
+--lua-desync=fake:blob=stun_fake:repeats=3:strategy=1 --lua-desync=fake:blob=discord_fake:repeats=3:strategy=1
+--lua-desync=fake:blob=discord_udp_1:repeats=10:out_range=-d8:strategy=2 --lua-desync=fake:blob=discord_udp_2:repeats=2:out_range=-d8:strategy=2
+--lua-desync=fake:blob=discord_fake:repeats=6:strategy=3
+--lua-desync=fake:blob=discord_fake:ipfrag:ipfrag_pos_udp=8:ipfrag_disorder:repeats=6:strategy=4
+--lua-desync=fake:blob=discord_fake:out_range=-n4:strategy=5
+--lua-desync=fake:blob=discord_fake:out_range=-d2:strategy=6
+--lua-desync=fake:blob=0x00:repeats=4:out_range=-d10:strategy=7
+--lua-desync=fake:blob=0x00:repeats=6:out_range=-d10:strategy=8
+--lua-desync=fake:blob=discord_fake:out_range=-d10:strategy=9
+--lua-desync=fake:blob=discord_fake:repeats=6:out_range=-d100:strategy=10
+--lua-desync=fake:blob=discord_udp_1:repeats=6:out_range=-d3:strategy=11
+--lua-desync=fake:blob=discord_fake:repeats=8:out_range=-d3:strategy=12
+--lua-desync=fake:blob=discord_udp_1:repeats=8:out_range=-d4:strategy=13
+--lua-desync=fake:blob=discord_udp_1:repeats=6:out_range=-n4:strategy=14
+--lua-desync=fake:blob=discord_udp_1:out_range=-n3:strategy=15
+--lua-desync=fake:blob=0x00:repeats=4:ip_autottl=0,3-20:ip6_autottl=0,3-20:out_range=-d10:strategy=16
+--lua-desync=fake:blob=0x00:repeats=6:out_range=-n2:strategy=17
+--lua-desync=fake:blob=quic_google:out_range=-n2:strategy=18
+--lua-desync=fake:blob=quic_google:out_range=-d2:strategy=19
+--lua-desync=send:repeats=2:ip_autottl=0,3-200:strategy=20 --lua-desync=fake:blob=discord_fake:ip_autottl=0,3-20:out_range=-d100:strategy=20
+--lua-desync=send:repeats=2:ip6_autottl=0,3-20:strategy=21 --lua-desync=fake:blob=discord_fake:ip6_autottl=0,3-20:out_range=-d10:strategy=21
+--lua-desync=fake:blob=discord_fake:repeats=11:out_range=-d5:strategy=22
+--lua-desync=fake:blob=stun_fake:repeats=3:out_range=-d10:strategy=23
+--lua-desync=fake:blob=stun_fake:ipfrag:ipfrag_pos_udp=8:ipfrag_disorder:repeats=4:out_range=-d10:strategy=24
+--lua-desync=udplen:increment=4:min=20:strategy=25 --lua-desync=fake:blob=0x00:repeats=2:out_range=-d10:strategy=25
+--lua-desync=udplen:increment=8:pattern=0x00000000:min=20:strategy=26 --lua-desync=fake:blob=discord_fake:repeats=2:out_range=-d10:strategy=26
+--lua-desync=fake:blob=discord_fake:ipfrag:ipfrag_pos_udp=8:repeats=6:out_range=-d10:strategy=27
+--lua-desync=fake:blob=quic_google:ipfrag:ipfrag_pos_udp=16:ipfrag_disorder:repeats=6:out_range=-d10:strategy=28
+--lua-desync=send:repeats=2:ip_autottl=1,3-20:strategy=29 --lua-desync=fake:blob=0x00:repeats=4:out_range=-d10:strategy=29
+--lua-desync=fake:blob=0x00:repeats=10:out_range=-d3:strategy=30
+--lua-desync=fake:blob=stun_fake:ip_autottl=0,3-20:ip6_autottl=0,3-20:repeats=4:out_range=-d10:strategy=31
+--lua-desync=fake:blob=discord_fake:ipfrag:ipfrag_pos_udp=8:ipfrag_disorder:repeats=8:out_range=-d5:strategy=32
+
+--new
+
 #Стратегии для голосовой связи. В первую очередь Discord, но может ещё для чего поможет
 --filter-udp=443,2053,2083,2087,2096,8443,50000-50099,1400,3478-3481,5349,19294-19344
 --filter-l7=discord,stun

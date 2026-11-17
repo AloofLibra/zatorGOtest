@@ -46,7 +46,7 @@ func TestWebUIHostDefaultsByPlatformAndHonorsOverride(t *testing.T) {
 		platform       platform.Platform
 		want           string
 	}{
-		{name: "VPS loops back", platform: platform.Platform{Kind: platform.KindVPS}, want: "127.0.0.1"},
+		{name: "VPS listens on all interfaces", platform: platform.Platform{Kind: platform.KindVPS}, want: ""},
 		{name: "Alpine listens on all interfaces", platform: platform.Platform{Kind: platform.KindVPS, OSID: "alpine"}, want: ""},
 		{name: "OpenWrt uses firewall", platform: platform.Platform{Kind: platform.KindOpenWRT}, want: ""},
 		{name: "Entware uses firewall", platform: platform.Platform{Kind: platform.KindEntware}, want: ""},

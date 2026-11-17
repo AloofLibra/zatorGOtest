@@ -134,7 +134,7 @@ func TestSetLockValidation(t *testing.T) {
 	}{
 		{"ok tls profile 3", "default", "3", "tls", 43, false},
 		{"ok http profile 1", "default", "1", "http", 1, false},
-		{"removed QUIC profile 5", "default", "5", "udp", 32, true},
+		{"ok QUIC profile 5", "default", "5", "udp", 32, false},
 		{"ok profile 4 max", "default", "4", "tls", 28, false},
 		{"ok fallback 9 http", "default", "9", "http", 8, false},
 		{"ok mark scope", "mark:2", "3", "tls", 1, false},

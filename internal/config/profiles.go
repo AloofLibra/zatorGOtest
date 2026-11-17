@@ -7,8 +7,7 @@ import (
 	"strings"
 )
 
-// Диапазон идентификаторов профилей. ID 5 не используется; QUIC-стратегии
-// находятся в общем UDP-профиле 7.
+// Диапазон идентификаторов профилей.
 const (
 	MinProfile = 1
 	MaxProfile = 10
@@ -49,6 +48,7 @@ var profileTable = [MaxProfile + 1]profileMeta{
 	2:  {"Googlevideo", "Видео-домены YouTube (стратегия из lock)", "TCP 443 (Googlevideo)", []string{"tls"}, 44},
 	3:  {"RKN Лист", "Основные блокировки сайтов", "TCP 443 (RKN)", []string{"tls"}, 44},
 	4:  {"Discord TCP", "TCP профиль Discord", "TCP 443 (Discord)", []string{"tls"}, 28},
+	5:  {"YouTube QUIC", "UDP 443 для YouTube", "UDP 443 (QUIC)", []string{"udp"}, 32},
 	6:  {"Voice UDP", "Discord/STUN и голосовые сервисы", "UDP Voice (Discord/STUN)", []string{"udp"}, 32},
 	7:  {"UDP Games", "Игровой UDP (порты 1026-65531)", "UDP Games (1026-65531)", []string{"udp"}, 20},
 	8:  {"Fallback TLS", "Безразборный режим TLS (profile 8)", "Fallback TLS", []string{"tls"}, 44},
@@ -57,7 +57,7 @@ var profileTable = [MaxProfile + 1]profileMeta{
 }
 
 // ValidProfile сообщает, есть ли профиль с таким ID.
-func ValidProfile(id int) bool { return id >= MinProfile && id <= MaxProfile && id != 5 }
+func ValidProfile(id int) bool { return id >= MinProfile && id <= MaxProfile }
 
 // DefaultMaxStrategy возвращает максимум стратегий профиля для штатного
 // config.default; 0 для неизвестного или удалённого профиля.
@@ -123,7 +123,7 @@ func DefaultProfile(id int) (Profile, bool) {
 
 // DefaultProfiles возвращает активные профили с максимумами по умолчанию.
 func DefaultProfiles() []Profile {
-	out := make([]Profile, 0, MaxProfile-1)
+	out := make([]Profile, 0, MaxProfile)
 	for id := MinProfile; id <= MaxProfile; id++ {
 		if p, ok := DefaultProfile(id); ok {
 			out = append(out, p)

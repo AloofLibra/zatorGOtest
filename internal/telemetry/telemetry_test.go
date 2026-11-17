@@ -524,7 +524,7 @@ func TestParseRecommendationsRejects(t *testing.T) {
 		"bad version":       mut("meta\t1\t", "meta\t2\t"),
 		"first not meta":    "profile\t1\t1\t0\t-\t-\n" + valid,
 		"duplicate profile": mut("profile\t2\t", "profile\t1\t"),
-		"profile 5":         mut("profile\t4\t0", "profile\t5\t0"),
+		"unknown profile":   mut("profile\t4\t0", "profile\t11\t0"),
 		"samples > total":   mut("profile\t3\t12", "profile\t3\t13"),
 		"bad clone flag":    mut("\t1\t40.5", "\t2\t40.5"),
 		"pct > 100":         mut("\t88.5\t", "\t100.5\t"),

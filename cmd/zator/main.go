@@ -673,7 +673,7 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	port := fs.Int("port", 0, "порт (по умолчанию из конфигурации, 17682)")
-	host := fs.String("host", "", "адрес привязки (VPS: 127.0.0.1, роутер: все интерфейсы)")
+	host := fs.String("host", "", "адрес привязки (по умолчанию: все интерфейсы)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -732,9 +732,6 @@ func cmdServe(name string, args []string, stdout, stderr io.Writer) int {
 func webUIHost(override string, p platform.Platform) string {
 	if override != "" {
 		return override
-	}
-	if p.Kind == platform.KindVPS && p.OSID != "alpine" {
-		return "127.0.0.1"
 	}
 	return ""
 }
