@@ -46,10 +46,10 @@ func TestDefaultProfiles(t *testing.T) {
 	if profiles[6].Label != "UDP Games" || !profiles[6].IsUDPGames {
 		t.Errorf("profile 7 = %+v", profiles[6])
 	}
-	if !profiles[6].IsFallback || !profiles[7].IsFallback || profiles[0].IsFallback {
+	if !profiles[7].IsFallback || !profiles[8].IsFallback || profiles[0].IsFallback {
 		t.Error("fallback flags are wrong")
 	}
-	if !profiles[8].IsDNSDesync {
+	if !profiles[9].IsDNSDesync {
 		t.Error("profile 10 must be DNS desync")
 	}
 }

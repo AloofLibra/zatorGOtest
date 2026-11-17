@@ -144,7 +144,7 @@ func TestStateAggregate(t *testing.T) {
 		t.Error("пустая zator_version")
 	}
 	st := out["status"].(map[string]any)
-	if len(st["profiles"].([]any)) != 9 {
+	if len(st["profiles"].([]any)) != 10 {
 		t.Errorf("profiles = %d", len(st["profiles"].([]any)))
 	}
 }
@@ -176,7 +176,7 @@ func TestCheck(t *testing.T) {
 		t.Errorf("results = %v", out["results"])
 	}
 	resp, out = e.post("/cgi-bin/check.cgi", "profile", "5")
-	wantError(t, resp, out, http.StatusBadRequest, "Некорректный профиль")
+	wantStatus(t, resp, http.StatusOK)
 	_, _ = e.post("/cgi-bin/check.cgi", "profile", "2", "video_id", "BPk1uJ4txPc")
 	e.checker.mu.Lock()
 	videoID := e.checker.lastOptions.VideoID

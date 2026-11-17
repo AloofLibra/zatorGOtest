@@ -168,9 +168,9 @@ func TestSetLockAutoRotationConflict(t *testing.T) {
 	wantError(t, resp, out, http.StatusConflict, want)
 	resp, out = e.post("/cgi-bin/clear-lock.cgi", "profile", "3")
 	wantError(t, resp, out, http.StatusConflict, want)
-	// Удалённый отдельный QUIC-профиль нельзя зафиксировать.
+	// Восстановленный QUIC-профиль можно зафиксировать.
 	resp, out = e.post("/cgi-bin/set-lock.cgi", "profile", "5", "strategy", "1")
-	wantError(t, resp, out, http.StatusBadRequest, "Стратегия вне диапазона")
+	wantOK(t, resp, out)
 }
 
 func TestSetLockVoiceProfileRestartsAndEditsPorts(t *testing.T) {
