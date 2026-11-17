@@ -700,6 +700,64 @@ func (r *ApplyResult) finishTransaction(commit bool) error {
 	return finish(commit)
 }
 
+// archiveTransaction collects deferred archive writes and owns their commit or rollback.
+type archiveTransaction struct {
+	results []*ApplyResult
+	result  *ApplyResult
+}
+
+type archiveSpec struct {
+	file, tracking, component string
+	meta                      *Latest
+}
+
+func (u *Updater) applyArchives(specs []archiveSpec) (*archiveTransaction, error) {
+	tx := &archiveTransaction{}
+	for _, spec := range specs {
+		res, err := u.ApplyArchive(spec.file, ApplyOptions{
+			Tracking: spec.tracking, Meta: spec.meta, Component: spec.component, deferCommit: true,
+		})
+		if err != nil {
+			return tx, tx.rollback(err)
+		}
+		tx.add(res)
+	}
+	return tx, nil
+}
+
+func (t *archiveTransaction) add(r *ApplyResult) {
+	t.results = append(t.results, r)
+	if t.result == nil {
+		t.result = r
+		return
+	}
+	t.result.Installed += r.Installed
+	t.result.Unchanged += r.Unchanged
+	t.result.Kept += r.Kept
+	t.result.Skipped += r.Skipped
+	t.result.HasCore = t.result.HasCore || r.HasCore
+	t.result.HasWebUI = t.result.HasWebUI || r.HasWebUI
+	t.result.Files = append(t.result.Files, r.Files...)
+}
+
+func (t *archiveTransaction) finish(commit bool) error {
+	var errs []error
+	if commit {
+		for _, r := range t.results {
+			errs = append(errs, r.finishTransaction(true))
+		}
+	} else {
+		for i := len(t.results) - 1; i >= 0; i-- {
+			errs = append(errs, t.results[i].finishTransaction(false))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (t *archiveTransaction) rollback(cause error) error {
+	return errors.Join(cause, t.finish(false))
+}
+
 func (u *Updater) planFiles(staging string) ([]plannedFile, *ApplyResult, map[string]string, error) {
 	entries, err := LoadManifest(staging)
 	if err != nil {
@@ -993,16 +1051,12 @@ func (u *Updater) ApplyArchive(archive string, opts ApplyOptions) (*ApplyResult,
 // RunOptions настраивает Run.
 type RunOptions struct {
 	// Mode selects app (binary+app resources), config (config resources only),
-	// or full. Empty preserves the legacy Variant behavior.
+	// or full.
 	Mode string
-	// Variant — core | webui | full (по умолчанию full).
-	Variant string
 	// Force применяет архив даже при отсутствии обновления.
 	Force bool
 	// Tracking — значение TRACKING (по умолчанию latest).
 	Tracking string
-	// KeepArchive не удаляет скачанный архив после успешного применения.
-	KeepArchive bool
 }
 
 // Report — итог Run.
@@ -1056,65 +1110,58 @@ func (u *Updater) RunMode(ctx context.Context, opts RunOptions) (*Report, error)
 			return rep, err
 		}
 	}
-	var transactions []*ApplyResult
-	rollback := func() error {
-		var errs []error
-		for i := len(transactions) - 1; i >= 0; i-- {
-			errs = append(errs, transactions[i].finishTransaction(false))
+	files := make(map[string]string, 2)
+	defer func() {
+		for _, file := range files {
+			_ = os.Remove(file)
 		}
-		return errors.Join(errs...)
-	}
-	applyPackage := func(name, component string) error {
-		archive, err := u.DownloadAsset(ctx, check.Latest, name)
-		if err != nil {
-			return err
-		}
-		defer os.Remove(archive)
-		res, err := u.ApplyArchive(archive, ApplyOptions{Tracking: opts.Tracking, Meta: check.Latest, Component: component, deferCommit: true})
-		if err != nil {
-			return err
-		}
-		transactions = append(transactions, res)
-		if rep.Apply == nil {
-			rep.Apply = res
-		} else {
-			rep.Apply.Installed += res.Installed
-			rep.Apply.Unchanged += res.Unchanged
-			rep.Apply.Kept += res.Kept
-			rep.Apply.Skipped += res.Skipped
-			rep.Apply.HasCore = rep.Apply.HasCore || res.HasCore
-			rep.Apply.HasWebUI = rep.Apply.HasWebUI || res.HasWebUI
-			rep.Apply.Files = append(rep.Apply.Files, res.Files...)
-		}
-		rep.Archive = name
-		return nil
-	}
+	}()
+	var specs []archiveSpec
 	if doApp {
-		if err := applyPackage(VariantApp, ModeApp); err != nil {
-			return rep, errors.Join(err, rollback())
+		file, err := u.DownloadAsset(ctx, check.Latest, VariantApp)
+		if err != nil {
+			return rep, err
 		}
+		files[VariantApp] = file
+		specs = append(specs, archiveSpec{file: file, tracking: opts.Tracking, component: ModeApp, meta: check.Latest})
+		rep.Archive = VariantApp
 	}
 	if doConfig {
-		if err := applyPackage(VariantConfig, ModeConfig); err != nil {
-			return rep, errors.Join(err, rollback())
+		file, err := u.DownloadAsset(ctx, check.Latest, VariantConfig)
+		if err != nil {
+			return rep, err
 		}
+		files[VariantConfig] = file
+		specs = append(specs, archiveSpec{file: file, tracking: opts.Tracking, component: ModeConfig, meta: check.Latest})
+		rep.Archive = VariantConfig
+	}
+	tx, err := u.applyArchives(specs)
+	if tx != nil {
+		rep.Apply = tx.result
+	}
+	if err != nil {
+		return rep, err
 	}
 	if doApp {
-		bin, tag, err := u.applyGitHubBinary(ctx, check.Latest.Release)
+		var bin *ApplyResult
+		var tag string
+		if u.applyBinary == nil {
+			bin, tag, err = u.applyGitHubBinary(ctx, check.Latest.Release)
+		} else {
+			bin, tag, err = u.applyBinary(ctx)
+		}
 		if err != nil {
-			return rep, errors.Join(fmt.Errorf("deploy: установка бинарника: %w", err), rollback())
+			return rep, tx.rollback(fmt.Errorf("deploy: установка бинарника: %w", err))
 		}
 		if tag != "" && CompareVersions(tag, check.Latest.Release) != 0 {
-			return rep, errors.Join(fmt.Errorf("deploy: бинарник %s не совпадает с релизом %s", tag, check.Latest.Release), rollback())
+			return rep, tx.rollback(fmt.Errorf("deploy: бинарник %s не совпадает с релизом %s", tag, check.Latest.Release))
 		}
 		if bin != nil && rep.Apply != nil {
 			rep.Apply.Installed += bin.Installed
 		}
 	}
-	for _, tr := range transactions {
-		if err := tr.finishTransaction(true); err != nil {
-			return rep, err
-		}
+	if err := tx.finish(true); err != nil {
+		return rep, err
 	}
 	return rep, nil
 }
@@ -1163,125 +1210,27 @@ func (u *Updater) applyResourceArchives(mode string, files map[string]string, me
 	if mode != ModeApp && mode != ModeConfig && mode != ModeFull {
 		return nil, fmt.Errorf("%w: mode %q", ErrUnknownVariant, mode)
 	}
-	var tx []*ApplyResult
-	var out *ApplyResult
-	rollback := func(cause error) error {
-		var errs []error
-		for i := len(tx) - 1; i >= 0; i-- {
-			errs = append(errs, tx[i].finishTransaction(false))
-		}
-		return errors.Join(append([]error{cause}, errs...)...)
-	}
-	apply := func(name, component string) error {
-		file := files[name]
-		if file == "" {
-			return fmt.Errorf("deploy: archive %s is missing", name)
-		}
-		res, err := u.ApplyArchive(file, ApplyOptions{Tracking: tracking, Meta: meta, Component: component, deferCommit: true})
-		if err != nil {
-			return err
-		}
-		tx = append(tx, res)
-		if out == nil {
-			out = res
-		} else {
-			out.Installed += res.Installed
-			out.Unchanged += res.Unchanged
-			out.Kept += res.Kept
-			out.Skipped += res.Skipped
-			out.Files = append(out.Files, res.Files...)
-			out.HasCore = out.HasCore || res.HasCore
-			out.HasWebUI = out.HasWebUI || res.HasWebUI
-		}
-		return nil
-	}
+	var specs []archiveSpec
 	if mode != ModeConfig {
-		if err := apply(VariantApp, ModeApp); err != nil {
-			return nil, rollback(err)
+		file := files[VariantApp]
+		if file == "" {
+			return nil, fmt.Errorf("deploy: archive %s is missing", VariantApp)
 		}
+		specs = append(specs, archiveSpec{file: file, tracking: tracking, meta: meta, component: ModeApp})
 	}
 	if mode != ModeApp {
-		if err := apply(VariantConfig, ModeConfig); err != nil {
-			return nil, rollback(err)
+		file := files[VariantConfig]
+		if file == "" {
+			return nil, fmt.Errorf("deploy: archive %s is missing", VariantConfig)
 		}
+		specs = append(specs, archiveSpec{file: file, tracking: tracking, meta: meta, component: ModeConfig})
 	}
-	for _, res := range tx {
-		if err := res.finishTransaction(true); err != nil {
-			return out, err
-		}
-	}
-	return out, nil
-}
-
-// Run выполняет полный цикл: проверка → загрузка → проверка sha256 →
-// staging → применение. Без обновления (и без Force) возвращает Report с
-// UpToDate=true и ничего не скачивает.
-func (u *Updater) Run(ctx context.Context, opts RunOptions) (*Report, error) {
-	if opts.Mode != "" {
-		return u.RunMode(ctx, opts)
-	}
-	variant := opts.Variant
-	if variant == "" {
-		variant = VariantFull
-	}
-	if !ValidVariant(variant) {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownVariant, variant)
-	}
-	check, err := u.CheckLatest(ctx)
-	if err != nil && check == nil {
-		return nil, err
-	}
-	rep := &Report{Check: check, Variant: variant}
-	if !check.UpdateAvailable() && !opts.Force {
-		rep.UpToDate = true
-		return rep, nil
-	}
-	// Релиз без tar/latest.json (только zator-linux-*): обновляем бинарник с GitHub.
-	if check.Latest != nil {
-		if _, aerr := check.Latest.Asset(variant); aerr != nil {
-			ar, tag, berr := u.applyGitHubBinary(ctx, check.Latest.Release)
-			if berr != nil {
-				return rep, berr
-			}
-			rep.Apply = ar
-			rep.Archive = tag
-			return rep, nil
-		}
-	}
-	archive, err := u.DownloadAsset(ctx, check.Latest, variant)
+	tx, err := u.applyArchives(specs)
 	if err != nil {
-		return rep, err
+		return tx.result, err
 	}
-	rep.Archive = archive
-	if !opts.KeepArchive {
-		defer os.Remove(archive)
+	if err := tx.finish(true); err != nil {
+		return tx.result, err
 	}
-	res, err := u.ApplyArchive(archive, ApplyOptions{Tracking: opts.Tracking, Meta: check.Latest, deferCommit: variant != VariantWebUI})
-	if err != nil {
-		return rep, err
-	}
-	rep.Apply = res
-	if variant != VariantWebUI {
-		applyBinary := u.applyBinary
-		var bin *ApplyResult
-		var tag string
-		if applyBinary == nil {
-			bin, tag, err = u.applyGitHubBinary(ctx, check.Latest.Release)
-		} else {
-			bin, tag, err = applyBinary(ctx)
-		}
-		if err != nil {
-			return rep, errors.Join(fmt.Errorf("deploy: архив применён, бинарник не обновлён: %w", err), res.finishTransaction(false))
-		}
-		if check.Latest != nil && tag != "" && CompareVersions(tag, check.Latest.Release) != 0 {
-			return rep, errors.Join(fmt.Errorf("deploy: бинарник %s не совпадает с архивным релизом %s", tag, check.Latest.Release), res.finishTransaction(false))
-		}
-		if bin != nil {
-			res.Installed += bin.Installed
-		}
-	}
-	if err := res.finishTransaction(true); err != nil {
-		return rep, fmt.Errorf("deploy: не удалось завершить транзакцию обновления: %w", err)
-	}
-	return rep, nil
+	return tx.result, nil
 }

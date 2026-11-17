@@ -54,7 +54,6 @@ func (a *App) StartGooglevideoSeeder(ctx context.Context) {
 		TailMax:         8,
 		PreferredStrats: []int{16},
 		Interval:        45 * time.Second,
-		Cooldown:        2 * time.Second,
 		RetryInterval:   time.Hour,
 		OnSeeded: func(hostKey string, strategy int) {
 			_ = hostKey

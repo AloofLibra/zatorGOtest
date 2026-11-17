@@ -101,59 +101,36 @@ func (u *Updater) ApplyBundleMode(ctx context.Context, b Bundle, mode string) (*
 		}
 		return nil, fmt.Errorf("deploy: offline bundle does not contain split resource archives")
 	}
-	var tx []*ApplyResult
-	var out *ApplyResult
-	rollback := func(cause error) error {
-		var errs []error
-		for i := len(tx) - 1; i >= 0; i-- {
-			errs = append(errs, tx[i].finishTransaction(false))
-		}
-		return errors.Join(append([]error{cause}, errs...)...)
-	}
-	apply := func(file, component string) error {
-		if file == "" {
-			return fmt.Errorf("deploy: offline archive %s is missing", component)
-		}
-		res, err := u.ApplyArchive(file, ApplyOptions{Tracking: "offline", Component: component, deferCommit: true})
-		if err != nil {
-			return err
-		}
-		tx = append(tx, res)
-		if out == nil {
-			out = res
-		} else {
-			out.Installed += res.Installed
-			out.Unchanged += res.Unchanged
-			out.Kept += res.Kept
-			out.Files = append(out.Files, res.Files...)
-		}
-		return nil
-	}
+	var specs []archiveSpec
 	if mode != ModeConfig {
-		if err := apply(b.AppArchive, ModeApp); err != nil {
-			return nil, rollback(err)
+		if b.AppArchive == "" {
+			return nil, fmt.Errorf("deploy: offline archive %s is missing", ModeApp)
 		}
+		specs = append(specs, archiveSpec{file: b.AppArchive, tracking: "offline", component: ModeApp})
 	}
 	if mode != ModeApp {
-		if err := apply(b.ConfigArchive, ModeConfig); err != nil {
-			return nil, rollback(err)
+		if b.ConfigArchive == "" {
+			return nil, fmt.Errorf("deploy: offline archive %s is missing", ModeConfig)
 		}
+		specs = append(specs, archiveSpec{file: b.ConfigArchive, tracking: "offline", component: ModeConfig})
+	}
+	tx, err := u.applyArchives(specs)
+	if err != nil {
+		return tx.result, err
 	}
 	if mode != ModeConfig {
 		bin, err := u.ApplyBundleBinary(ctx, b)
 		if err != nil {
-			return nil, rollback(err)
+			return nil, tx.rollback(err)
 		}
-		if out != nil {
-			out.Installed += bin.Installed
-		}
-	}
-	for _, res := range tx {
-		if err := res.finishTransaction(true); err != nil {
-			return out, err
+		if tx.result != nil {
+			tx.result.Installed += bin.Installed
 		}
 	}
-	return out, nil
+	if err := tx.finish(true); err != nil {
+		return tx.result, err
+	}
+	return tx.result, nil
 }
 
 // ApplyBundleResources installs resources from an offline bundle without replacing

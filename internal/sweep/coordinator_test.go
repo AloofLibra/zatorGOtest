@@ -73,7 +73,7 @@ func fullScenario(key string, s int) netcheck.TargetResult {
 	return resFail()
 }
 
-func newCoordEnv(t *testing.T, isolated bool, decide func(string, int) netcheck.TargetResult, mod func(*Config)) *coordEnv {
+func newCoordEnv(t *testing.T, decide func(string, int) netcheck.TargetResult, mod func(*Config)) *coordEnv {
 	t.Helper()
 	e := &coordEnv{t: t, st: newStore(t), probe: &recordingProbe{}}
 	e.dir = filepath.Join(t.TempDir(), "supersweep")
@@ -82,12 +82,8 @@ func newCoordEnv(t *testing.T, isolated bool, decide func(string, int) netcheck.
 		netcheck.URLYouTube: "1", gvTestURL: "2", netcheck.URLDiscord: "4",
 		"https://a.com/": "a.com", "https://b.org/": "b.org",
 	}
-	checkStore := e.st
-	if isolated {
-		e.probeSt = newStore(t)
-		checkStore = e.probeSt
-	}
-	e.chk = newScripted(checkStore, keyFor, decide)
+	e.probeSt = newStore(t)
+	e.chk = newScripted(e.probeSt, keyFor, decide)
 	cfg := Config{
 		Dir: e.dir, ArchiveDir: e.archive, Store: e.st, Checker: e.chk, Probe: e.probe,
 		MaxStrategy: fullMax,
@@ -95,9 +91,7 @@ func newCoordEnv(t *testing.T, isolated bool, decide func(string, int) netcheck.
 		Sleep:       (&sleepRec{}).sleep,
 		CancelPoll:  5 * time.Millisecond,
 	}
-	if isolated {
-		cfg.ProbeStore = e.probeSt
-	}
+	cfg.ProbeStore = e.probeSt
 	if mod != nil {
 		mod(&cfg)
 	}
@@ -159,7 +153,7 @@ func worker(t *testing.T, rep Report, name string) WorkerReport {
 }
 
 func TestCoordinator_FullRun(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 
 	rep, err := e.c.Run(context.Background(), fastParams())
@@ -263,7 +257,7 @@ func TestCoordinator_FullRun(t *testing.T) {
 }
 
 func TestCoordinator_PollDuringRun(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	var seen Report
 	var polled bool
 	e.chk.hook = func(call int, key string, s int, _ context.Context) {
@@ -298,7 +292,7 @@ func TestCoordinator_PollDuringRun(t *testing.T) {
 }
 
 func TestCoordinator_QuickProfileAppliesOnlySelectedWinner(t *testing.T) {
-	e := newCoordEnv(t, true, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	address := "https://custom.youtube.com/watch"
 	e.chk.keyFor[address] = "1"
@@ -321,8 +315,8 @@ func TestCoordinator_QuickProfileAppliesOnlySelectedWinner(t *testing.T) {
 	}
 }
 
-func TestCoordinator_CancelRestoresPrev(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+func TestCoordinator_CancelKeepsPrev(t *testing.T) {
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	e.chk.hook = func(call int, _ string, _ int, _ context.Context) {
 		if call == 3 {
@@ -375,7 +369,7 @@ func TestCoordinator_CancelRestoresPrev(t *testing.T) {
 }
 
 func TestCoordinator_CancelFileFromAnotherProcess(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	// yt и gv применяются, затем cancel-файл (как от WebUI) останавливает фазу ds.
 	e.setPrev()
 	mustSet(t, e.st, "2", "tls", 8)
@@ -403,7 +397,7 @@ func TestCoordinator_CancelFileFromAnotherProcess(t *testing.T) {
 	e.wantLock("1", "tls", 3)
 	e.wantLock("1", "http", 3)
 	e.wantLock("2", "tls", 1)
-	// Прерванная фаза возвращает прежнее.
+	// Прерванная фаза не меняет рабочие локи.
 	e.wantLock("4", "tls", 11)
 	e.wantLock("a.com", "tls", 1)
 	e.wantUnset("b.org", "tls")
@@ -413,7 +407,7 @@ func TestCoordinator_CancelFileFromAnotherProcess(t *testing.T) {
 }
 
 func TestCoordinator_ContextCancel(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	ctx, cancel := context.WithCancel(context.Background())
 	e.chk.hook = func(call int, _ string, _ int, _ context.Context) {
@@ -434,7 +428,7 @@ func TestCoordinator_ContextCancel(t *testing.T) {
 
 func TestCoordinator_Busy(t *testing.T) {
 	release := make(chan struct{})
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	entered := make(chan struct{})
 	var once bool
 	e.chk.hook = func(call int, _ string, _ int, ctx context.Context) {
@@ -458,7 +452,7 @@ func TestCoordinator_Busy(t *testing.T) {
 		t.Errorf("second Start in same coordinator: %v", err)
 	}
 	// Другой координатор на тот же каталог (другой «процесс» с живым pid).
-	other, err := New(Config{Dir: e.dir, Store: e.st, Checker: e.chk})
+	other, err := New(Config{Dir: e.dir, Store: e.st, ProbeStore: e.probeSt, Checker: e.chk})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +475,7 @@ func TestCoordinator_Busy(t *testing.T) {
 }
 
 func TestCoordinator_StaleAndFreshLockDir(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, func(c *Config) { c.MaxStrategy = tinyMax })
+	e := newCoordEnv(t, fullScenario, func(c *Config) { c.MaxStrategy = tinyMax })
 	// Lock от умершего процесса снимается.
 	writeFile(t, filepath.Join(e.dir+".lock", "pid"), "999999999\n")
 	rep, err := e.c.Run(context.Background(), fastParams())
@@ -504,7 +498,7 @@ func TestCoordinator_StaleAndFreshLockDir(t *testing.T) {
 
 func TestCoordinator_DNSGate(t *testing.T) {
 	spoofed := netcheck.GateResult{Code: netcheck.GateSpoofed, Verdict: netcheck.GateVerdictSpoofed, Message: "DNS подменён"}
-	e := newCoordEnv(t, false, fullScenario, func(c *Config) {
+	e := newCoordEnv(t, fullScenario, func(c *Config) {
 		c.MaxStrategy = tinyMax
 		c.Gate = func(context.Context) netcheck.GateResult { return spoofed }
 	})
@@ -524,7 +518,7 @@ func TestCoordinator_DNSGate(t *testing.T) {
 	}
 
 	// Неопределённый вердикт не блокирует прогон.
-	e2 := newCoordEnv(t, false, fullScenario, func(c *Config) {
+	e2 := newCoordEnv(t, fullScenario, func(c *Config) {
 		c.MaxStrategy = tinyMax
 		c.Gate = func(context.Context) netcheck.GateResult {
 			return netcheck.GateResult{Code: netcheck.GateUnknown, Verdict: netcheck.GateVerdictUnknown}
@@ -536,7 +530,7 @@ func TestCoordinator_DNSGate(t *testing.T) {
 }
 
 func TestCoordinator_ParamValidation(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	if _, err := e.c.Run(context.Background(), Params{QuickProfile: 5}); err == nil {
 		t.Error("invalid quick profile must be rejected")
 	}
@@ -548,7 +542,7 @@ func TestCoordinator_ParamValidation(t *testing.T) {
 	if _, err := e.c.Run(context.Background(), p); !errors.Is(err, ErrNoDomains) {
 		t.Errorf("no valid domains: %v", err)
 	}
-	e2 := newCoordEnv(t, false, fullScenario, func(c *Config) {
+	e2 := newCoordEnv(t, fullScenario, func(c *Config) {
 		c.MaxStrategy = func(p int) int {
 			if p == 4 {
 				return 0
@@ -573,13 +567,13 @@ func TestCoordinator_ParamValidation(t *testing.T) {
 	if _, err := e.c.Wait(); !errors.Is(err, ErrNotRunning) {
 		t.Errorf("Wait before Start: %v", err)
 	}
-	if c, _ := New(Config{Store: e.st, Checker: e.chk}); c.Dir() != filepath.Clean(DefaultDir) {
+	if c, _ := New(Config{Store: e.st, ProbeStore: e.probeSt, Checker: e.chk}); c.Dir() != filepath.Clean(DefaultDir) {
 		t.Errorf("default dir = %q", c.Dir())
 	}
 }
 
 func TestCoordinator_DomainsSanitizedInReport(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, func(c *Config) { c.MaxStrategy = tinyMax })
+	e := newCoordEnv(t, fullScenario, func(c *Config) { c.MaxStrategy = tinyMax })
 	var logs []string
 	e.c.cfg.Logf = func(f string, a ...any) { logs = append(logs, f) }
 	p := fastParams()
@@ -603,7 +597,7 @@ func TestCoordinator_DomainsSanitizedInReport(t *testing.T) {
 }
 
 func TestCoordinator_MediaStatusMakesGoogleVideoUnknown(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	mustSet(t, e.st, "2", "tls", 6)
 	p := fastParams()
@@ -619,14 +613,14 @@ func TestCoordinator_MediaStatusMakesGoogleVideoUnknown(t *testing.T) {
 	if !strings.Contains(gv.Label, "Media UNKNOWN: resolver_unavailable") {
 		t.Errorf("label = %q", gv.Label)
 	}
-	// unknown без победителя: прежний лок профиля возвращается.
+	// unknown без победителя: прежний лок профиля остаётся.
 	e.wantLock("2", "tls", 6)
 	if got := strings.TrimSpace(string(mustRead(t, filepath.Join(e.dir, "media-status")))); got != "resolver_unavailable" {
 		t.Errorf("media-status = %q", got)
 	}
 
 	// Готовая медиапроверка: gv остаётся обычным, метка — [media TCP].
-	e2 := newCoordEnv(t, false, fullScenario, nil)
+	e2 := newCoordEnv(t, fullScenario, nil)
 	p.MediaStatus = "ready"
 	rep, err = e2.c.Run(context.Background(), p)
 	if err != nil {
@@ -638,7 +632,7 @@ func TestCoordinator_MediaStatusMakesGoogleVideoUnknown(t *testing.T) {
 }
 
 func TestCoordinatorResolvesMediaBeforeIsolatedGVPhase(t *testing.T) {
-	e := newCoordEnv(t, true, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.c.cfg.ResolveMedia = func(context.Context) (netcheck.YouTubeMedia, error) {
 		if len(e.probe.startList()) != 0 {
 			t.Fatal("Innertube URLs must be prepared before the isolated probe starts")
@@ -662,7 +656,7 @@ func TestCoordinatorResolvesMediaBeforeIsolatedGVPhase(t *testing.T) {
 }
 
 func TestCoordinator_NoGreenKeepsPrevLocks(t *testing.T) {
-	e := newCoordEnv(t, false, func(string, int) netcheck.TargetResult { return resFail() }, nil)
+	e := newCoordEnv(t, func(string, int) netcheck.TargetResult { return resFail() }, nil)
 	e.setPrev()
 	rep, err := e.c.Run(context.Background(), fastParams())
 	if err != nil {
@@ -688,7 +682,7 @@ func TestCoordinator_NoGreenKeepsPrevLocks(t *testing.T) {
 // --- изолированный режим и пробник ---
 
 func TestCoordinator_IsolatedModeDoesNotTouchStoreUntilApply(t *testing.T) {
-	e := newCoordEnv(t, true, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	rep, err := e.c.Run(context.Background(), fastParams())
 	if err != nil {
@@ -711,7 +705,7 @@ func TestCoordinator_IsolatedModeDoesNotTouchStoreUntilApply(t *testing.T) {
 }
 
 func TestCoordinator_IsolatedCancelLeavesStoreUntouched(t *testing.T) {
-	e := newCoordEnv(t, true, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	e.chk.hook = func(call int, _ string, _ int, _ context.Context) {
 		if call == 3 {
@@ -728,7 +722,7 @@ func TestCoordinator_IsolatedCancelLeavesStoreUntouched(t *testing.T) {
 }
 
 func TestCoordinator_ProbeStartFailureStopsRun(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	e.probe.startErr = map[int]error{2: errors.New("boom")}
 	rep, err := e.c.Run(context.Background(), fastParams())
@@ -749,7 +743,7 @@ func TestCoordinator_ProbeStartFailureStopsRun(t *testing.T) {
 }
 
 func TestCoordinator_UnhealthyProbe(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	e.probe.healthy = func(int) bool { return false }
 	_, err := e.c.Run(context.Background(), fastParams())
@@ -763,7 +757,7 @@ func TestCoordinator_UnhealthyProbe(t *testing.T) {
 }
 
 func TestCoordinator_IsolationLostTwice(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, nil)
+	e := newCoordEnv(t, fullScenario, nil)
 	e.setPrev()
 	e.probe.healthy = func(call int) bool { return call%2 == 1 } // до пробы здорова, после — нет
 	_, err := e.c.Run(context.Background(), fastParams())
@@ -777,7 +771,7 @@ func TestCoordinator_IsolationLostTwice(t *testing.T) {
 }
 
 func TestCoordinator_IsolationLostOnceIsRetried(t *testing.T) {
-	e := newCoordEnv(t, false, fullScenario, func(c *Config) { c.MaxStrategy = tinyMax })
+	e := newCoordEnv(t, fullScenario, func(c *Config) { c.MaxStrategy = tinyMax })
 	e.probe.healthy = func(call int) bool { return call != 2 }
 	rep, err := e.c.Run(context.Background(), fastParams())
 	if err != nil || rep.State != StateDone {
@@ -791,7 +785,7 @@ func TestCoordinator_IsolationLostOnceIsRetried(t *testing.T) {
 
 func TestCoordinator_WorkerPausesAreRequested(t *testing.T) {
 	rec := &sleepRec{}
-	e := newCoordEnv(t, false, fullScenario, func(c *Config) { c.Sleep = rec.sleep })
+	e := newCoordEnv(t, fullScenario, func(c *Config) { c.Sleep = rec.sleep })
 	p := fastParams()
 	p.Pause, p.DSPause, p.RKNPause, p.PhasePause, p.GreenPause, p.Settle = 4*time.Second, 7*time.Second, 11*time.Second, 13*time.Second, 0, 0
 	if _, err := e.c.Run(context.Background(), p); err != nil {

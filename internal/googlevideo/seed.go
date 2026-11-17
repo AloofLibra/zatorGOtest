@@ -20,9 +20,6 @@ type SeedStatus struct {
 	Pending    int    `json:"pending"`
 }
 
-// ProbeFunc пробует стратегию против FQDN; ok=true если TLS зелёный.
-type ProbeFunc func(ctx context.Context, fqdn string, strategy int) (ok bool, detail string, err error)
-
 // ProbeBatchFunc проверяет упорядоченный набор стратегий одной изолированной
 // сессией. onTry вызывается перед каждой стратегией для отображения прогресса.
 // Возвращается только стратегия, прошедшая все критерии проверки.
@@ -36,10 +33,7 @@ type SeederConfig struct {
 	StatePath string
 	// ListHosts — текущий googlevideo-hosts.txt
 	ListHosts func() ([]string, error)
-	// Probe — изолированная/живая TLS-проба (обязательна для реального пробоя;
-	// если nil — только transfer-seed без сети).
-	Probe ProbeFunc
-	// ProbeBatch — предпочтительная изолированная проба списка кандидатов.
+	// ProbeBatch — изолированная проба списка кандидатов.
 	ProbeBatch ProbeBatchFunc
 	// DefaultStrat / MaxStrat / TailMax — кандидаты.
 	DefaultStrat int
@@ -50,8 +44,6 @@ type SeederConfig struct {
 	PreferredStrats []int
 	// Interval между циклами.
 	Interval time.Duration
-	// Cooldown после обработки одного sn.
-	Cooldown time.Duration
 	// RetryInterval — интервал повторной сетевой пробы неудачного hostkey.
 	RetryInterval time.Duration
 	// OnSeeded — после успешной записи (опционально: refresh ipv4/wssize).
@@ -84,9 +76,6 @@ func NewSeeder(cfg SeederConfig) *Seeder {
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 45 * time.Second
-	}
-	if cfg.Cooldown <= 0 {
-		cfg.Cooldown = 3 * time.Second
 	}
 	if cfg.RetryInterval <= 0 {
 		cfg.RetryInterval = time.Hour
@@ -223,7 +212,7 @@ func (s *Seeder) tick(ctx context.Context) {
 	}
 	cands := CandidateStrategies(locks, s.cfg.DefaultStrat, s.cfg.MaxStrat, s.cfg.TailMax)
 	cands = prioritizeCandidates(cands, s.cfg.PreferredStrats, s.cfg.MaxStrat)
-	if s.cfg.ProbeBatch == nil && s.cfg.Probe == nil {
+	if s.cfg.ProbeBatch == nil {
 		// Never turn an untested default into a lock or transfer evidence.
 		s.setStatus(func(st *SeedStatus) {
 			st.LastHost = hk
@@ -233,12 +222,7 @@ func (s *Seeder) tick(ctx context.Context) {
 		})
 		return
 	}
-	if s.cfg.ProbeBatch != nil {
-		s.probeBatch(ctx, hk, fqdn, cands)
-		return
-	}
-	s.markProbed(hk)
-	s.probeSequential(ctx, hk, fqdn, cands)
+	s.probeBatch(ctx, hk, fqdn, cands)
 }
 
 func (s *Seeder) probeBatch(ctx context.Context, hk, fqdn string, cands []int) {
@@ -307,75 +291,6 @@ func (s *Seeder) probeBatch(ctx context.Context, hk, fqdn string, cands []int) {
 	if s.cfg.OnSeeded != nil {
 		s.cfg.OnSeeded(hk, strategy)
 	}
-}
-
-func (s *Seeder) probeSequential(ctx context.Context, hk, fqdn string, cands []int) {
-	for _, strat := range cands {
-		if ctx.Err() != nil {
-			return
-		}
-		s.setStatus(func(st *SeedStatus) {
-			st.State = "probing"
-			st.HostKey = hk
-			st.Strategy = strat
-		})
-		ok, detail, err := s.cfg.Probe(ctx, fqdn, strat)
-		if err != nil {
-			s.setStatus(func(st *SeedStatus) {
-				st.State = "idle"
-				st.HostKey = ""
-				st.Strategy = 0
-				st.LastHost = hk
-				st.LastStrat = strat
-				st.LastResult = "error"
-				st.LastError = err.Error()
-			})
-			return
-		}
-		if !ok {
-			s.setStatus(func(st *SeedStatus) {
-				st.LastHost = hk
-				st.LastStrat = strat
-				st.LastResult = "fail"
-				st.LastError = detail
-			})
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(s.cfg.Cooldown):
-			}
-			continue
-		}
-		if err := s.commit(hk, strat, SourceLearned); err != nil {
-			s.setStatus(func(st *SeedStatus) {
-				st.State = "idle"
-				st.LastResult = "error"
-				st.LastError = err.Error()
-			})
-			return
-		}
-		s.setStatus(func(st *SeedStatus) {
-			st.State = "idle"
-			st.HostKey = ""
-			st.Strategy = 0
-			st.LastHost = hk
-			st.LastStrat = strat
-			st.LastResult = "ok"
-			st.LastError = ""
-		})
-		if s.cfg.OnSeeded != nil {
-			s.cfg.OnSeeded(hk, strat)
-		}
-		return
-	}
-	s.setStatus(func(st *SeedStatus) {
-		st.State = "idle"
-		st.HostKey = ""
-		st.Strategy = 0
-		st.LastHost = hk
-		st.LastResult = "fail"
-		st.LastError = fmt.Sprintf("нет зелёной стратегии среди %d кандидатов", len(cands))
-	})
 }
 
 func (s *Seeder) nextProbeHost(missing []string) string {

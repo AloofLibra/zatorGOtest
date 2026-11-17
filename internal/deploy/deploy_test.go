@@ -38,7 +38,7 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
-func TestParseLatestAndRun(t *testing.T) {
+func TestParseLatestAndRunMode(t *testing.T) {
 	root := t.TempDir()
 	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
 	if err := p.EnsureDirs(); err != nil {
@@ -75,9 +75,15 @@ func TestParseLatestAndRun(t *testing.T) {
 		WebUISHA:      "newweb",
 		ZatorDate:     "2026-01-01",
 		WebUIDate:     "2026-01-01",
+		ConfigSHA:     "newconfig",
 		Assets: map[string]Asset{
-			VariantFull: {
-				Name:   "zator-full.tar.gz",
+			VariantApp: {
+				Name:   "zator-app.tar.gz",
+				Size:   int64(len(archiveBytes)),
+				SHA256: archHex,
+			},
+			VariantConfig: {
+				Name:   "zator-config.tar.gz",
 				Size:   int64(len(archiveBytes)),
 				SHA256: archHex,
 			},
@@ -89,7 +95,10 @@ func TestParseLatestAndRun(t *testing.T) {
 	mux.HandleFunc("/latest.json", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(latestJSON)
 	})
-	mux.HandleFunc("/zator-full.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/zator-app.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(archiveBytes)
+	})
+	mux.HandleFunc("/zator-config.tar.gz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(archiveBytes)
 	})
 	srv := httptest.NewServer(mux)
@@ -113,7 +122,7 @@ func TestParseLatestAndRun(t *testing.T) {
 		t.Fatalf("expected update available: %+v", check)
 	}
 
-	rep, err := u.Run(ctx, RunOptions{Variant: VariantFull, Force: true})
+	rep, err := u.RunMode(ctx, RunOptions{Mode: ModeFull, Force: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +141,7 @@ func TestParseLatestAndRun(t *testing.T) {
 	}
 }
 
-func TestRunRollsBackArchiveWhenBinaryUpdateFails(t *testing.T) {
+func TestRunModeRollsBackArchiveWhenBinaryUpdateFails(t *testing.T) {
 	root := t.TempDir()
 	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
 	if err := p.EnsureDirs(); err != nil {
@@ -183,8 +192,10 @@ func TestRunRollsBackArchiveWhenBinaryUpdateFails(t *testing.T) {
 	latest := Latest{
 		SchemaVersion: 1,
 		Release:       "2.0.0",
+		ConfigSHA:     "newconfig",
 		Assets: map[string]Asset{
-			VariantFull: {Name: "zator-full.tar.gz", Size: int64(archive.Len()), SHA256: archiveHash},
+			VariantApp:    {Name: "zator-app.tar.gz", Size: int64(archive.Len()), SHA256: archiveHash},
+			VariantConfig: {Name: "zator-config.tar.gz", Size: int64(archive.Len()), SHA256: archiveHash},
 		},
 	}
 	latestData, err := json.Marshal(latest)
@@ -193,7 +204,8 @@ func TestRunRollsBackArchiveWhenBinaryUpdateFails(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/latest.json", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(latestData) })
-	mux.HandleFunc("/zator-full.tar.gz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive.Bytes()) })
+	mux.HandleFunc("/zator-app.tar.gz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive.Bytes()) })
+	mux.HandleFunc("/zator-config.tar.gz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive.Bytes()) })
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	u := New(p)
@@ -202,7 +214,7 @@ func TestRunRollsBackArchiveWhenBinaryUpdateFails(t *testing.T) {
 	u.applyBinary = func(context.Context) (*ApplyResult, string, error) {
 		return nil, "", errors.New("binary download failed")
 	}
-	if _, err := u.Run(context.Background(), RunOptions{Variant: VariantFull, Force: true}); err == nil {
+	if _, err := u.RunMode(context.Background(), RunOptions{Mode: ModeFull, Force: true}); err == nil {
 		t.Fatal("expected binary update failure")
 	}
 	if got, err := os.ReadFile(target); err != nil || string(got) != "old-resource\n" {

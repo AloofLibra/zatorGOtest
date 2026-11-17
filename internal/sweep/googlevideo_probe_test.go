@@ -14,7 +14,7 @@ import (
 )
 
 func TestProbeGooglevideoCandidatesUsesPrivateLockAndRequiresBothTLSAndFullDownload(t *testing.T) {
-	e := newCoordEnv(t, true, func(_ string, strategy int) netcheck.TargetResult {
+	e := newCoordEnv(t, func(_ string, strategy int) netcheck.TargetResult {
 		if strategy == 2 {
 			return resGood("1.0")
 		}
@@ -47,7 +47,7 @@ func TestProbeGooglevideoCandidatesUsesPrivateLockAndRequiresBothTLSAndFullDownl
 }
 
 func TestProbeGooglevideoCandidatesRejectsPartialDownloadAndBusyRun(t *testing.T) {
-	e := newCoordEnv(t, true, func(string, int) netcheck.TargetResult { return resCut() }, nil)
+	e := newCoordEnv(t, func(string, int) netcheck.TargetResult { return resCut() }, nil)
 	const url = "https://rr1---sn-example.googlevideo.com/"
 	e.chk.keyFor[url] = "2"
 	media := netcheck.YouTubeMedia{
@@ -77,7 +77,7 @@ func TestProbeGooglevideoCandidatesRejectsPartialDownloadAndBusyRun(t *testing.T
 }
 
 func TestProbeGooglevideoCandidatesRejectsDifferentMediaHostkey(t *testing.T) {
-	e := newCoordEnv(t, true, func(string, int) netcheck.TargetResult { return resGood("1.0") }, nil)
+	e := newCoordEnv(t, func(string, int) netcheck.TargetResult { return resGood("1.0") }, nil)
 	media := netcheck.YouTubeMedia{
 		VideoURL:  "https://rr1---sn-other.googlevideo.com/videoplayback?sig=video",
 		AudioURL:  "https://rr1---sn-other.googlevideo.com/videoplayback?sig=audio",

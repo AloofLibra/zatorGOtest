@@ -34,11 +34,9 @@ type Config struct {
 	// ArchiveDir — каталог с last-report.tsv (пусто — отчёт не сохраняется).
 	ArchiveDir string
 
-	// Store — хранилище фиксаций: сюда применяются победители и откатываются
-	// прежние локи (обычно *orchestra.Store).
+	// Store — рабочее хранилище, куда применяются выбранные победители.
 	Store Locker
-	// ProbeStore — приватное хранилище пробных локов изолированного режима.
-	// nil — пробы пишут прямо в Store (локи потом откатываются/применяются).
+	// ProbeStore — отдельное приватное хранилище для всех пробных локов.
 	ProbeStore Locker
 	// Checker — проверка цели (обычно *netcheck.Checker).
 	Checker TargetChecker
@@ -172,6 +170,9 @@ func New(cfg Config) (*Coordinator, error) {
 	if cfg.Store == nil {
 		return nil, fmt.Errorf("%w: не задан Store", ErrConfig)
 	}
+	if cfg.ProbeStore == nil {
+		return nil, fmt.Errorf("%w: не задан ProbeStore", ErrConfig)
+	}
 	if cfg.Checker == nil {
 		return nil, fmt.Errorf("%w: не задан Checker", ErrConfig)
 	}
@@ -297,27 +298,20 @@ func (c *Coordinator) Start(ctx context.Context, p Params) error {
 
 // run — состояние одного прогона.
 type run struct {
-	c         *Coordinator
-	p         Params
-	targets   []DomainTarget
-	maxes     map[int]int
-	started   time.Time
-	state     State
-	alive     string
-	mediaURLs *netcheck.YouTubeMedia
+	c              *Coordinator
+	p              Params
+	targets        []DomainTarget
+	maxes          map[int]int
+	started        time.Time
+	state          State
+	alive          string
+	mediaURLs      *netcheck.YouTubeMedia
+	profileResults map[string]ProfileSweepResult
+	rknResult      *RKNSweepResult
 
 	errMu  sync.Mutex
 	err    error
 	cancel context.CancelFunc
-
-	prev []prevRow
-}
-
-type prevRow struct {
-	kind  string // profile|domain
-	key   string
-	proto string
-	value orchestra.Strategy // StrategyAuto — лока не было
 }
 
 func (c *Coordinator) now() time.Time {
@@ -578,15 +572,6 @@ func (r *run) firstErr() error {
 
 // --- выполнение ---
 
-func (r *run) isolated() bool { return r.c.cfg.ProbeStore != nil }
-
-func (r *run) probeLocker() Locker {
-	if r.c.cfg.ProbeStore != nil {
-		return r.c.cfg.ProbeStore
-	}
-	return r.c.cfg.Store
-}
-
 func (r *run) specs(gvURL string) []workerSpec {
 	return []workerSpec{
 		{WorkerYT, 1, []string{"tls", "http"}, netcheck.LabelYouTube, netcheck.URLYouTube, r.maxes[1], r.p.Pause},
@@ -669,10 +654,8 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 	// До конца отката глушим отмену: откат и сводка не должны прерываться.
 	r.alive = ""
 	if cancelled {
-		r.restoreOnCancel()
 		_ = r.setState(StateCancelled)
 	} else {
-		r.restoreUnapplied()
 		_ = r.setState(StateApplying)
 		_ = r.setState(StateDone)
 	}
@@ -755,14 +738,19 @@ func (r *run) writeRegistry(specs []workerSpec) {
 	_ = fsutil.AtomicWriteFile(r.path(fileWorkers), []byte(b.String()), 0o644)
 }
 
-// collectPrev запоминает прежние локи для отката (prev.tsv).
+// collectPrev сохраняет рабочие локи для сравнения в отчёте.
 func (r *run) collectPrev() {
+	type previous struct {
+		kind, key, proto string
+		value            orchestra.Strategy
+	}
+	var prev []previous
 	add := func(kind, key, proto string) {
 		v := orchestra.Strategy(orchestra.StrategyAuto)
 		if s, err := r.c.cfg.Store.GetLock(r.p.Scope, key, proto); err == nil {
 			v = s
 		}
-		r.prev = append(r.prev, prevRow{kind, key, proto, v})
+		prev = append(prev, previous{kind, key, proto, v})
 	}
 	add("profile", "1", "tls")
 	add("profile", "1", "http")
@@ -773,32 +761,10 @@ func (r *run) collectPrev() {
 		add("domain", t.Domain, "tls")
 	}
 	var b strings.Builder
-	for _, p := range r.prev {
+	for _, p := range prev {
 		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\n", p.kind, p.key, p.proto, p.value)
 	}
 	_ = fsutil.AtomicWriteFile(r.path(filePrev), []byte(b.String()), 0o644)
-}
-
-// restorePrev возвращает прежние локи. В изолированном режиме пробы писали
-// только в приватное хранилище, рабочие локи трогать не нужно.
-func (r *run) restorePrev(kind, key string) {
-	if r.isolated() {
-		return
-	}
-	for _, p := range r.prev {
-		if (kind != "" && p.kind != kind) || (key != "" && p.key != key) {
-			continue
-		}
-		var err error
-		if p.value.IsAuto() {
-			err = r.c.cfg.Store.ClearLock(r.p.Scope, p.key, p.proto)
-		} else {
-			err = r.c.cfg.Store.SetLock(r.p.Scope, p.key, p.proto, p.value)
-		}
-		if err != nil {
-			r.c.logf("Не удалось вернуть прежний лок %s/%s/%s: %v", p.kind, p.key, p.proto, err)
-		}
-	}
 }
 
 // guarded проверяет здоровье изолированного пробника до и после пробы;
@@ -859,7 +825,7 @@ func (g guarded) withProbe(ctx context.Context, label, url string, check func() 
 
 func (r *run) env(profile int) *Env {
 	return &Env{
-		Locks:   r.probeLocker(),
+		Locks:   r.c.cfg.ProbeStore,
 		Checker: guarded{r: r, inner: r.c.cfg.Checker, profile: profile},
 		Scope:   r.p.Scope,
 		Settle:  r.p.Settle,
@@ -924,6 +890,10 @@ func (r *run) runProfile(ctx context.Context, s workerSpec) error {
 			_ = appendLine(r.path(filePacing), fmt.Sprintf("%s\t%d\t%d", s.name, n, int(d.Seconds())))
 		},
 	})
+	if r.profileResults == nil {
+		r.profileResults = make(map[string]ProfileSweepResult)
+	}
+	r.profileResults[s.name] = res
 	bestKind := res.BestKind
 	_ = writeKV(r.path(bestFile(s.name)), kv{
 		{"best", numOrEmpty(res.Best)},
@@ -967,6 +937,7 @@ func (r *run) runRKN(ctx context.Context) error {
 			_ = appendLine(r.path(filePacing), fmt.Sprintf("%s\t%d\t%d", WorkerRKN, n, int(d.Seconds())))
 		},
 	})
+	r.rknResult = &res
 	w := res.Winner
 	_ = writeKV(r.path(bestFile(WorkerRKN)), kv{
 		{"winner", numOrEmpty(w.OK)},
@@ -1007,30 +978,51 @@ func (r *run) noteApplied(kind, target string, strategy int) {
 // settleWorker применяет результат завершённой фазы через orchestra.Store:
 // зелёная лучшая стратегия профиля; для РКН — зелёные победители доменов и
 // профиль 3. Жёлтые результаты автоматически не применяются. Неполный проход
-// не применяется, прежний лок возвращается.
+// не применяется, рабочие локи остаются без изменений.
 func (r *run) settleWorker(name string) {
 	if !fileExists(r.path(doneFile(name))) || fileExists(r.path(appliedDoneFile(name))) {
 		return
 	}
 	pkey := workerProfiles[name]
-	best := readKV(r.path(bestFile(name)))
+	profile, hasProfile := r.profileResults[name]
+	best := map[string]string{}
+	if name == WorkerRKN {
+		if r.rknResult == nil {
+			best = readKV(r.path(bestFile(name)))
+		}
+	} else if !hasProfile {
+		best = readKV(r.path(bestFile(name)))
+	}
 	marker := "none"
 	finish := func() {
 		_ = fsutil.AtomicWriteFile(r.path(appliedDoneFile(name)), []byte(marker+"\n"), 0o644)
 	}
 
-	if best["interrupted"] == "1" {
-		if name != WorkerRKN {
-			r.restorePrev("profile", strconv.Itoa(pkey))
-		}
+	interrupted := best["interrupted"] == "1"
+	if name == WorkerRKN && r.rknResult != nil {
+		interrupted = r.rknResult.Interrupted
+	} else if hasProfile {
+		interrupted = profile.Interrupted
+	}
+	if interrupted {
 		finish()
 		return
 	}
 
 	var winner int
 	if name == WorkerRKN {
-		winner = atoi(best["winner"])
-		for _, d := range DomainWinners(parseCoverage(readTSV(r.path(fileCoverage)))) {
+		if r.rknResult != nil {
+			winner = r.rknResult.Winner.OK
+		} else {
+			winner = atoi(best["winner"])
+		}
+		var coverage []CoverageRow
+		if r.rknResult != nil {
+			coverage = r.rknResult.Coverage
+		} else {
+			coverage = parseCoverage(readTSV(r.path(fileCoverage)))
+		}
+		for _, d := range DomainWinners(coverage) {
 			if d.Rank != 0 {
 				continue
 			}
@@ -1042,6 +1034,10 @@ func (r *run) settleWorker(name string) {
 			r.c.logf("РКН: домен %s — применена стратегия %d", d.Domain, d.Strategy)
 		}
 		marker = "domains"
+	} else if hasProfile {
+		if profile.BestKind != BestKindWarn {
+			winner = profile.Best
+		}
 	} else if best["best_kind"] != BestKindWarn {
 		winner = atoi(best["best"])
 	}
@@ -1066,84 +1062,6 @@ func (r *run) settleWorker(name string) {
 		}
 	case name == WorkerRKN:
 		r.c.logf("РКН: зелёного покрытия нет — профильная строка не менялась")
-	default:
-		r.restorePrev("profile", strconv.Itoa(pkey))
 	}
 	finish()
-}
-
-// restoreOnCancel — откат при отмене: уже применённые профили сохраняются,
-// остальные возвращаются; доменные пробы откатываются.
-func (r *run) restoreOnCancel() {
-	if r.p.QuickProfile != 0 {
-		if r.p.QuickProfile == 3 {
-			r.restorePrev("domain", "")
-			applied, _ := readApplied(r.path(fileApplied))
-			has3 := false
-			for _, a := range applied {
-				if a.Kind == "profile" && a.Target == "3" {
-					has3 = true
-				}
-			}
-			if !has3 {
-				r.restorePrev("profile", "3")
-			}
-			return
-		}
-		name := profileWorkers[r.p.QuickProfile]
-		marker := readFirstLine(r.path(appliedDoneFile(name)))
-		if marker == "" || marker == "none" || marker == "error" {
-			r.restorePrev("profile", strconv.Itoa(r.p.QuickProfile))
-		}
-		return
-	}
-	for _, name := range []string{WorkerYT, WorkerGV, WorkerDS} {
-		marker := readFirstLine(r.path(appliedDoneFile(name)))
-		switch marker {
-		case "", "none", "error":
-			r.restorePrev("profile", strconv.Itoa(workerProfiles[name]))
-		}
-	}
-	r.restorePrev("domain", "")
-	applied, _ := readApplied(r.path(fileApplied))
-	has3 := false
-	for _, a := range applied {
-		if a.Kind == "profile" && a.Target == "3" {
-			has3 = true
-		}
-	}
-	if !has3 {
-		r.restorePrev("profile", "3")
-	}
-}
-
-// restoreUnapplied — штатное завершение: откатить доменные пробы без
-// применённого победителя и профили без маркера применения.
-func (r *run) restoreUnapplied() {
-	applied, _ := readApplied(r.path(fileApplied))
-	has := map[string]bool{}
-	for _, a := range applied {
-		if a.Kind == "domain" {
-			has[a.Target] = true
-		}
-	}
-	for _, t := range r.targets {
-		if !has[t.Domain] {
-			r.restorePrev("domain", t.Domain)
-		}
-	}
-	if r.p.QuickProfile != 0 {
-		if r.p.QuickProfile != 3 {
-			name := profileWorkers[r.p.QuickProfile]
-			if !fileExists(r.path(appliedDoneFile(name))) {
-				r.restorePrev("profile", strconv.Itoa(r.p.QuickProfile))
-			}
-		}
-		return
-	}
-	for _, name := range []string{WorkerYT, WorkerGV, WorkerDS} {
-		if !fileExists(r.path(appliedDoneFile(name))) {
-			r.restorePrev("profile", strconv.Itoa(workerProfiles[name]))
-		}
-	}
 }

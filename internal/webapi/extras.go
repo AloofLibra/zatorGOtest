@@ -236,7 +236,7 @@ func (s *Server) postUpdateApply(r *http.Request, _ params) (map[string]any, err
 		if off.Offline {
 			u.Offline = true
 		}
-		rep, rerr := u.Run(ctx, deploy.RunOptions{Mode: mode})
+		rep, rerr := u.RunMode(ctx, deploy.RunOptions{Mode: mode})
 		if rerr != nil {
 			return rollbackFailure(http.StatusBadGateway, "Обновление не удалось: ", rerr)
 		}

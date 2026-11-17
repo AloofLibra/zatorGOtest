@@ -108,7 +108,12 @@ func TestSeederTransferWithoutProbe(t *testing.T) {
 		ListHosts: func() ([]string, error) {
 			return []string{"rr1---sn-new.googlevideo.com"}, nil
 		},
-		Probe:    nil,
+		ProbeBatch: func(_ context.Context, _ string, strategies []int, _ func(int)) (int, string, error) {
+			if len(strategies) == 0 {
+				return 0, "", nil
+			}
+			return strategies[0], "ok", nil
+		},
 		Interval: time.Hour,
 		TailMax:  2,
 	})
@@ -214,7 +219,10 @@ func TestSeederProbeWritesLearnedSource(t *testing.T) {
 	live := filepath.Join(dir, "live.tsv")
 	s := NewSeeder(SeederConfig{LivePath: live, DefaultStrat: 41, MaxStrat: 44,
 		ListHosts: func() ([]string, error) { return []string{"rr1---sn-new.googlevideo.com"}, nil },
-		Probe:     func(context.Context, string, int) (bool, string, error) { return true, "media verified", nil },
+		ProbeBatch: func(_ context.Context, _ string, candidates []int, onTry func(int)) (int, string, error) {
+			onTry(candidates[0])
+			return candidates[0], "media verified", nil
+		},
 	})
 	s.tick(context.Background())
 	got, err := ParseAutoLockedTSV(live)

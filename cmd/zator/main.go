@@ -592,7 +592,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	rep, err := u.Run(context.Background(), deploy.RunOptions{
+	rep, err := u.RunMode(context.Background(), deploy.RunOptions{
 		Mode:  *mode,
 		Force: *force,
 	})

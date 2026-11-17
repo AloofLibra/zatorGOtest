@@ -29,6 +29,11 @@ func procMutex(key string) *sync.Mutex {
 // WithDirLock выполняет fn под эксклюзивной блокировкой каталога path+LockDirSuffix.
 // Блокировка мёртвого PID и пустого каталога старше staleAge снимается.
 func WithDirLock(path string, timeout, staleAge time.Duration, fn func() error) error {
+	return WithDirLockCause(path, timeout, staleAge, nil, fn)
+}
+
+// WithDirLockCause is WithDirLock with a caller-specific timeout error for errors.Is.
+func WithDirLockCause(path string, timeout, staleAge time.Duration, timeoutCause error, fn func() error) error {
 	if path == "" {
 		return fn()
 	}
@@ -57,6 +62,9 @@ func WithDirLock(path string, timeout, staleAge time.Duration, fn func() error) 
 		}
 		reapStaleLock(dir, staleAge)
 		if time.Now().After(deadline) {
+			if timeoutCause != nil {
+				return fmt.Errorf("%w (%s): если все операции остановлены, удалите каталог блокировки", timeoutCause, dir)
+			}
 			return fmt.Errorf("fsutil: timeout lock %s (удалите каталог, если операции остановлены)", dir)
 		}
 		time.Sleep(lockPollInterval)

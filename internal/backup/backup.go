@@ -159,6 +159,9 @@ type CreateOptions struct {
 	IncludeLists bool
 	// SkipConfig не включает config zapret2 в архив.
 	SkipConfig bool
+	// IncludeExtraStrats and IncludeOrchestraState preserve the WebUI archive layout.
+	IncludeExtraStrats    bool
+	IncludeOrchestraState bool
 }
 
 type fileEntry struct {
@@ -207,39 +210,68 @@ func (m *Manager) collect(opts CreateOptions) ([]fileEntry, error) {
 			return nil, err
 		}
 	}
+	for _, tree := range []struct {
+		include    bool
+		name, root string
+	}{{opts.IncludeExtraStrats, "extra_strats", m.Paths.ExtraStratsDir}, {opts.IncludeOrchestraState, "orchestra_state", m.Paths.StateOrchestraDir()}} {
+		if !tree.include {
+			continue
+		}
+		err := filepath.WalkDir(tree.root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					return nil
+				}
+				return err
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
+			rel, err := filepath.Rel(tree.root, p)
+			if err != nil {
+				return err
+			}
+			add(tree.name+"/"+filepath.ToSlash(rel), p)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 	orchDir := m.Paths.StateOrchestraDir()
-	for _, f := range stateOrchestraFiles() {
-		add(entryOrch+"/"+f, filepath.Join(orchDir, f))
-	}
-	// Preserve the last report produced by the Go SuperSweep.
-	add("supersweep/last-report.tsv", filepath.Join(m.Paths.StateDir, "last-report.tsv"))
-	// Bash Zator stores result archives in orchestra/supersweep. Keep the
-	// newest one when importing/continuing an existing Bash installation.
-	ssDir := filepath.Join(orchDir, "supersweep")
-	if ents, err := os.ReadDir(ssDir); err == nil {
-		var newest os.DirEntry
-		var newestTime time.Time
-		for _, e := range ents {
-			if e.IsDir() || !strings.HasPrefix(e.Name(), "supersweep-") || !strings.HasSuffix(e.Name(), ".tar") {
-				continue
+	if !opts.IncludeOrchestraState {
+		for _, f := range stateOrchestraFiles() {
+			add(entryOrch+"/"+f, filepath.Join(orchDir, f))
+		}
+		// Preserve the last report produced by the Go SuperSweep.
+		add("supersweep/last-report.tsv", filepath.Join(m.Paths.StateDir, "last-report.tsv"))
+		// Bash Zator stores result archives in orchestra/supersweep. Keep the newest one.
+		ssDir := filepath.Join(orchDir, "supersweep")
+		if ents, err := os.ReadDir(ssDir); err == nil {
+			var newest os.DirEntry
+			var newestTime time.Time
+			for _, e := range ents {
+				if e.IsDir() || !strings.HasPrefix(e.Name(), "supersweep-") || !strings.HasSuffix(e.Name(), ".tar") {
+					continue
+				}
+				info, err := e.Info()
+				if err != nil || !info.Mode().IsRegular() {
+					continue
+				}
+				if newest == nil || info.ModTime().After(newestTime) {
+					newest, newestTime = e, info.ModTime()
+				}
 			}
-			info, err := e.Info()
-			if err != nil || !info.Mode().IsRegular() {
-				continue
-			}
-			if newest == nil || info.ModTime().After(newestTime) {
-				newest, newestTime = e, info.ModTime()
+			if newest != nil {
+				add(entryOrch+"/supersweep/"+newest.Name(), filepath.Join(ssDir, newest.Name()))
 			}
 		}
-		if newest != nil {
-			add(entryOrch+"/supersweep/"+newest.Name(), filepath.Join(ssDir, newest.Name()))
-		}
-	}
-	// Файлы client-scope (scopes/mark_N.tsv).
-	if ents, err := os.ReadDir(filepath.Join(orchDir, orchestra.ScopesDirName)); err == nil {
-		for _, e := range ents {
-			if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".tsv") {
-				add(entryOrch+"/"+orchestra.ScopesDirName+"/"+e.Name(), filepath.Join(orchDir, orchestra.ScopesDirName, e.Name()))
+		// Файлы client-scope (scopes/mark_N.tsv).
+		if ents, err := os.ReadDir(filepath.Join(orchDir, orchestra.ScopesDirName)); err == nil {
+			for _, e := range ents {
+				if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".tsv") {
+					add(entryOrch+"/"+orchestra.ScopesDirName+"/"+e.Name(), filepath.Join(orchDir, orchestra.ScopesDirName, e.Name()))
+				}
 			}
 		}
 	}
@@ -858,11 +890,15 @@ func (m *Manager) destFor(name string) string {
 		return filepath.Join(m.Paths.ListsDir, filepath.FromSlash(strings.TrimPrefix(name, entryLists+"/")))
 	case strings.HasPrefix(name, entryOrch+"/"):
 		return filepath.Join(m.Paths.StateOrchestraDir(), filepath.FromSlash(strings.TrimPrefix(name, entryOrch+"/")))
+	case strings.HasPrefix(name, "orchestra_state/"):
+		return filepath.Join(m.Paths.StateOrchestraDir(), filepath.FromSlash(strings.TrimPrefix(name, "orchestra_state/")))
 	// Раскладка shell-версии.
 	case strings.HasPrefix(name, "extra_strats/cache/orchestra/"):
 		return filepath.Join(m.Paths.StateOrchestraDir(), filepath.FromSlash(strings.TrimPrefix(name, "extra_strats/cache/orchestra/")))
 	case name == "extra_strats/TCP_Custom.txt" || name == "extra_strats/TCP_RKN_domains_by_substring.txt":
 		return filepath.Join(m.Paths.ListsDir, path.Base(name))
+	case strings.HasPrefix(name, "extra_strats/"):
+		return filepath.Join(m.Paths.ExtraStratsDir, filepath.FromSlash(strings.TrimPrefix(name, "extra_strats/")))
 	}
 	return ""
 }

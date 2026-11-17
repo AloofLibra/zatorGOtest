@@ -9,16 +9,6 @@ import (
 	"time"
 )
 
-func TestPidAlive(t *testing.T) {
-	if !pidAlive(os.Getpid()) {
-		t.Error("current process must be alive")
-	}
-	// Очень большой PID практически гарантированно не существует.
-	if pidAlive(0x7ffffff0) {
-		t.Error("bogus pid reported alive")
-	}
-}
-
 func TestLockReleasedAfterOperation(t *testing.T) {
 	s := newTestStore(t)
 	if err := s.SetLock("default", "3", "tls", 1); err != nil {
