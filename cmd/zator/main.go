@@ -33,6 +33,7 @@ const usage = `zator — управление zapret2 через Web UI
 
 Использование:
   zator [команда] [флаги]
+  zator menu      интерактивное меню (только TTY)
 
 Команды:
   version     показать версию
@@ -58,10 +59,19 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
+		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+			return runMenu(os.Stdin, stdout, stderr)
+		}
 		return cmdDefault(stdout)
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
+	case "menu":
+		if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Fprintln(stderr, "команда menu требует интерактивный терминал (TTY)")
+			return 1
+		}
+		return runMenu(os.Stdin, stdout, stderr)
 	case "version", "-v", "--version":
 		fmt.Fprintf(stdout, "zator %s\n", zator.Version())
 		return 0

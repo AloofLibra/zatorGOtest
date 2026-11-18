@@ -124,6 +124,11 @@ func (s *Server) writeSupersweep(w http.ResponseWriter) {
 
 // postSupersweep — POST setting=supersweep&value=start|status|cancel.
 func (s *Server) postSupersweep(_ *http.Request, p params) (map[string]any, error) {
+	return s.supersweepAction(p)
+}
+
+// supersweepAction is the shared operation behind HTTP and the local CLI.
+func (s *Server) supersweepAction(p params) (map[string]any, error) {
 	action := strings.ToLower(p.Get("value"))
 	if action == "" {
 		action = strings.ToLower(p.Get("action"))

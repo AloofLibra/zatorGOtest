@@ -539,45 +539,16 @@ func (s *Server) handleSetLock(w http.ResponseWriter, r *http.Request, p params)
 		writeErr(w, err)
 		return
 	}
-	if err := autoConflict(cfg, id); err != nil {
-		writeErr(w, err)
-		return
-	}
 	n, convErr := strconv.Atoi(strategy)
 	max := cfg.ProfileMaxStrategyOrDefault(id)
 	if convErr != nil || (n != 0 && (n < 1 || n > max)) {
 		writeError(w, http.StatusBadRequest, "Стратегия вне диапазона")
 		return
 	}
-	if err := profileModeGuard(cfg, id); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if len(config.ProfileProtos(id)) == 0 {
-		writeError(w, http.StatusBadRequest, "Не удалось определить протокол профиля")
-		return
-	}
-	prev := s.profileLockLabel(scope, id)
-	if err := s.applyProfileLock(scope, id, orchestra.Strategy(n)); err != nil {
+	out, err := s.CLISetProfileLock(r.Context(), scope, id, &n)
+	if err != nil {
 		writeLockFailure(w, err, "Не удалось сохранить состояние профиля")
 		return
-	}
-	lock := orchestra.Strategy(n).String()
-	out := map[string]any{
-		"ok":       true,
-		"previous": prev,
-		"lock":     lock,
-		"changed":  prev != lock,
-		"scope":    scope,
-		"profile":  id,
-	}
-	if id == 6 {
-		if w := s.voicePorts(r.Context(), n != 0); w != "" {
-			out["warning"] = w
-		}
-	}
-	if prev != lock {
-		s.notifyTelemetry()
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -598,43 +569,20 @@ func (s *Server) handleClearLock(w http.ResponseWriter, r *http.Request, p param
 		writeErr(w, err)
 		return
 	}
-	if err := autoConflict(cfg, id); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if err := profileModeGuard(cfg, id); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if len(config.ProfileProtos(id)) == 0 {
-		writeError(w, http.StatusBadRequest, "Не удалось определить протокол профиля")
-		return
-	}
-	prev := s.profileLockLabel(scope, id)
-	if err := s.applyProfileLock(scope, id, orchestra.StrategyAuto); err != nil {
+	out, err := s.CLISetProfileLock(r.Context(), scope, id, nil)
+	if err != nil {
 		writeLockFailure(w, err, "Не удалось сбросить состояние профиля")
 		return
-	}
-	out := map[string]any{
-		"ok":       true,
-		"previous": prev,
-		"lock":     "auto",
-		"changed":  prev != "auto",
-		"scope":    scope,
-		"profile":  id,
-	}
-	if id == 6 {
-		if w := s.voicePorts(r.Context(), true); w != "" {
-			out["warning"] = w
-		}
-	}
-	if prev != "auto" {
-		s.notifyTelemetry()
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func writeLockFailure(w http.ResponseWriter, err error, msg string) {
+	var ae *apiError
+	if errors.As(err, &ae) {
+		writeError(w, ae.Status, ae.Msg)
+		return
+	}
 	if errors.Is(err, orchestra.ErrConflict) {
 		writeError(w, http.StatusConflict, "Конфликт дубликатов в файле фиксаций: "+err.Error())
 		return

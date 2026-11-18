@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -95,6 +96,52 @@ func TestUnknownCommand(t *testing.T) {
 	code, _, errOut := runCmd(t, "bogus")
 	if code != 2 || !strings.Contains(errOut, "неизвестная команда") {
 		t.Fatalf("code=%d err=%q", code, errOut)
+	}
+}
+
+func TestMenuReaderAndExit(t *testing.T) {
+	setupEnv(t)
+	var out, errb bytes.Buffer
+	if code := runMenu(strings.NewReader("0\n"), &out, &errb); code != 0 {
+		t.Fatalf("exit code=%d err=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "ZATOR GO") || !strings.Contains(out.String(), "Стратегии") {
+		t.Fatalf("menu output missing header/items: %q", out.String())
+	}
+	if code := runMenu(strings.NewReader("неверно\n\n0\n"), &out, &errb); code != 0 || !strings.Contains(out.String(), "Введите номер") {
+		t.Fatalf("invalid choice code=%d output=%q", code, out.String())
+	}
+	if code := runMenu(strings.NewReader(""), &out, &errb); code != 0 {
+		t.Fatalf("EOF code=%d", code)
+	}
+}
+
+func TestMenuCommandRejectsNonTTY(t *testing.T) {
+	code, _, errOut := runCmd(t, "menu")
+	if code != 1 || !strings.Contains(errOut, "требует интерактивный терминал") {
+		t.Fatalf("menu without TTY: code=%d err=%q", code, errOut)
+	}
+}
+
+func TestMenuColorCanBeDisabled(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("NO_COLOR", "1")
+	if got := menuColor("31", "error"); got != "error" {
+		t.Fatalf("NO_COLOR output=%q", got)
+	}
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "dumb")
+	if got := menuColor("32", "ok"); got != "ok" {
+		t.Fatalf("TERM=dumb output=%q", got)
+	}
+}
+
+func TestMenuBlockcheckRequestsTarget(t *testing.T) {
+	setupEnv(t)
+	var out, errb bytes.Buffer
+	code := menuTools(bufio.NewReader(strings.NewReader("1\ny\nexample.com\n")), &out, &errb)
+	if code != 1 || !strings.Contains(errb.String(), "Blockcheck2 не найден") || strings.Contains(errb.String(), "run: zator blockcheck2") {
+		t.Fatalf("menu blockcheck code=%d err=%q", code, errb.String())
 	}
 }
 
