@@ -308,9 +308,6 @@ func (a *App) StartServices(ctx context.Context, opts BootstrapOptions) error {
 			if err := a.EnsureFirewallApplied(ctx); err != nil {
 				soft = append(soft, "fw ensure: "+err.Error())
 			}
-			if err := a.ApplyWssizeFirewall(ctx); err != nil {
-				soft = append(soft, "WSSIZE firewall: "+err.Error())
-			}
 			a.SyncAutoLockedPersist()
 			a.StartNfqwsWatchdog()
 		}

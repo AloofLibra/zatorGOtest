@@ -68,6 +68,18 @@ func newEnv(t *testing.T) env {
 	}
 	os.MkdirAll(e.root, 0o755)
 	os.MkdirAll(e.proc, 0o755)
+	for path, body := range map[string]string{
+		filepath.Join(e.p.ZapretRoot, "init.d", "sysv", "zapret2"):            "#!/bin/sh\n# upstream-sysv\n",
+		filepath.Join(e.p.ZapretRoot, "init.d", "systemd", "zapret2.service"): "[Service]\nExecStart=/opt/zapret2/init.d/sysv/zapret2 start\n",
+		filepath.Join(e.p.ZapretRoot, "init.d", "openwrt", "zapret2"):         "#!/bin/sh /etc/rc.common\n# upstream-openwrt\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return e
 }
 
@@ -414,8 +426,8 @@ func TestSystemdInstallControlUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit := filepath.Join(e.root, "etc", "systemd", "system", "zapret2.service")
-	if !strings.Contains(readFile(t, unit), "ExecStart=") {
-		t.Fatal("unit не записан")
+	if got := readFile(t, unit); got != "[Service]\nExecStart=/opt/zapret2/init.d/sysv/zapret2 start\n" {
+		t.Fatalf("не установлен upstream unit: %q", got)
 	}
 	if err := c.Install(ctx, UnitWebUI); err != nil {
 		t.Fatal(err)
@@ -619,9 +631,8 @@ func TestEntwareKeeneticInstall(t *testing.T) {
 
 	script := filepath.Join(e.p.ZapretRoot, "init.d", "sysv", "zapret2")
 	body := readFile(t, script)
-	// Нет заранее положенного апстримного init — пишется запасной RenderSysV.
-	if !strings.Contains(body, "PIDFILE=/opt/var/run/zapret2.pid") {
-		t.Errorf("скрипт zapret2:\n%s", body)
+	if body != "#!/bin/sh\n# upstream-sysv\n" {
+		t.Errorf("установлен не upstream init:\n%s", body)
 	}
 	// Повторная установка не должна затирать существующий init.
 	marker := "#!/bin/sh\n# upstream-keep\nstart(){ :; }\n"
@@ -669,6 +680,17 @@ func TestEntwareKeeneticInstall(t *testing.T) {
 		if _, err := os.Lstat(p); !os.IsNotExist(err) {
 			t.Errorf("не удалён %s", p)
 		}
+	}
+}
+
+func TestEntwareRequiresUpstreamInit(t *testing.T) {
+	e := newEnv(t)
+	script := filepath.Join(e.p.ZapretRoot, "init.d", "sysv", "zapret2")
+	if err := os.Remove(script); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ctl(t, platKeen).Install(context.Background(), UnitZapret2); err == nil || !strings.Contains(err.Error(), "upstream zapret2 init is required") {
+		t.Fatalf("missing upstream init accepted: %v", err)
 	}
 }
 

@@ -148,6 +148,9 @@ NFQWS2_OPT="
 	if _, err := a.ApplyZapretRuntime(); err != nil {
 		t.Fatalf("ApplyZapretRuntime: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(p.ZapretRoot, "zator-nfqueue.sh")); !os.IsNotExist(err) {
+		t.Fatalf("legacy Go-owned NFQUEUE hook remains: %v", err)
+	}
 	argsPath := filepath.Join(p.ZapretRoot, "nfqws2.args")
 	b, err := os.ReadFile(argsPath)
 	if err != nil {

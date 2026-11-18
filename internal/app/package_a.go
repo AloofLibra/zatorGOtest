@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
-	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/fsutil"
 	"github.com/AloofLibra/zator/internal/platform"
 	"github.com/AloofLibra/zator/internal/uiembed"
@@ -62,7 +62,8 @@ func (a *App) migratePackageA(cfg *config.Config) bool {
 }
 
 // ApplyZapretRuntime — единый pipeline: migrate → SyncWssize → Save →
-// WriteNfqws2Args → SyncCustomD → queue hook. Не затирает живой config при
+// WriteNfqws2Args → SyncCustomD. NFQUEUE/firewall rules belong to native init.
+// Не затирает живой config при
 // битом NFQWS2_OPT (в отличие от старого wipe-fallback).
 func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 	cfgPath := a.Paths.ZapretConfig
@@ -126,15 +127,7 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 		return "", fmt.Errorf("nfqws2.args: %w (config не затёрт — исправьте NFQWS2_OPT вручную)", err)
 	}
 
-	qcfg := firewall.QueueHookFromGetter(func(k string) string { return cfg.GetDefault(k, "") })
-	// На обычном Linux делегируем nftables upstream init: он создаёт базовые
-	// таблицы/цепочки и запускает custom.d (включая WSSIZE). На OpenWrt это
-	// делает собственный procd backend.
-	if a.Platform.Kind == platform.KindVPS && cfg.FWType() == string(platform.FWNftables) {
-		qcfg.FWType = string(platform.FWNftables)
-	}
-	hook, err := firewall.WriteQueueHook(a.Paths.ZapretRoot, qcfg)
-	if err != nil {
+	if err := a.removeLegacyQueueHook(); err != nil {
 		return "", err
 	}
 	_ = a.SyncCustomDHooks(cfg)
@@ -143,7 +136,40 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 	a.SyncAutoLockedPersist()
 	// Package B: подтянуть googlevideo-ipv4 (best-effort, уважает TTL).
 	_, _ = a.RefreshGooglevideoIPv4(context.Background(), false)
-	return hook, nil
+	return "", nil
+}
+
+// removeLegacyQueueHook drops rules created by the old Go-owned queue hook.
+func (a *App) removeLegacyQueueHook() error {
+	path := filepath.Join(a.Paths.ZapretRoot, "zator-nfqueue.sh")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := exec.LookPath("iptables"); err == nil {
+		if _, err := exec.CommandContext(ctx, "iptables", "-t", "mangle", "-S", "ZATOR_NFQ").Output(); err == nil {
+			for _, hook := range []string{"POSTROUTING", "PREROUTING"} {
+				for i := 0; i < 16; i++ {
+					if err := exec.CommandContext(ctx, "iptables", "-t", "mangle", "-D", hook, "-j", "ZATOR_NFQ").Run(); err != nil {
+						break
+					}
+				}
+			}
+			if out, err := exec.CommandContext(ctx, "iptables", "-t", "mangle", "-F", "ZATOR_NFQ").CombinedOutput(); err != nil {
+				return fmt.Errorf("flush legacy NFQUEUE chain: %w: %s", err, strings.TrimSpace(string(out)))
+			}
+			if out, err := exec.CommandContext(ctx, "iptables", "-t", "mangle", "-X", "ZATOR_NFQ").CombinedOutput(); err != nil {
+				return fmt.Errorf("remove legacy NFQUEUE chain: %w: %s", err, strings.TrimSpace(string(out)))
+			}
+		}
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // SetNfqwsWantRunning выставляет/снимает флаг для Entware-watchdog.

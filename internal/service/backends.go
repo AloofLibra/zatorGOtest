@@ -51,6 +51,9 @@ func (b systemdBackend) unitFile(u Unit) string {
 }
 
 func (b systemdBackend) install(ctx context.Context, u Unit) error {
+	if u == UnitZapret2 {
+		return b.installNativeZapret(ctx)
+	}
 	content, err := RenderSystemd(b.m.templateData(u))
 	if err != nil {
 		return err
@@ -62,6 +65,21 @@ func (b systemdBackend) install(ctx context.Context, u Unit) error {
 		return err
 	}
 	return b.m.run(ctx, "systemctl", "enable", string(u)+".service")
+}
+
+func (b systemdBackend) installNativeZapret(ctx context.Context) error {
+	src := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "systemd", "zapret2.service")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("service: upstream zapret2 systemd unit: %w", err)
+	}
+	if err := b.m.writeFile(b.unitFile(UnitZapret2), string(data), 0o644); err != nil {
+		return err
+	}
+	if err := b.m.run(ctx, "systemctl", "daemon-reload"); err != nil {
+		return err
+	}
+	return b.m.run(ctx, "systemctl", "enable", "zapret2.service")
 }
 
 func (b systemdBackend) uninstall(ctx context.Context, u Unit) error {
@@ -98,6 +116,9 @@ type procdBackend struct{ m *manager }
 func (b procdBackend) script(u Unit) string { return initDir + "/" + string(u) }
 
 func (b procdBackend) install(ctx context.Context, u Unit) error {
+	if u == UnitZapret2 {
+		return b.installNativeZapret(ctx)
+	}
 	content, err := RenderProcd(b.m.templateData(u))
 	if err != nil {
 		return err
@@ -106,6 +127,18 @@ func (b procdBackend) install(ctx context.Context, u Unit) error {
 		return err
 	}
 	return b.m.run(ctx, b.script(u), "enable")
+}
+
+func (b procdBackend) installNativeZapret(ctx context.Context) error {
+	src := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "openwrt", "zapret2")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("service: upstream OpenWrt zapret2 init: %w", err)
+	}
+	if err := b.m.writeFile(b.m.sys(b.script(UnitZapret2)), string(data), 0o755); err != nil {
+		return err
+	}
+	return b.m.run(ctx, b.script(UnitZapret2), "enable")
 }
 
 func (b procdBackend) uninstall(ctx context.Context, u Unit) error {
@@ -142,6 +175,9 @@ type sysvBackend struct{ m *manager }
 func (b sysvBackend) script(u Unit) string { return initDir + "/" + string(u) }
 
 func (b sysvBackend) install(ctx context.Context, u Unit) error {
+	if u == UnitZapret2 {
+		return b.installNativeZapret(ctx)
+	}
 	content, err := RenderSysV(b.m.templateData(u))
 	if err != nil {
 		return err
@@ -153,6 +189,21 @@ func (b sysvBackend) install(ctx context.Context, u Unit) error {
 	// утилиты, ошибки не фатальны.
 	if err := b.m.run(ctx, "update-rc.d", string(u), "defaults"); err != nil {
 		_ = b.m.run(ctx, "chkconfig", "--add", string(u))
+	}
+	return nil
+}
+
+func (b sysvBackend) installNativeZapret(ctx context.Context) error {
+	src := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "sysv", "zapret2")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("service: upstream zapret2 SysV init: %w", err)
+	}
+	if err := b.m.writeFile(b.m.sys(b.script(UnitZapret2)), string(data), 0o755); err != nil {
+		return err
+	}
+	if err := b.m.run(ctx, "update-rc.d", string(UnitZapret2), "defaults"); err != nil {
+		_ = b.m.run(ctx, "chkconfig", "--add", string(UnitZapret2))
 	}
 	return nil
 }
@@ -219,17 +270,10 @@ func (b entwareBackend) install(ctx context.Context, u Unit) error {
 	if u != UnitZapret2 {
 		scriptOnDisk = b.m.sys(script)
 	}
-	// zapret2: не затирать апстримный/Entware init (deployEntwareInit уже положил
-	// оверрайд). RenderSysV — только запасной вариант, если скрипта ещё нет.
+	// zapret2 always uses the upstream init unpacked with its release archive.
 	if u == UnitZapret2 {
 		if _, err := os.Stat(scriptOnDisk); err != nil {
-			content, err := RenderSysV(d)
-			if err != nil {
-				return err
-			}
-			if err := b.m.writeFile(scriptOnDisk, content, 0o755); err != nil {
-				return err
-			}
+			return fmt.Errorf("service: upstream zapret2 init is required: %w", err)
 		} else if err := os.Chmod(scriptOnDisk, 0o755); err != nil {
 			return fmt.Errorf("service: %w", err)
 		}

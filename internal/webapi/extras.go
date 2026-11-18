@@ -329,13 +329,14 @@ func (s *Server) schedulePostUpdateRestarts(restartWebUI bool) {
 	}
 	go func() {
 		time.Sleep(1500 * time.Millisecond)
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
 		if s.app != nil {
 			s.runtimeMu.Lock()
-			if err := s.app.RestartZapretTransactional(ctx, func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			err := s.app.RestartZapretTransactional(ctx, func(ctx context.Context) error {
 				return s.svc.Restart(ctx, service.UnitZapret2)
-			}); err != nil {
+			})
+			cancel()
+			if err != nil {
 				s.app.WriteServiceWarnings([]string{"post-update restart: " + err.Error()})
 			} else {
 				var warns []string
@@ -351,14 +352,38 @@ func (s *Server) schedulePostUpdateRestarts(restartWebUI bool) {
 			}
 			s.runtimeMu.Unlock()
 		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			_ = s.svc.Restart(ctx, service.UnitZapret2)
+			cancel()
 		}
-		_ = s.svc.Restart(ctx, service.UnitValidator)
+		// Restart each unit with a fresh deadline. A slow zapret2 restart must
+		// not leave the shared context expired and silently skip WebUI restart.
+		if err := restartPostUpdateUnit(s.svc, service.UnitValidator, 1); err != nil && s.app != nil {
+			s.app.WriteServiceWarnings([]string{"post-update validator restart: " + err.Error()})
+		}
 		if restartWebUI {
-			_ = s.svc.Restart(ctx, service.UnitWebUI)
+			if err := restartPostUpdateUnit(s.svc, service.UnitWebUI, 3); err != nil && s.app != nil {
+				s.app.WriteServiceWarnings([]string{"post-update WebUI restart: " + err.Error()})
+			}
 		}
 		if restartWebUI && s.app != nil {
 			s.app.StartWebUIWatchdog()
 		}
 	}()
+}
+
+func restartPostUpdateUnit(svc service.Manager, unit service.Unit, attempts int) error {
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		lastErr = svc.Restart(ctx, unit)
+		cancel()
+		if lastErr == nil {
+			return nil
+		}
+		if attempt+1 < attempts {
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+	}
+	return lastErr
 }

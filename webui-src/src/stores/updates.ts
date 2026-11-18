@@ -5,7 +5,7 @@ import type { UpdateCheckResult, VersionInfo } from '../api/types'
 import { confirmDialog } from './confirm'
 import { fetchAndApplyState } from './state'
 import { scope, versionInfo, versionInfoCheckedAt, versionInfoFresh } from './status'
-import { announceRestart, showToast } from './toast'
+import { showToast } from './toast'
 import { withBusy } from './busy'
 
 export type UpdateCheckState = 'never' | 'checking' | 'success' | 'error'
@@ -168,7 +168,7 @@ export async function applyUpdate(mode: UpdateMode = updateMode.value) {
   if (!ok) return
 
     await withBusy('upd-apply', async () => {
-      announceRestart()
+      showToast('Скачиваем и устанавливаем обновление…', 'info')
       const res = await api<{
         needs_confirmation?: boolean
         warning?: string
@@ -188,6 +188,10 @@ export async function applyUpdate(mode: UpdateMode = updateMode.value) {
         hydrateUpdateCheck(versionInfo.value)
       } else if (res.restart_required) {
         showToast(`Обновлено (файлов: ${res.installed ?? 0}). Перезапуск WebUI…`)
+        // The server has already committed the new release metadata. Refresh
+        // the check now so a delayed WebUI restart cannot leave the old
+        // release badge active and invite the user to apply the same update again.
+        await refreshUpdateCheck()
       } else {
         showToast(`Обновлено (файлов: ${res.installed ?? 0})`)
         await fetchAndApplyState()

@@ -148,6 +148,33 @@ func TestNormalizeVersion(t *testing.T) {
 	}
 }
 
+func TestPreserveCustomInit(t *testing.T) {
+	root, stage := t.TempDir(), t.TempDir()
+	src := filepath.Join(root, "init.d", "sysv", "custom.d")
+	dst := filepath.Join(stage, "init.d", "sysv", "custom.d")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "50-user-hook"), []byte("user rules\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, ".keep"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := preserveCustomInit(root, stage); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dst, "50-user-hook")); err != nil || string(got) != "user rules\n" {
+		t.Fatalf("user hook not preserved: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, ".keep")); !os.IsNotExist(err) {
+		t.Fatalf("obsolete archive custom.d content retained: %v", err)
+	}
+}
+
 func TestReleaseURL(t *testing.T) {
 	t.Setenv(EnvReleaseBase, "")
 	t.Setenv(EnvForkReleaseBase, "")

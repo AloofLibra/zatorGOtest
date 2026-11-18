@@ -53,10 +53,15 @@ func (a *App) writeFwEnsure(status, detail string) {
 }
 
 func (a *App) resolveZapretInit() string {
-	cands := []string{
+	cands := []string{}
+	if a.Platform.InitSystem == platform.InitProcd {
+		cands = append(cands, "/etc/init.d/zapret2")
+	}
+	cands = append(cands,
 		filepath.Join(a.Paths.ZapretRoot, "init.d", "sysv", "zapret2"),
 		"/opt/etc/init.d/S90-zapret2",
-	}
+		"/etc/init.d/zapret2",
+	)
 	for _, p := range cands {
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
 			return p
@@ -65,19 +70,17 @@ func (a *App) resolveZapretInit() string {
 	return ""
 }
 
-// EnsureFirewallApplied вызывает init restart-fw на Entware/Keenetic (best-effort).
-// На других платформах — skip. Ошибки пишутся в state, но не валят start
-// (ndm сам переприменит хук); возвращаются для логов/warnings.
+// EnsureFirewallApplied delegates firewall reconciliation to zapret2's native init.
 func (a *App) EnsureFirewallApplied(ctx context.Context) error {
-	if a.Platform.InitSystem != platform.InitEntware && a.Platform.Kind != platform.KindEntware &&
-		service.DetectHook(a.Platform) == service.HookNone {
-		a.writeFwEnsure("skip", "not entware/keenetic")
+	if a.Platform.Kind == "" {
+		a.writeFwEnsure("skip", "platform not detected")
 		return nil
 	}
 	init := a.resolveZapretInit()
 	if init == "" {
-		a.writeFwEnsure("skip", "нет init-скрипта zapret2")
-		return nil
+		err := fmt.Errorf("upstream zapret2 init not found")
+		a.writeFwEnsure("fail", err.Error())
+		return err
 	}
 	if ctx == nil {
 		ctx = context.Background()

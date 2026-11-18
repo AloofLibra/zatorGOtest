@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/AloofLibra/zator/internal/uiembed"
@@ -49,6 +49,10 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 			force = true
 		}
 	}
+	if !force && legacyZapretInit(filepath.Join(a.Paths.ZapretRoot, "init.d", "sysv", "zapret2")) {
+		// Restore upstream init from its release archive; never replace it with a Go-owned copy.
+		force = true
+	}
 	zopts := zapret.Options{
 		Source:     src,
 		Version:    opts.Version,
@@ -84,10 +88,6 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 	if err := a.syncAssets(); err != nil {
 		return res, fmt.Errorf("ресурсы zator: %w", err)
 	}
-	if err := a.deployEntwareInit(); err != nil {
-		return res, err
-	}
-
 	lan, wan, ifaceErr := a.ApplyDetectedIfaces()
 	if ifaceErr != nil {
 		if a.isRouterHost() {
@@ -113,22 +113,7 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 	return res, nil
 }
 
-// deployEntwareInit подменяет init-скрипт zapret2 оверрайдом Keenetic/Entware
-// (если он встроен в бинарник). Апстримный init.d остаётся в каталоге;
-// оверрайд использует те же functions из EXEDIR.
-func (a *App) deployEntwareInit() error {
-	src := uiembed.InitAt(a.Paths)
-	data, err := fs.ReadFile(src, "entware/zapret")
-	if err != nil {
-		return nil
-	}
-	dst := filepath.Join(a.Paths.ZapretRoot, "init.d", "sysv", "zapret2")
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, data, 0o755); err != nil {
-		return fmt.Errorf("Entware init: %w", err)
-	}
-	_ = a.deployNfqwsWatchdog()
-	return nil
+func legacyZapretInit(path string) bool {
+	data, err := os.ReadFile(path)
+	return err == nil && strings.Contains(string(data), "z2r: оверрайды апстримных")
 }

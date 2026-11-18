@@ -35,13 +35,12 @@ func (a *App) RestartZapretTransactional(ctx context.Context, restart RestartFun
 	if err := restart(ctx); err != nil {
 		return fmt.Errorf("runtime restart: %w", err)
 	}
-	if err := a.ApplyWssizeFirewall(ctx); err != nil {
+	if err := a.EnsureFirewallApplied(ctx); err != nil {
 		_ = restoreSnap(cfgPath, snapCFG)
 		_ = restoreSnap(argsPath, snapArgs)
 		_ = restart(ctx)
-		return fmt.Errorf("runtime WSSIZE: %w (выполнен откат config/args)", err)
+		return fmt.Errorf("runtime firewall apply: %w (выполнен откат config/args)", err)
 	}
-	_ = a.EnsureFirewallApplied(ctx)
 
 	if err := a.verifyRuntimeFiles(); err != nil {
 		_ = restoreSnap(cfgPath, snapCFG)

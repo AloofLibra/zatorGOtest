@@ -253,6 +253,9 @@ func DownloadAndInstall(ctx context.Context, opts Options) (*Result, error) {
 	if !fileExists(filepath.Join(stage, "binaries", archDir, BinNfqws2)) {
 		return nil, fmt.Errorf("zapret: %s не распакован", BinNfqws2)
 	}
+	if err := preserveCustomInit(root, stage); err != nil {
+		return nil, fmt.Errorf("zapret: сохранить custom.d: %w", err)
+	}
 
 	if err := commit(root, stage, archDir, opts.IncludeLua); err != nil {
 		return nil, err
@@ -269,6 +272,25 @@ func DownloadAndInstall(ctx context.Context, opts Options) (*Result, error) {
 	res.Binaries = binaryPaths(root, archDir)
 	opts.logf("zapret2 %s (%s) установлен в %s", ver, archDir, root)
 	return res, nil
+}
+
+func preserveCustomInit(root, stage string) error {
+	for _, rel := range []string{"init.d/sysv/custom.d", "init.d/openwrt/custom.d"} {
+		src := filepath.Join(root, filepath.FromSlash(rel))
+		if st, err := os.Stat(src); os.IsNotExist(err) || err == nil && !st.IsDir() {
+			continue
+		} else if err != nil {
+			return err
+		}
+		dst := filepath.Join(stage, filepath.FromSlash(rel))
+		if err := os.RemoveAll(dst); err != nil {
+			return err
+		}
+		if err := copyTree(src, dst); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // pickArchDir выбирает первый доступный каталог из candidates и возвращает
