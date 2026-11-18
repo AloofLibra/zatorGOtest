@@ -22,18 +22,20 @@ const (
 
 // TemplateData — данные для шаблонов unit/init-файлов.
 type TemplateData struct {
-	Name        string   // имя службы (zapret2, zator-webui)
-	Description string   // описание
-	Command     []string // исполняемый файл и аргументы
-	PIDFile     string   // PID-файл (SysV/Entware)
-	LogFile     string   // лог stdout/stderr для SysV/Entware
-	InitScript  string   // путь init-скрипта (для restart-fw)
-	FWHook      string   // необязательный скрипт межсетевого экрана
-	WssizeBin   string   // zator binary for WSSIZE lifecycle hooks
-	ZatorRoot   string   // runtime root passed to managed processes
-	ZapretRoot  string   // zapret2 root passed to managed processes
-	Path        string   // значение PATH
-	Start       int      // порядок запуска (procd START=)
+	Name         string   // имя службы (zapret2, zator-webui)
+	Description  string   // описание
+	Command      []string // исполняемый файл и аргументы
+	PIDFile      string   // PID-файл (SysV/Entware)
+	LogFile      string   // лог stdout/stderr для SysV/Entware
+	InitScript   string   // путь init-скрипта (для restart-fw)
+	FWHook       string   // необязательный скрипт межсетевого экрана
+	WssizeBin    string   // zator binary for WSSIZE lifecycle hooks
+	ZatorRoot    string   // runtime root passed to managed processes
+	ZapretRoot   string   // zapret2 root passed to managed processes
+	ReleaseOwner string   // GitHub owner for update checks
+	ReleaseRepo  string   // GitHub repository for update checks
+	Path         string   // значение PATH
+	Start        int      // порядок запуска (procd START=)
 }
 
 // ExecStart — командная строка для systemd (аргументы через пробел).
@@ -84,6 +86,12 @@ Environment=ZATOR_ROOT=`)
 	b.WriteString(`
 Environment=ZAPRET2_ROOT=`)
 	b.WriteString(d.ZapretRoot)
+	if validReleaseRepository(d.ReleaseOwner, d.ReleaseRepo) {
+		b.WriteString("\nEnvironment=ZATOR_OWNER=")
+		b.WriteString(d.ReleaseOwner)
+		b.WriteString("\nEnvironment=ZATOR_REPO=")
+		b.WriteString(d.ReleaseRepo)
+	}
 	if d.FWHook != "" {
 		b.WriteString(`
 ExecStartPre=-`)
@@ -158,7 +166,15 @@ start_service() {`)
 		b.WriteString(` wssize-hook start || logger -t zator-wssize 'failed to apply WSSIZE rules'`)
 	}
 	b.WriteString(`
-	procd_open_instance
+	procd_open_instance`)
+	if validReleaseRepository(d.ReleaseOwner, d.ReleaseRepo) {
+		b.WriteString(`
+	procd_set_param env ZATOR_OWNER=`)
+		b.WriteString(shellQuote(d.ReleaseOwner))
+		b.WriteString(` ZATOR_REPO=`)
+		b.WriteString(shellQuote(d.ReleaseRepo))
+	}
+	b.WriteString(`
 	procd_set_param command `)
 	b.WriteString(d.ShellCommand())
 	b.WriteString(`
@@ -226,6 +242,13 @@ func RenderSysV(d TemplateData) (string, error) {
 	b.WriteString(shellQuote(d.ZapretRoot))
 	b.WriteString("\nexport ZATOR_ROOT ZAPRET2_ROOT\nNAME=")
 	b.WriteString(shellQuote(d.Name))
+	if validReleaseRepository(d.ReleaseOwner, d.ReleaseRepo) {
+		b.WriteString("\nZATOR_OWNER=")
+		b.WriteString(shellQuote(d.ReleaseOwner))
+		b.WriteString("\nZATOR_REPO=")
+		b.WriteString(shellQuote(d.ReleaseRepo))
+		b.WriteString("\nexport ZATOR_OWNER ZATOR_REPO")
+	}
 	b.WriteString("\nPIDFILE=")
 	b.WriteString(shellQuote(d.PIDFile))
 	b.WriteString("\nLOGFILE=")
@@ -380,11 +403,11 @@ func RemoveHookLine(content, line string) string {
 // templateData собирает данные шаблона для службы.
 func (m *manager) templateData(u Unit) TemplateData {
 	d := TemplateData{
-		Name:       string(u),
-		Path:       defaultPath,
-		FWHook:     slash(m.cfg.FWHook),
-		ZatorRoot:  slash(m.cfg.Paths.ZatorRoot),
-		ZapretRoot: slash(m.cfg.Paths.ZapretRoot),
+		Name:         string(u),
+		Path:         defaultPath,
+		FWHook:       slash(m.cfg.FWHook),
+		ZatorRoot:    slash(m.cfg.Paths.ZatorRoot),
+		ZapretRoot:   slash(m.cfg.Paths.ZapretRoot),
 	}
 	switch u {
 	case UnitZapret2:
@@ -405,6 +428,8 @@ func (m *manager) templateData(u Unit) TemplateData {
 		d.Command = []string{slash(m.cfg.ZatorBin), "webui"}
 		d.Start = 95
 		d.FWHook = "" // межсетевой экран относится только к zapret2
+		d.ReleaseOwner = os.Getenv("ZATOR_OWNER")
+		d.ReleaseRepo = os.Getenv("ZATOR_REPO")
 	}
 	runDir := "/var/run"
 	if m.cfg.Backend == BackendEntware {
@@ -416,3 +441,18 @@ func (m *manager) templateData(u Unit) TemplateData {
 }
 
 func slash(p string) string { return filepath.ToSlash(p) }
+
+func validReleaseRepository(owner, repo string) bool {
+	validPart := func(s string) bool {
+		if s == "" {
+			return false
+		}
+		for _, r := range s {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+				return false
+			}
+		}
+		return true
+	}
+	return validPart(owner) && validPart(repo)
+}

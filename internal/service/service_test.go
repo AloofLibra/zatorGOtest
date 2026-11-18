@@ -264,6 +264,37 @@ func TestRenderSysV(t *testing.T) {
 	}
 }
 
+func TestServiceTemplatesPersistReleaseRepository(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("ZATOR_OWNER", "AloofLibra")
+	t.Setenv("ZATOR_REPO", "zatorGOtest")
+	c := e.ctl(t, platSystemd).(*manager)
+	d := c.templateData(UnitWebUI)
+
+	checks := []struct {
+		name   string
+		render func(TemplateData) (string, error)
+	}{
+		{"systemd", RenderSystemd},
+		{"procd", RenderProcd},
+		{"sysv", RenderSysV},
+	}
+	for _, check := range checks {
+		got, err := check.render(d)
+		if err != nil {
+			t.Fatalf("%s: %v", check.name, err)
+		}
+		if !strings.Contains(got, "AloofLibra") || !strings.Contains(got, "zatorGOtest") {
+			t.Errorf("%s unit does not persist release repository:\n%s", check.name, got)
+		}
+	}
+
+	d.ReleaseOwner = "AloofLibra\nExecStart=/bin/evil"
+	if got, _ := RenderSystemd(d); strings.Contains(got, "Environment=ZATOR_OWNER=") {
+		t.Errorf("invalid release owner was written to the systemd unit:\n%s", got)
+	}
+}
+
 func TestShellQuoting(t *testing.T) {
 	cases := map[string]string{
 		"plain":     "plain",
