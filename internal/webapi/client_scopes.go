@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -16,6 +17,53 @@ import (
 type clientScopeMapping struct {
 	Scope string `json:"scope"`
 	IP    string `json:"ip"`
+}
+
+// CLIClientScopes returns the available strategy scopes in stable menu order.
+func (s *Server) CLIClientScopes() ([]string, error) {
+	cfg, installed := s.readConfig()
+	cc, err := firewall.ClientScopeConfigFromGetter(cfg.Get, s.paths.ZatorRoot)
+	if err != nil {
+		return nil, err
+	}
+	scopes := []string{"default"}
+	if !installed {
+		return scopes, nil
+	}
+	mapPath, err := clientScopeMapPath(cc.MapFile, s.paths.ZatorRoot)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(mapPath)
+	if os.IsNotExist(err) {
+		return scopes, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("не удалось прочитать client_scope.tsv: %w", err)
+	}
+	defer f.Close()
+	if cc.Mask == 0 {
+		cc.Mask = ^uint32(0)
+	}
+	entries, _, err := cc.ParseTSV(f)
+	if err != nil {
+		return nil, fmt.Errorf("не удалось разобрать client_scope.tsv: %w", err)
+	}
+	ids := make([]uint32, 0, len(entries))
+	for _, entry := range entries {
+		ids = append(ids, entry.ID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	var last uint32
+	haveLast := false
+	for _, id := range ids {
+		if !haveLast || id != last {
+			scopes = append(scopes, fmt.Sprintf("mark:%d", id))
+			last = id
+			haveLast = true
+		}
+	}
+	return scopes, nil
 }
 
 func (s *Server) handleClientScopes(w http.ResponseWriter, r *http.Request, p params) {

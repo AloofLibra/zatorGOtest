@@ -27,17 +27,47 @@ import (
 
 // menu — намеренно последовательный текстовый интерфейс: он не опрашивает
 // клавиатуру и использует те же команды, что и неинтерактивный CLI.
+const menuBack = -1
+
 func runMenu(input io.Reader, output, stderr io.Writer) int {
 	r := bufio.NewReader(input)
 	for {
-		fmt.Fprintln(output, menuColor("36;1", "\n=== ZATOR GO ==="))
-		fmt.Fprintf(output, "Версия: %s\n", zator.Version())
+		menuClearScreen(output)
+		title := fmt.Sprintf("ZATOR GO %s", zator.Version())
+		state := "● НЕ УСТАНОВЛЕН"
 		if a, err := app.Load(); err == nil {
-			fmt.Fprintf(output, "Платформа: %s | Установка: %s\n", a.Platform, map[bool]string{true: "установлен", false: "не установлен"}[a.Installed()])
-			fmt.Fprintf(output, "Обновления: %s\n", menuColor("33", menuCachedUpdates(a.Paths, a.Installed())))
+			if a.Installed() {
+				state = "● УСТАНОВЛЕН"
+				if ctl, err := service.New(service.Config{Platform: a.Platform, Paths: a.Paths}); err == nil {
+					if st, err := ctl.Status(context.Background(), service.UnitZapret2); err == nil {
+						if st.Running {
+							state = "● РАБОТАЕТ"
+						} else {
+							state = "● ОСТАНОВЛЕН"
+						}
+					}
+				}
+			}
+			fmt.Fprintf(output, "%-52s%s\n", menuColor("96;1", title), menuColor("96", state))
+			fmt.Fprintln(output, menuColor("90", strings.Repeat("─", 72)))
+			fmt.Fprintf(output, "Платформа: %s\nСлужба:    zapret2 %s\nОбновления: %s\n", a.Platform, stateLabel(state), menuColor("96", menuCachedUpdates(a.Paths, a.Installed())))
+		} else {
+			fmt.Fprintf(output, "%s\n", menuColor("96;1", title))
 		}
-		fmt.Fprintln(output, "\n 1. Статус и диагностика\n 2. Стратегии\n 3. Supersweep\n 4. Домены и списки\n 5. Настройки обхода\n 6. Службы\n 7. Обновление\n 8. Резервные копии\n 9. Дополнительные инструменты\n 0. Выход")
-		choice, err := menuRead(r, output, "Выберите пункт: ")
+		fmt.Fprintln(output, menuColor("90", strings.Repeat("─", 72)))
+		fmt.Fprintln(output, menuColor("96;1", "ГЛАВНОЕ МЕНЮ"))
+		fmt.Fprintln(output, "1.  Статус и диагностика")
+		fmt.Fprintln(output, "2.  Стратегии")
+		fmt.Fprintln(output, "3.  Supersweep — подбор стратегий")
+		fmt.Fprintln(output, "4.  Домены и списки")
+		fmt.Fprintln(output, "5.  Настройки обхода")
+		fmt.Fprintln(output, "6.  Службы")
+		fmt.Fprintln(output, "7.  Обновление ZatorGO")
+		fmt.Fprintln(output, "8.  Резервные копии")
+		fmt.Fprintln(output, "9.  Дополнительные инструменты")
+		fmt.Fprintln(output, "0.  Выход")
+		fmt.Fprintln(output, menuColor("90", strings.Repeat("─", 72)))
+		choice, err := menuRead(r, output, "Выбор: ")
 		if err != nil {
 			if err == io.EOF {
 				return 0
@@ -52,32 +82,64 @@ func runMenu(input io.Reader, output, stderr io.Writer) int {
 				return 0
 			}
 		case "1":
-			code = menuStatus(r, output, stderr)
+			code = menuPage(output, stderr, "Статус и диагностика", func() int { return menuStatus(r, output, stderr) })
 		case "2":
-			code = menuStrategies(r, output, stderr)
+			code = menuPage(output, stderr, "Стратегии", func() int { return menuStrategies(r, output, stderr) })
 		case "3":
-			code = menuSweep(r, output, stderr)
+			code = menuPage(output, stderr, "Supersweep", func() int { return menuSweep(r, output, stderr) })
 		case "4":
-			code = menuDomains(r, output, stderr)
+			code = menuPage(output, stderr, "Домены и списки", func() int { return menuDomains(r, output, stderr) })
 		case "5":
-			code = menuSettings(r, output, stderr)
+			code = menuPage(output, stderr, "Настройки обхода", func() int { return menuSettings(r, output, stderr) })
 		case "6":
-			code = menuServices(r, output, stderr)
+			code = menuPage(output, stderr, "Службы", func() int { return menuServices(r, output, stderr) })
 		case "7":
-			code = menuUpdate(r, output, stderr)
+			code = menuPage(output, stderr, "Обновление", func() int { return menuUpdate(r, output, stderr) })
 		case "8":
-			code = menuBackups(r, output, stderr)
+			code = menuPage(output, stderr, "Резервные копии", func() int { return menuBackups(r, output, stderr) })
 		case "9":
-			code = menuTools(r, output, stderr)
+			code = menuPage(output, stderr, "Инструменты", func() int { return menuTools(r, output, stderr) })
 		default:
 			fmt.Fprintln(output, "Введите номер от 0 до 9.")
 		}
 		if code != 0 {
 			fmt.Fprintf(stderr, "Команда завершилась с кодом %d.\n", code)
 		}
-		if _, err := menuRead(r, output, "Нажмите Enter для возврата в меню..."); err == io.EOF {
+	}
+}
+
+func menuPage(out, errw io.Writer, title string, page func() int) int {
+	for {
+		menuClearScreen(out)
+		fmt.Fprintln(out, menuColor("96;1", strings.ToUpper(title)))
+		fmt.Fprintln(out, menuColor("90", strings.Repeat("─", 72)))
+		code := page()
+		if code == menuBack {
 			return 0
 		}
+		if code != 0 {
+			fmt.Fprintf(errw, "Команда завершилась с кодом %d.\n", code)
+		}
+	}
+}
+
+func menuClearScreen(w io.Writer) {
+	out, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(int(out.Fd())) || os.Getenv("TERM") == "dumb" {
+		return
+	}
+	// Clear the visible screen only. Omitting CSI 3J preserves terminal scrollback.
+	_, _ = fmt.Fprint(w, "\x1b[2J\x1b[H")
+}
+
+func stateLabel(state string) string {
+	switch state {
+	case "● РАБОТАЕТ":
+		return "запущена"
+	case "● ОСТАНОВЛЕН":
+		return "остановлена"
+	default:
+		return "не проверена"
 	}
 }
 
@@ -108,7 +170,7 @@ func menuCachedUpdates(p paths.Paths, installed bool) string {
 }
 
 func menuRead(r *bufio.Reader, w io.Writer, prompt string) (string, error) {
-	fmt.Fprint(w, prompt)
+	fmt.Fprint(w, menuColor("96;1", prompt))
 	s, err := r.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return "", err
@@ -124,11 +186,11 @@ func menuStatus(r *bufio.Reader, out, errw io.Writer) int {
 	fmt.Fprintln(out, "\n 1. Обновить статус\n 2. Ошибки nfqws2 и предупреждения служб\n 3. Проверить доступность\n 4. Службы\n 0. Назад")
 	c, err := menuRead(r, out, "Выберите пункт: ")
 	if err != nil {
-		return 0
+		return menuBack
 	}
 	switch c {
 	case "0":
-		return code
+		return menuBack
 	case "1":
 		return cmdStatus(out, errw)
 	case "2":
@@ -144,7 +206,7 @@ func menuStatus(r *bufio.Reader, out, errw io.Writer) int {
 		res, err := s.CLIReachability(ctx)
 		return menuResult(out, errw, res, err)
 	case "4":
-		return menuServices(r, out, errw)
+		return menuPage(out, errw, "Службы", func() int { return menuServices(r, out, errw) })
 	default:
 		fmt.Fprintln(out, "Некорректный выбор.")
 	}
@@ -152,13 +214,6 @@ func menuStatus(r *bufio.Reader, out, errw io.Writer) int {
 }
 
 func menuStrategies(r *bufio.Reader, out, errw io.Writer) int {
-	scope, err := menuRead(r, out, "Scope (default или mark:N, Enter — default): ")
-	if err != nil {
-		return 0
-	}
-	if scope == "" {
-		scope = orchestra.ScopeDefault
-	}
 	a, err := app.Load()
 	if err != nil {
 		fmt.Fprintln(errw, err)
@@ -170,12 +225,18 @@ func menuStrategies(r *bufio.Reader, out, errw io.Writer) int {
 		return 1
 	}
 	store := orchestra.NewStore(a.Paths.StateOrchestraDir())
-	fmt.Fprintf(out, "Ручные фиксации: %s\n", map[bool]string{true: "есть", false: "нет"}[store.HasLocks()])
 	srv, err := menuServer()
 	if err != nil {
 		fmt.Fprintln(errw, err)
 		return 1
 	}
+	scope, ok := menuChooseScope(r, out, srv)
+	if !ok {
+		return menuBack
+	}
+	menuClearScreen(out)
+	fmt.Fprintf(out, "%s · %s\n", menuColor("96;1", "СТРАТЕГИИ"), scope)
+	fmt.Fprintf(out, "Ручные фиксации: %s\n\n", map[bool]string{true: "есть", false: "нет"}[store.HasLocks()])
 	for _, p := range cfg.Profiles() {
 		lock, source, err := srv.CLIProfileLockLabel(scope, p.ID)
 		if err != nil {
@@ -186,8 +247,11 @@ func menuStrategies(r *bufio.Reader, out, errw io.Writer) int {
 	}
 	fmt.Fprintln(out, "\n 1. Зафиксировать стратегию / выключить профиль (0)\n 2. Снять фиксацию (auto)\n 3. Проверить профиль\n 0. Назад")
 	c, e := menuRead(r, out, "Выберите пункт: ")
-	if e != nil || c == "0" {
-		return 0
+	if e != nil {
+		return menuBack
+	}
+	if c == "0" {
+		return menuBack
 	}
 	idText, e := menuRead(r, out, "Номер профиля: ")
 	if e != nil {
@@ -240,15 +304,19 @@ func menuServices(r *bufio.Reader, out, errw io.Writer) int {
 	fmt.Fprintln(out, "\n 1. Запустить службу\n 2. Остановить службу\n 3. Перезапустить службу\n 4. Предупреждения\n 0. Назад")
 	c, err := menuRead(r, out, "Выберите пункт: ")
 	if err != nil {
-		return code
+		return menuBack
 	}
 	switch c {
 	case "0":
-		return code
+		return menuBack
 	case "1", "2", "3":
 		fmt.Fprintf(out, "Службы: 1 zapret2, 2 %s, 3 %s\n", service.UnitValidator, service.UnitWebUI)
+		fmt.Fprintln(out, " 0. Назад")
 		unitChoice, e := menuRead(r, out, "Номер службы: ")
 		if e != nil {
+			return 0
+		}
+		if unitChoice == "0" {
 			return 0
 		}
 		units := map[string]string{"1": "zapret2", "2": string(service.UnitValidator), "3": string(service.UnitWebUI)}
@@ -286,17 +354,17 @@ func menuBackups(r *bufio.Reader, out, errw io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(out, "Резервные копии (%d):\n", len(items))
-	for _, item := range items {
-		fmt.Fprintf(out, " %s  %d байт  %s\n", item.Name, item.Size, item.ModTime.Format("2006-01-02 15:04"))
+	for i, item := range items {
+		fmt.Fprintf(out, " %d. %s  %d байт  %s\n", i+1, item.Name, item.Size, item.ModTime.Format("2006-01-02 15:04"))
 	}
 	fmt.Fprintln(out, "\n 1. Создать резервную копию\n 2. Smart-восстановление\n 3. Откат последнего обновления\n 0. Назад")
 	c, err := menuRead(r, out, "Выберите пункт: ")
 	if err != nil {
-		return 0
+		return menuBack
 	}
 	switch c {
 	case "0":
-		return 0
+		return menuBack
 	case "1":
 		created, e := m.Create(backup.CreateOptions{IncludeLists: true, IncludeExtraStrats: true, IncludeOrchestraState: true})
 		if e != nil {
@@ -306,14 +374,20 @@ func menuBackups(r *bufio.Reader, out, errw io.Writer) int {
 		fmt.Fprintf(out, "Создана резервная копия: %s (%d байт)\n", created.Name, created.Size)
 		return 0
 	case "2":
-		name, e := menuRead(r, out, "Имя backup для восстановления: ")
-		if e != nil {
+		if len(items) == 0 {
+			fmt.Fprintln(out, "Список резервных копий пуст.")
 			return 0
 		}
-		if !backup.ValidName(name) {
-			fmt.Fprintln(errw, "Некорректное имя backup.")
+		choice, e := menuRead(r, out, fmt.Sprintf("Номер копии для восстановления (1..%d, 0 — назад): ", len(items)))
+		if e != nil || choice == "0" {
+			return 0
+		}
+		n, e := strconv.Atoi(choice)
+		if e != nil || n < 1 || n > len(items) {
+			fmt.Fprintln(errw, "Некорректный номер резервной копии.")
 			return 1
 		}
+		name := items[n-1].Name
 		fmt.Fprintln(out, "Smart-восстановление переносит поддерживаемые настройки и состояние списков/фиксаций; живой config полностью не заменяется.")
 		ok, e := menuConfirm(r, out, "Восстановить эту резервную копию?")
 		if e != nil || !ok {
@@ -338,11 +412,11 @@ func menuTools(r *bufio.Reader, out, errw io.Writer) int {
 	fmt.Fprintln(out, " 1. Проверить HTTPS/TLS (blockcheck2)\n 2. Запустить Web UI\n 3. Статус авторизации\n 4. Включить авторизацию\n 5. Отключить авторизацию\n 6. Справка CLI\n 0. Назад")
 	c, err := menuRead(r, out, "Выберите пункт: ")
 	if err != nil {
-		return 0
+		return menuBack
 	}
 	switch c {
 	case "0":
-		return 0
+		return menuBack
 	case "1":
 		fmt.Fprintln(out, "Внимание: blockcheck2 временно останавливает zapret2 и затем пытается восстановить службу.")
 		ok, e := menuConfirm(r, out, "Запустить проверку?")
@@ -405,18 +479,89 @@ func menuColor(code, text string) string {
 }
 
 func menuConfirm(r *bufio.Reader, out io.Writer, question string) (bool, error) {
-	a, err := menuRead(r, out, question+" [y/N]: ")
-	if err != nil {
-		return false, err
+	for {
+		a, err := menuRead(r, out, question+" 1. Да  0. Нет: ")
+		if err != nil {
+			return false, err
+		}
+		switch a {
+		case "1":
+			return true, nil
+		case "0":
+			return false, nil
+		default:
+			fmt.Fprintln(out, "Введите 1 или 0.")
+		}
 	}
-	return strings.EqualFold(a, "y") || strings.EqualFold(a, "yes") || a == "д", nil
+}
+
+func menuChooseScope(r *bufio.Reader, out io.Writer, s *webapi.Server) (string, bool) {
+	scopes, err := s.CLIClientScopes()
+	if err != nil {
+		fmt.Fprintln(out, "Не удалось прочитать список scope:", err)
+		return "", false
+	}
+	for {
+		menuClearScreen(out)
+		fmt.Fprintln(out, menuColor("96;1", "ОБЛАСТЬ ПРИМЕНЕНИЯ"))
+		fmt.Fprintln(out, menuColor("90", strings.Repeat("─", 72)))
+		fmt.Fprintln(out, "Область применения:")
+		for i, scope := range scopes {
+			label := scope
+			if scope == orchestra.ScopeDefault {
+				label = "default — все клиенты"
+			}
+			fmt.Fprintf(out, " %d. %s\n", i+1, label)
+		}
+		fmt.Fprintln(out, " 0. Назад")
+		choice, err := menuRead(r, out, "Выберите scope: ")
+		if err != nil || choice == "0" {
+			return "", false
+		}
+		n, err := strconv.Atoi(choice)
+		if err == nil && n >= 1 && n <= len(scopes) {
+			return scopes[n-1], true
+		}
+		fmt.Fprintf(out, "Введите номер от 1 до %d или 0 для возврата.\n", len(scopes))
+	}
+}
+
+func menuChooseTLS(r *bufio.Reader, out io.Writer) (string, bool) {
+	choices := []struct{ label, value string }{
+		{"TLS 1.2 и 1.3", "any"},
+		{"Только TLS 1.2", "12"},
+		{"Только TLS 1.3", "13"},
+		{"Оба режима отдельно", "both"},
+	}
+	for {
+		menuClearScreen(out)
+		fmt.Fprintln(out, menuColor("96;1", "ВЕРСИИ TLS"))
+		fmt.Fprintln(out, menuColor("90", strings.Repeat("─", 72)))
+		fmt.Fprintln(out, "Версии TLS:")
+		for i, choice := range choices {
+			fmt.Fprintf(out, " %d. %s\n", i+1, choice.label)
+		}
+		fmt.Fprintln(out, " 0. Назад")
+		choice, err := menuRead(r, out, "Выберите режим TLS: ")
+		if err != nil || choice == "0" {
+			return "", false
+		}
+		n, err := strconv.Atoi(choice)
+		if err == nil && n >= 1 && n <= len(choices) {
+			return choices[n-1].value, true
+		}
+		fmt.Fprintln(out, "Введите номер от 1 до 4 или 0 для возврата.")
+	}
 }
 
 func menuSweep(r *bufio.Reader, out, errw io.Writer) int {
 	fmt.Fprintln(out, " 1. Состояние и прогресс\n 2. Полный Supersweep\n 3. Быстрый подбор профиля\n 4. Отменить текущий прогон\n 0. Назад")
 	a, e := menuRead(r, out, "Выберите пункт: ")
-	if e != nil || a == "0" {
-		return 0
+	if e != nil {
+		return menuBack
+	}
+	if a == "0" {
+		return menuBack
 	}
 	s, err := menuServer()
 	if err != nil {
@@ -429,32 +574,24 @@ func menuSweep(r *bufio.Reader, out, errw io.Writer) int {
 	case "1":
 		result, err = s.CLISupersweep(ctx, "status", nil)
 	case "2":
-		pref, e := menuRead(r, out, "TLS (any/12/13/both, Enter — any): ")
-		if e != nil {
+		pref, ok := menuChooseTLS(r, out)
+		if !ok {
 			return 0
-		}
-		if pref == "" {
-			pref = "any"
-		}
-		if pref != "any" && pref != "12" && pref != "13" && pref != "both" {
-			fmt.Fprintln(errw, "Допустимые TLS значения: any, 12, 13, both.")
-			return 1
 		}
 		domains, e := menuRead(r, out, "Дополнительные домены через запятую (Enter — стандартный список): ")
 		if e != nil {
 			return 0
 		}
-		ok, e := menuConfirm(r, out, "Полный Supersweep проверит профили и домены, может выполняться долго и менять фиксации. Начать?")
+		ok, e = menuConfirm(r, out, "Полный Supersweep проверит профили и домены, может выполняться долго и менять фиксации. Начать?")
 		if e != nil || !ok {
 			return 0
 		}
-		scope, e := menuRead(r, out, "Scope (default или mark:N, Enter — default): ")
-		if e != nil {
+		scope, ok := menuChooseScope(r, out, s)
+		if !ok {
 			return 0
 		}
-		if scope == "" {
-			scope = "default"
-		}
+		menuClearScreen(out)
+		fmt.Fprintf(out, "%s · scope %s\n\n", menuColor("96;1", "ПОЛНЫЙ SUPERSWEEP"), scope)
 		result, err = s.CLISupersweep(ctx, "start", map[string]string{"scope": scope, "tls_pref": pref, "domain": domains})
 	case "3":
 		ptext, e := menuRead(r, out, "Профиль быстрого подбора (1 YouTube, 2 Googlevideo, 3 РКН, 4 Discord): ")
@@ -470,28 +607,25 @@ func menuSweep(r *bufio.Reader, out, errw io.Writer) int {
 		if e != nil {
 			return 0
 		}
-		pref, e := menuRead(r, out, "TLS (any/12/13/both, Enter — any): ")
-		if e != nil {
+		pref, ok := menuChooseTLS(r, out)
+		if !ok {
 			return 0
 		}
-		if pref == "" {
-			pref = "any"
+		if addr == "" {
+			addr = "стандартный"
 		}
-		ok, e := menuConfirm(r, out, "Начать быстрый подбор? Будут созданы временные тестовые правила.")
+		menuClearScreen(out)
+		fmt.Fprintf(out, "%s · профиль %d · TLS %s\nАдрес: %s\n\n", menuColor("96;1", "БЫСТРЫЙ ПОДБОР"), p, pref, addr)
+		ok, e = menuConfirm(r, out, "Начать быстрый подбор? Будут созданы временные тестовые правила.")
 		if e != nil || !ok {
 			return 0
 		}
-		if pref != "any" && pref != "12" && pref != "13" && pref != "both" {
-			fmt.Fprintln(errw, "Допустимые TLS значения: any, 12, 13, both.")
-			return 1
-		}
-		scope, e := menuRead(r, out, "Scope (default или mark:N, Enter — default): ")
-		if e != nil {
+		scope, ok := menuChooseScope(r, out, s)
+		if !ok {
 			return 0
 		}
-		if scope == "" {
-			scope = "default"
-		}
+		menuClearScreen(out)
+		fmt.Fprintf(out, "%s · scope %s\n\n", menuColor("96;1", "БЫСТРЫЙ ПОДБОР"), scope)
 		result, err = s.CLIStartQuickSweep(ctx, p, addr, scope, pref)
 	case "4":
 		ok, e := menuConfirm(r, out, "Отменить именно тестирование Supersweep?")
@@ -632,23 +766,39 @@ func printSweepProgress(out io.Writer, value any) {
 }
 
 func menuDomains(r *bufio.Reader, out, errw io.Writer) int {
-	fmt.Fprintln(out, "Списки: netrogat (исключения), custom_rkn (свои RKN домены), substring, netrogat_substring, googlevideo")
-	name, e := menuRead(r, out, "Имя списка: ")
-	if e != nil || name == "0" {
-		return 0
+	lists := []struct{ name, label string }{
+		{"netrogat", "Исключения (netrogat)"},
+		{"custom_rkn", "Свои домены РКН"},
+		{"substring", "Подстроки"},
+		{"netrogat_substring", "Исключения по подстрокам"},
+		{"googlevideo", "Googlevideo IP"},
 	}
-	scope, e := menuRead(r, out, "Scope (default или mark:N, Enter — default): ")
-	if e != nil {
-		return 0
+	fmt.Fprintln(out, "Списки:")
+	for i, list := range lists {
+		fmt.Fprintf(out, " %d. %s\n", i+1, list.label)
 	}
-	if scope == "" {
-		scope = orchestra.ScopeDefault
+	fmt.Fprintln(out, " 0. Назад")
+	choice, e := menuRead(r, out, "Выберите список: ")
+	if e != nil || choice == "0" {
+		return menuBack
 	}
+	n, err := strconv.Atoi(choice)
+	if err != nil || n < 1 || n > len(lists) {
+		fmt.Fprintln(errw, "Некорректный номер списка.")
+		return 1
+	}
+	name := lists[n-1].name
 	s, err := menuServer()
 	if err != nil {
 		fmt.Fprintln(errw, err)
 		return 1
 	}
+	scope, ok := menuChooseScope(r, out, s)
+	if !ok {
+		return 0
+	}
+	menuClearScreen(out)
+	fmt.Fprintf(out, "%s · %s · scope %s\n\n", menuColor("96;1", "СПИСОК ДОМЕНОВ"), lists[n-1].label, scope)
 	data, err := s.CLIDomains(context.Background(), name, scope, "list", nil)
 	if err != nil {
 		fmt.Fprintln(errw, err)
@@ -821,7 +971,7 @@ func menuSettings(r *bufio.Reader, out, errw io.Writer) int {
 	fmt.Fprintln(out, " 0. Назад")
 	raw, e := menuRead(r, out, "Номер настройки для переключения: ")
 	if e != nil || raw == "0" {
-		return 0
+		return menuBack
 	}
 	n, e := strconv.Atoi(raw)
 	if e != nil || n < 1 || n > len(settings) {
@@ -904,11 +1054,11 @@ func menuUpdate(r *bufio.Reader, out, errw io.Writer) int {
 		fmt.Fprintf(out, "Офлайн bundle: %s\nСетевая проверка обновлений пропущена.\n", offline.Bundle.Tarball)
 		ok, e := menuConfirm(r, out, "Применить обновление из локального bundle?")
 		if e != nil || !ok {
-			return 0
+			return menuBack
 		}
 		mode, ok := menuChooseUpdateMode(r, out, offline.Bundle.AppArchive != "", offline.Bundle.ConfigArchive != "")
 		if !ok {
-			return 0
+			return menuBack
 		}
 		return cmdUpdate([]string{"-mode", mode}, out, errw)
 	}
@@ -927,15 +1077,16 @@ func menuUpdate(r *bufio.Reader, out, errw io.Writer) int {
 	fmt.Fprintf(out, "Обновление доступно: %t\n", res.UpdateAvailable())
 	fmt.Fprintf(out, "Обновление шаблона конфигурации: %t\n", res.UpdateConfig)
 	if !res.UpdateAvailable() {
-		return 0
+		fmt.Fprintln(out, "Проверка завершена.")
+		return menuBack
 	}
 	mode, ok := menuChooseUpdateMode(r, out, res.UpdateZator || res.UpdateWebUI, res.UpdateConfig)
 	if !ok {
-		return 0
+		return menuBack
 	}
 	ok, e := menuConfirm(r, out, "Создать резервную копию и установить обновление?")
 	if e != nil || !ok {
-		return 0
+		return menuBack
 	}
 	return cmdUpdate([]string{"-mode", mode}, out, errw)
 }

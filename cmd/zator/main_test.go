@@ -139,7 +139,7 @@ func TestMenuColorCanBeDisabled(t *testing.T) {
 func TestMenuBlockcheckRequestsTarget(t *testing.T) {
 	setupEnv(t)
 	var out, errb bytes.Buffer
-	code := menuTools(bufio.NewReader(strings.NewReader("1\ny\nexample.com\n")), &out, &errb)
+	code := menuTools(bufio.NewReader(strings.NewReader("1\n1\nexample.com\n")), &out, &errb)
 	if code != 1 || !strings.Contains(errb.String(), "Blockcheck2 не найден") || strings.Contains(errb.String(), "run: zator blockcheck2") {
 		t.Fatalf("menu blockcheck code=%d err=%q", code, errb.String())
 	}
