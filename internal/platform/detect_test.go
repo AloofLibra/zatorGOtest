@@ -140,3 +140,32 @@ func TestDetectRealDoesNotPanic(t *testing.T) {
 	}
 	_ = p.String()
 }
+
+func TestDetectAlpineOpenRCActive(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "etc/os-release", "ID=alpine\nNAME=\"Alpine Linux\"\n")
+	writeFile(t, root, "run/openrc/softlevel", "default\n")
+	writeFile(t, root, "sbin/openrc-run", "")
+	writeFile(t, root, "usr/sbin/nft", "")
+	p := Detector{Root: root, GOARCH: "amd64"}.Detect()
+	if p.Kind != KindVPS || p.OSID != "alpine" || p.InitSystem != InitOpenRC || p.FWType != FWNftables {
+		t.Fatalf("неожиданная платформа Alpine active OpenRC: %+v", p)
+	}
+	if !HasOpenRCSoftlevel(root) {
+		t.Fatal("HasOpenRCSoftlevel должен возвращать true")
+	}
+}
+
+func TestDetectAlpineOpenRCContainer(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "etc/os-release", "ID=alpine\nNAME=\"Alpine Linux\"\n")
+	writeFile(t, root, "sbin/openrc-run", "")
+	writeFile(t, root, "sbin/iptables", "")
+	p := Detector{Root: root, GOARCH: "arm64"}.Detect()
+	if p.Kind != KindVPS || p.OSID != "alpine" || p.InitSystem != InitOpenRC || p.FWType != FWIptables {
+		t.Fatalf("неожиданная платформа Alpine container: %+v", p)
+	}
+	if HasOpenRCSoftlevel(root) {
+		t.Fatal("HasOpenRCSoftlevel должен возвращать false без softlevel")
+	}
+}

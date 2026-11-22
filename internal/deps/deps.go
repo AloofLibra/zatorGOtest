@@ -3,6 +3,7 @@
 package deps
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/AloofLibra/zator/internal/platform"
+	"github.com/AloofLibra/zator/internal/sysprofile"
 )
 
 // Status — состояние проверки.
@@ -105,152 +107,63 @@ func Ensure(ctx context.Context, plat platform.Platform, opts Options) Report {
 		return rep
 	}
 
-	switch plat.Kind {
-	case platform.KindEntware:
-		ensureEntware(ctx, &rep, opts)
-	case platform.KindOpenWRT:
-		ensureOpenWRT(ctx, &rep, opts)
-	default:
-		ensureVPS(ctx, &rep, opts)
-	}
+	prof := sysprofile.Resolve(plat, sysprofile.Options{Root: opts.root()})
+	ensureWithProfile(ctx, &rep, prof, opts)
 	return rep
 }
 
-func ensureEntware(ctx context.Context, rep *Report, opts Options) {
-	if p := findBinary("opkg", opts); p != "" {
-		rep.Items = append(rep.Items, Item{Name: "opkg", Kind: "binary", Status: StatusOK, Detail: p})
-	} else {
-		rep.Items = append(rep.Items, Item{Name: "opkg", Kind: "binary", Status: StatusMissing, Detail: "пакетный менеджер Entware"})
-		rep.CriticalMissing = append(rep.CriticalMissing, "opkg")
+func ensureWithProfile(ctx context.Context, rep *Report, prof sysprofile.Profile, opts Options) {
+	spec := prof.RequiredDeps(rep.Platform.FWType)
+	if spec.RequiredPkgManager != "" {
+		if p := findBinary(spec.RequiredPkgManager, opts); p != "" {
+			rep.Items = append(rep.Items, Item{Name: spec.RequiredPkgManager, Kind: "binary", Status: StatusOK, Detail: p})
+		} else {
+			detail := ""
+			if spec.RequiredPkgManager == "opkg" {
+				detail = "пакетный менеджер Entware"
+			}
+			rep.Items = append(rep.Items, Item{Name: spec.RequiredPkgManager, Kind: "binary", Status: StatusMissing, Detail: detail})
+			rep.CriticalMissing = appendUnique(rep.CriticalMissing, spec.RequiredPkgManager)
+		}
 	}
 
-	bins := []struct {
-		name     string
-		critical bool
-	}{
-		{"iptables", true},
-		{"ipset", true},
-		{"ip6tables", false},
-		{"insmod", false},
-	}
 	needPkg := false
-	for _, b := range bins {
-		path := findBinary(b.name, opts)
-		if path != "" {
-			rep.Items = append(rep.Items, Item{Name: b.name, Kind: "binary", Status: StatusOK, Detail: path})
+	for _, b := range spec.Binaries {
+		if p := findBinary(b.Name, opts); p != "" {
+			rep.Items = append(rep.Items, Item{Name: b.Name, Kind: "binary", Status: StatusOK, Detail: p})
 			continue
 		}
 		needPkg = true
-		rep.Items = append(rep.Items, Item{Name: b.name, Kind: "binary", Status: StatusMissing})
-		if b.critical {
-			rep.CriticalMissing = append(rep.CriticalMissing, b.name)
+		rep.Items = append(rep.Items, Item{Name: b.Name, Kind: "binary", Status: StatusMissing})
+		if b.Critical {
+			rep.CriticalMissing = appendUnique(rep.CriticalMissing, b.Name)
 		}
 	}
-	// Entware opkg неинтерактивен и НЕ поддерживает apt-стиль -y.
-	if needPkg && opts.InstallPackages {
-		pkgs := uniqueStrings([]string{"iptables", "ipset"})
-		if err := opkgInstall(ctx, opts, pkgs...); err != nil {
-			rep.Items = append(rep.Items, Item{Name: "opkg install", Kind: "package", Status: StatusFailed, Detail: err.Error()})
+
+	if needPkg && opts.InstallPackages && len(spec.Packages) > 0 {
+		pkgs := uniqueStrings(spec.Packages)
+		mgr, err := installPackages(ctx, prof, opts, pkgs...)
+		opName := "pkg install"
+		if mgr == "opkg" {
+			opName = "opkg install"
+		}
+		if err != nil {
+			rep.Items = append(rep.Items, Item{Name: opName, Kind: "package", Status: StatusFailed, Detail: err.Error()})
 		} else {
-			rep.Items = append(rep.Items, Item{Name: "opkg install", Kind: "package", Status: StatusFixed, Detail: strings.Join(pkgs, " ")})
-			recheckBinaries(rep, opts)
+			rep.Items = append(rep.Items, Item{Name: opName, Kind: "package", Status: StatusFixed, Detail: strings.Join(pkgs, " ")})
+			recheckBinaries(rep, spec, opts)
 		}
 	}
 
-	mods := []string{
-		"xt_NFQUEUE", "xt_connbytes", "xt_multiport", "xt_set",
-		"ip_set", "ip_set_bitmap_port", "ip_set_hash_ip", "ip_set_hash_net", "ip_set_hash_ipport",
-	}
-	criticalMods := map[string]bool{"xt_NFQUEUE": true, "xt_connbytes": true, "ip_set_bitmap_port": true}
-	for _, m := range mods {
-		ensureModule(rep, m, criticalMods[m], opts)
+	for _, m := range spec.Modules {
+		ensureModule(rep, prof, m.Name, m.Critical, opts)
 	}
 }
 
-func ensureOpenWRT(ctx context.Context, rep *Report, opts Options) {
-	fw := rep.Platform.FWType
-	if fw == platform.FWNftables {
-		checkBinary(rep, "nft", true, opts)
-	}
-	for _, b := range []string{"iptables", "ipset"} {
-		critical := b == "iptables" && fw == platform.FWIptables
-		if b == "ipset" {
-			critical = fw == platform.FWIptables
-		}
-		checkBinary(rep, b, critical, opts)
-	}
-	if opts.InstallPackages && hasMissingBinaries(rep) {
-		pkgs := []string{"ipset", "iptables-mod-conntrack-extra", "kmod-ipt-conntrack-extra", "kmod-ipt-ipset"}
-		if fw == platform.FWNftables {
-			pkgs = append(pkgs, "nftables", "kmod-nfnetlink-queue", "kmod-nft-queue")
-		} else {
-			pkgs = append(pkgs, "iptables-mod-nfqueue", "kmod-ipt-nfqueue", "iptables-zz-legacy")
-		}
-		if err := opkgInstall(ctx, opts, pkgs...); err != nil {
-			rep.Items = append(rep.Items, Item{Name: "opkg install", Kind: "package", Status: StatusFailed, Detail: err.Error()})
-		} else {
-			rep.Items = append(rep.Items, Item{Name: "opkg install", Kind: "package", Status: StatusFixed, Detail: strings.Join(pkgs, " ")})
-			recheckBinaries(rep, opts)
-		}
-	}
-	queueModules := []string{"xt_NFQUEUE"}
-	if fw == platform.FWNftables {
-		// OpenWrt's iptables-nft translates NFQUEUE into nft queue expressions;
-		// it uses nfnetlink_queue + nft_queue, not the legacy xt_NFQUEUE module.
-		queueModules = []string{"nfnetlink_queue", "nft_queue"}
-	}
-	criticalMods := map[string]bool{"xt_connbytes": true}
-	mods := append(queueModules, "xt_connbytes", "ip_set_bitmap_port")
-	for _, m := range mods {
-		critical := criticalMods[m]
-		if m == "xt_NFQUEUE" || m == "nfnetlink_queue" || m == "nft_queue" {
-			critical = true
-		}
-		ensureModule(rep, m, critical, opts)
-	}
-}
-
-func ensureVPS(ctx context.Context, rep *Report, opts Options) {
-	for _, b := range []string{"iptables", "ipset"} {
-		checkBinary(rep, b, true, opts)
-	}
-	if opts.InstallPackages && hasMissingBinaries(rep) {
-		if err := hostPkgInstall(ctx, opts, "iptables", "ipset"); err != nil {
-			rep.Items = append(rep.Items, Item{Name: "pkg install", Kind: "package", Status: StatusFailed, Detail: err.Error()})
-		} else {
-			rep.Items = append(rep.Items, Item{Name: "pkg install", Kind: "package", Status: StatusFixed, Detail: "iptables ipset"})
-			recheckBinaries(rep, opts)
-		}
-	}
-	for _, m := range []string{"xt_NFQUEUE", "xt_connbytes", "ip_set_bitmap_port"} {
-		ensureModule(rep, m, m == "xt_NFQUEUE", opts)
-	}
-}
-
-func hasMissingBinaries(rep *Report) bool {
-	for _, it := range rep.Items {
-		if it.Kind == "binary" && (it.Status == StatusMissing || it.Status == StatusFailed) {
-			return true
-		}
-	}
-	return false
-}
-
-func checkBinary(rep *Report, name string, critical bool, opts Options) {
-	if p := findBinary(name, opts); p != "" {
-		rep.Items = append(rep.Items, Item{Name: name, Kind: "binary", Status: StatusOK, Detail: p})
-		return
-	}
-	rep.Items = append(rep.Items, Item{Name: name, Kind: "binary", Status: StatusMissing})
-	if critical {
-		rep.CriticalMissing = appendUnique(rep.CriticalMissing, name)
-	}
-}
-
-func recheckBinaries(rep *Report, opts Options) {
+func recheckBinaries(rep *Report, spec sysprofile.DepsSpec, opts Options) {
 	kept := make([]string, 0, len(rep.CriticalMissing))
 	for _, name := range rep.CriticalMissing {
-		if name == "opkg" && findBinary("opkg", opts) == "" {
+		if spec.RequiredPkgManager != "" && name == spec.RequiredPkgManager && findBinary(name, opts) == "" {
 			kept = append(kept, name)
 		}
 	}
@@ -265,19 +178,31 @@ func recheckBinaries(rep *Report, opts Options) {
 			it.Detail = p
 			continue
 		}
-		if isCriticalBinary(it.Name) || it.Name == "nft" || it.Name == "opkg" {
+		if isCriticalInSpec(spec, it.Name) {
 			rep.CriticalMissing = appendUnique(rep.CriticalMissing, it.Name)
 		}
 	}
 }
 
-func ensureModule(rep *Report, name string, critical bool, opts Options) {
+func isCriticalInSpec(spec sysprofile.DepsSpec, name string) bool {
+	if spec.RequiredPkgManager == name {
+		return true
+	}
+	for _, b := range spec.Binaries {
+		if b.Name == name && b.Critical {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureModule(rep *Report, prof sysprofile.Profile, name string, critical bool, opts Options) {
 	if moduleLoaded(opts, name) {
 		rep.Items = append(rep.Items, Item{Name: name, Kind: "module", Status: StatusOK})
 		return
 	}
 	if opts.LoadModules {
-		if err := loadModule(opts, name); err != nil {
+		if err := loadModule(prof, opts, name); err != nil {
 			// повторная проверка: builtin / уже подтянут зависимостью
 			if moduleLoaded(opts, name) {
 				rep.Items = append(rep.Items, Item{Name: name, Kind: "module", Status: StatusFixed, Detail: "loaded"})
@@ -301,36 +226,30 @@ func ensureModule(rep *Report, name string, critical bool, opts Options) {
 	rep.Items = append(rep.Items, Item{Name: name, Kind: "module", Status: st})
 }
 
-func hostPkgInstall(ctx context.Context, opts Options, pkgs ...string) error {
-	if apt := findBinary("apt-get", opts); apt != "" {
+func installPackages(ctx context.Context, prof sysprofile.Profile, opts Options, pkgs ...string) (string, error) {
+	order := prof.PkgManagerOrder()
+	for _, mgr := range order {
+		bin := findBinary(mgr, opts)
+		if bin == "" {
+			continue
+		}
 		cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		defer cancel()
-		args := append([]string{"install", "-y"}, pkgs...)
-		cmd := exec.CommandContext(cctx, apt, args...)
+		if upd, ok := prof.PkgUpdateCmd(mgr, bin); ok {
+			u := exec.CommandContext(cctx, upd.Name, upd.Args...)
+			u.Env = enrichedEnv()
+			_ = u.Run()
+		}
+		inst := prof.PkgInstallCmd(mgr, bin, pkgs)
+		cmd := exec.CommandContext(cctx, inst.Name, inst.Args...)
 		cmd.Env = enrichedEnv()
 		out, err := cmd.CombinedOutput()
+		cancel()
 		if err != nil {
-			return fmt.Errorf("%v: %s", err, trimOut(string(out)))
+			return mgr, fmt.Errorf("%v: %s", err, trimOut(string(out)))
 		}
-		return nil
+		return mgr, nil
 	}
-	if apk := findBinary("apk", opts); apk != "" {
-		cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		defer cancel()
-		args := append([]string{"add"}, pkgs...)
-		cmd := exec.CommandContext(cctx, apk, args...)
-		cmd.Env = enrichedEnv()
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("%v: %s", err, trimOut(string(out)))
-		}
-		return nil
-	}
-	return fmt.Errorf("нет apt-get/apk для установки пакетов")
-}
-
-func isCriticalBinary(name string) bool {
-	return name == "iptables" || name == "ipset"
+	return "", fmt.Errorf("нет пакетного менеджера (%s) для установки пакетов", strings.Join(order, "/"))
 }
 
 func findBinary(name string, opts Options) string {
@@ -356,20 +275,65 @@ func findBinary(name string, opts Options) string {
 }
 
 func moduleLoaded(opts Options, name string) bool {
+	norm := normalizeModName(name)
 	if _, err := os.Stat(filepath.Join(opts.root(), "sys", "module", name)); err == nil {
 		return true
 	}
-	data, err := os.ReadFile(filepath.Join(opts.root(), "proc", "modules"))
+	if norm != name {
+		if _, err := os.Stat(filepath.Join(opts.root(), "sys", "module", norm)); err == nil {
+			return true
+		}
+	}
+	if f, err := os.Open(filepath.Join(opts.root(), "proc", "modules")); err == nil {
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := sc.Text()
+			if field, _, ok := strings.Cut(line, " "); ok {
+				if normalizeModName(field) == norm {
+					return true
+				}
+			} else if normalizeModName(strings.TrimSpace(line)) == norm {
+				return true
+			}
+		}
+	}
+	return moduleBuiltin(opts, name)
+}
+
+func moduleBuiltin(opts Options, name string) bool {
+	rel := kernelRelease(opts)
+	if rel == "" {
+		return false
+	}
+	f, err := os.Open(filepath.Join(opts.root(), "lib", "modules", rel, "modules.builtin"))
 	if err != nil {
 		return false
 	}
-	prefix := name + " "
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, prefix) || line == name {
+	defer f.Close()
+	want := normalizeModName(name)
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if idx := strings.LastIndexByte(line, '/'); idx >= 0 {
+			line = line[idx+1:]
+		}
+		line = strings.TrimSuffix(line, ".xz")
+		line = strings.TrimSuffix(line, ".gz")
+		line = strings.TrimSuffix(line, ".zst")
+		line = strings.TrimSuffix(line, ".ko")
+		if normalizeModName(line) == want {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizeModName(name string) string {
+	return strings.ReplaceAll(name, "-", "_")
 }
 
 func kernelRelease(opts Options) string {
@@ -380,52 +344,36 @@ func kernelRelease(opts Options) string {
 	return strings.TrimSpace(string(b))
 }
 
-func loadModule(opts Options, name string) error {
+func loadModule(prof sysprofile.Profile, opts Options, name string) error {
 	rel := kernelRelease(opts)
-	if rel == "" {
-		return fmt.Errorf("не удалось прочитать версию ядра")
+	cmds := prof.ModuleLoadCmds(name, rel, opts.root(), func(bin string) string {
+		return findBinary(bin, opts)
+	})
+	if len(cmds) == 0 {
+		if rel == "" {
+			return fmt.Errorf("не удалось прочитать версию ядра")
+		}
+		return fmt.Errorf("нет %s", filepath.Join(opts.root(), "lib", "modules", rel, name+".ko"))
 	}
-	ko := filepath.Join(opts.root(), "lib", "modules", rel, name+".ko")
-	if _, err := os.Stat(ko); err != nil {
-		return fmt.Errorf("нет %s", ko)
+	var lastErr error
+	for _, spec := range cmds {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cmd := exec.CommandContext(ctx, spec.Name, spec.Args...)
+		cmd.Env = enrichedEnv()
+		out, err := cmd.CombinedOutput()
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
-	insmod := findBinary("insmod", opts)
-	if insmod == "" {
-		insmod = "insmod"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, insmod, ko)
-	cmd.Env = enrichedEnv()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return lastErr
 }
 
 // opkgInstallArgs — аргументы для Entware/OpenWrt opkg (без -y: его нет в opkg).
 func opkgInstallArgs(pkgs ...string) []string {
-	return append([]string{"install"}, pkgs...)
-}
-
-func opkgInstall(ctx context.Context, opts Options, pkgs ...string) error {
-	opkg := findBinary("opkg", opts)
-	if opkg == "" {
-		return fmt.Errorf("opkg не найден")
-	}
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
-	upd := exec.CommandContext(cctx, opkg, "update")
-	upd.Env = enrichedEnv()
-	_ = upd.Run()
-	cmd := exec.CommandContext(cctx, opkg, opkgInstallArgs(pkgs...)...)
-	cmd.Env = enrichedEnv()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%v: %s", err, trimOut(string(out)))
-	}
-	return nil
+	return sysprofile.Resolve(platform.Platform{Kind: platform.KindEntware}, sysprofile.Options{}).
+		PkgInstallCmd("opkg", "opkg", pkgs).Args
 }
 
 func enrichedEnv() []string {
