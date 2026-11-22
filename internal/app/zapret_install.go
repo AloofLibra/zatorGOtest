@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AloofLibra/zator/internal/platform"
+	"github.com/AloofLibra/zator/internal/sysprofile"
 	"github.com/AloofLibra/zator/internal/uiembed"
 	"github.com/AloofLibra/zator/internal/zapret"
 )
@@ -41,16 +43,9 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 		src = zapret.DefaultSource
 	}
 	force := opts.Force
-	// Старые установки могли положить только binaries без init.d/common —
-	// тогда nfqws2 не поднимается. Переустанавливаем runtime.
-	if !force {
-		fn := filepath.Join(a.Paths.ZapretRoot, "init.d", "sysv", "functions")
-		if _, err := os.Stat(fn); err != nil {
-			force = true
-		}
-	}
-	if !force && legacyZapretInit(filepath.Join(a.Paths.ZapretRoot, "init.d", "sysv", "zapret2")) {
-		// Restore upstream init from its release archive; never replace it with a Go-owned copy.
+	// Старые установки могли положить только binaries без init.d/common либо
+	// повредить openrc/zapret2 на v0.1.43-test15 — переустанавливаем runtime.
+	if !force && needsZapretReinstall(a.Platform, a.Paths.ZapretRoot) {
 		force = true
 	}
 	zopts := zapret.Options{
@@ -111,6 +106,14 @@ func (a *App) InstallZapret(ctx context.Context, opts InstallZapretOptions) (*za
 		return res, err
 	}
 	return res, nil
+}
+
+func needsZapretReinstall(plat platform.Platform, zapretRoot string) bool {
+	prof := sysprofile.Resolve(plat, sysprofile.Options{})
+	if !prof.ValidateUpstreamZapret(zapretRoot) {
+		return true
+	}
+	return legacyZapretInit(filepath.Join(zapretRoot, "init.d", "sysv", "zapret2"))
 }
 
 func legacyZapretInit(path string) bool {

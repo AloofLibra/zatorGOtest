@@ -182,6 +182,21 @@ func TestWriteAndRemoveCustomD(t *testing.T) {
 		t.Errorf("path = %q", p2)
 	}
 
+	// OpenRC-вариант.
+	p3, err := WriteCustomD(root, CustomDOpenRC, CustomDWssizeName, script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "init.d", "openrc", "custom.d", "90-z2r-wssize-ramp.sh"); p3 != want {
+		t.Errorf("openrc path = %q, want %q", p3, want)
+	}
+	if err := RemoveCustomD(root, CustomDOpenRC, CustomDWssizeName); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p3); !os.IsNotExist(err) {
+		t.Error("openrc hook must be removed")
+	}
+
 	for _, bad := range []string{"", "../x", "a/b", `a\b`, ".", ".."} {
 		if _, err := WriteCustomD(root, CustomDSysV, bad, "x"); err == nil {
 			t.Errorf("name %q must be rejected", bad)

@@ -39,6 +39,7 @@ type CustomDFlavor string
 const (
 	CustomDSysV    CustomDFlavor = "sysv"
 	CustomDOpenWrt CustomDFlavor = "openwrt"
+	CustomDOpenRC  CustomDFlavor = "openrc"
 )
 
 // ErrUnsafeScriptValue — значение нельзя безопасно подставить в shell-шаблон.
@@ -146,7 +147,7 @@ func CustomDPath(zapretRoot string, flavor CustomDFlavor, name string) string {
 // WriteCustomD атомарно записывает хук в custom.d (права 0755, недостающие
 // каталоги создаются) и возвращает путь файла. name — простое имя файла.
 func WriteCustomD(zapretRoot string, flavor CustomDFlavor, name, content string) (string, error) {
-	if flavor != CustomDSysV && flavor != CustomDOpenWrt {
+	if flavor != CustomDSysV && flavor != CustomDOpenWrt && flavor != CustomDOpenRC {
 		return "", fmt.Errorf("firewall: unknown custom.d flavor %q", flavor)
 	}
 	if name == "" || name != filepath.Base(name) || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {

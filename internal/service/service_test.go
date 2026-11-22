@@ -9,9 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/AloofLibra/zator/internal/paths"
 	"github.com/AloofLibra/zator/internal/platform"
@@ -115,6 +117,7 @@ func readFile(t *testing.T, path string) string {
 
 var (
 	platSystemd = platform.Platform{Kind: platform.KindVPS, InitSystem: platform.InitSystemd, Arch: platform.ArchX86_64}
+	platOpenRC  = platform.Platform{Kind: platform.KindVPS, InitSystem: platform.InitOpenRC, OSID: "alpine", Arch: platform.ArchX86_64}
 	platProcd   = platform.Platform{Kind: platform.KindOpenWRT, InitSystem: platform.InitProcd}
 	platSysV    = platform.Platform{Kind: platform.KindVPS, InitSystem: platform.InitSysV}
 	platKeen    = platform.Platform{Kind: platform.KindEntware, Hardware: platform.HardwareKeenetic, InitSystem: platform.InitEntware}
@@ -129,6 +132,7 @@ func TestDetectBackendAndHook(t *testing.T) {
 		hook Hook
 	}{
 		{platSystemd, BackendSystemd, HookNone},
+		{platOpenRC, BackendOpenRC, HookNone},
 		{platProcd, BackendProcd, HookNone},
 		{platSysV, BackendSysV, HookNone},
 		{platKeen, BackendEntware, HookKeenetic},
@@ -866,5 +870,359 @@ func TestMatchers(t *testing.T) {
 		MatchValidator("nfqws2", []string{"/opt/zapret2/nfq2/nfqws2", "--comment=strategy-validator.lua"}) ||
 		MatchValidator("bash", []string{"bash", "-c", "echo"}) {
 		t.Error("MatchValidator")
+	}
+}
+
+func TestRenderOpenRCAndWrapper(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("ZATOR_OWNER", "AloofLibra")
+	t.Setenv("ZATOR_REPO", "zatorGOtest")
+	c := e.ctl(t, platOpenRC).(*manager)
+	got, err := RenderOpenRC(c.templateData(UnitWebUI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zbin := filepath.ToSlash(filepath.Join(e.p.BinDir, "zator"))
+	for _, want := range []string{
+		"#!/sbin/openrc-run",
+		"command=" + zbin,
+		`command_args="webui"`,
+		`command_background="yes"`,
+		`pidfile="/run/${RC_SVCNAME}.pid"`,
+		"output_log=",
+		"error_log=",
+		`PATH="${PATH:+$PATH:}"`,
+		"ZATOR_OWNER=AloofLibra",
+		"ZATOR_REPO=zatorGOtest",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderOpenRC missing %q:\n%s", want, got)
+		}
+	}
+
+	wrap, err := RenderOpenRCZapretWrapper("/opt/zapret2/init.d/sysv/zapret2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"#!/sbin/openrc-run",
+		`extra_commands="restart_fw"`,
+		"/opt/zapret2/init.d/sysv/zapret2 start",
+		"/opt/zapret2/init.d/sysv/zapret2 stop",
+		"/opt/zapret2/init.d/sysv/zapret2 status",
+		"/opt/zapret2/init.d/sysv/zapret2 restart-fw",
+	} {
+		if !strings.Contains(wrap, want) {
+			t.Errorf("RenderOpenRCZapretWrapper missing %q:\n%s", want, wrap)
+		}
+	}
+	if _, err := RenderOpenRCZapretWrapper("/opt/bad;rm"); err == nil {
+		t.Fatal("expected unsafe path rejection")
+	}
+}
+
+func TestOpenRCActiveInstallControlUninstall(t *testing.T) {
+	e := newEnv(t)
+	softlevel := filepath.Join(e.root, "run", "openrc", "softlevel")
+	if err := os.MkdirAll(filepath.Dir(softlevel), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(softlevel, []byte("default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	openrcInit := filepath.Join(e.p.ZapretRoot, "init.d", "openrc", "zapret2")
+	openrcFn := filepath.Join(e.p.ZapretRoot, "init.d", "openrc", "functions")
+	if err := os.MkdirAll(filepath.Dir(openrcInit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(openrcInit, []byte("#!/sbin/openrc-run\n. \"$EXEDIR/functions\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(openrcFn, []byte("# openrc functions\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	c := e.ctl(t, platOpenRC)
+	if c.Backend() != BackendOpenRC {
+		t.Fatalf("backend = %s", c.Backend())
+	}
+	if err := c.Install(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Install(ctx, UnitWebUI); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Restart(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Stop(ctx, UnitWebUI); err != nil {
+		t.Fatal(err)
+	}
+
+	zapretDst := filepath.Join(e.root, "etc", "init.d", "zapret2")
+	if runtime.GOOS != "windows" {
+		target, err := os.Readlink(zapretDst)
+		if err != nil || target != openrcInit {
+			t.Fatalf("zapret2 symlink = %q (%v), want %q", target, err, openrcInit)
+		}
+	} else if !strings.Contains(readFile(t, zapretDst), "#!/sbin/openrc-run") {
+		t.Fatalf("zapret2 script missing openrc-run shebang")
+	}
+	webuiDst := filepath.Join(e.root, "etc", "init.d", "zator-webui")
+	if !strings.HasPrefix(readFile(t, webuiDst), "#!/sbin/openrc-run") {
+		t.Fatalf("webui script must use openrc-run:\n%s", readFile(t, webuiDst))
+	}
+
+	want := []string{
+		"rc-update add zapret2 default",
+		"rc-update add zator-webui default",
+		"rc-service zapret2 restart",
+		"rc-service zator-webui stop",
+	}
+	if !reflect.DeepEqual(e.runner.calls, want) {
+		t.Fatalf("calls = %v, want %v", e.runner.calls, want)
+	}
+
+	if err := c.Uninstall(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(zapretDst); !os.IsNotExist(err) {
+		t.Fatalf("zapret2 init still exists: %v", err)
+	}
+	// Оригинальный openrc/zapret2 в ZapretRoot должен остаться нетронутым.
+	if _, err := os.Stat(openrcInit); err != nil {
+		t.Fatalf("upstream openrc/zapret2 removed: %v", err)
+	}
+}
+
+func TestOpenRCFallbackWrapperWhenNoUpstreamOpenRC(t *testing.T) {
+	e := newEnv(t)
+	softlevel := filepath.Join(e.root, "run", "openrc", "softlevel")
+	if err := os.MkdirAll(filepath.Dir(softlevel), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(softlevel, []byte("default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := e.ctl(t, platOpenRC)
+	if err := c.Install(context.Background(), UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(e.root, "etc", "init.d", "zapret2")
+	got := readFile(t, dst)
+	sysvPath := filepath.ToSlash(filepath.Join(e.p.ZapretRoot, "init.d", "sysv", "zapret2"))
+	if !strings.HasPrefix(got, "#!/sbin/openrc-run") || !strings.Contains(got, sysvPath+" start") {
+		t.Fatalf("expected OpenRC wrapper over sysv/zapret2, got:\n%s", got)
+	}
+}
+
+func TestOpenRCContainerDirectFallback(t *testing.T) {
+	e := newEnv(t) // без softlevel
+	ctx := context.Background()
+	c := e.ctl(t, platOpenRC)
+	if err := c.Install(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Install(ctx, UnitWebUI); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Restart(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(e.root, "etc", "init.d", "zapret2")), "upstream-sysv") {
+		t.Fatal("container mode should link sysv/zapret2")
+	}
+	if !strings.HasPrefix(readFile(t, filepath.Join(e.root, "etc", "init.d", "zator-webui")), "#!/bin/sh\n") {
+		t.Fatal("container mode webui should use SysV POSIX script")
+	}
+	want := []string{"/etc/init.d/zapret2 restart"}
+	if !reflect.DeepEqual(e.runner.calls, want) {
+		t.Fatalf("container calls = %v, want %v", e.runner.calls, want)
+	}
+}
+
+func TestWriteFileDoesNotFollowSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		probeDir := t.TempDir()
+		if err := os.Symlink("target", filepath.Join(probeDir, "link")); err != nil {
+			t.Skip("Windows symlink creation needs elevated privileges")
+		}
+	}
+	e := newEnv(t)
+	m := e.ctl(t, platOpenRC).(*manager)
+	target := filepath.Join(e.root, "upstream-openrc-zapret2")
+	link := filepath.Join(e.root, "etc", "init.d", "zapret2")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("#!/sbin/openrc-run\nORIGINAL\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.writeFile(link, "#!/sbin/openrc-run\nWRAPPER\n", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, target); got != "#!/sbin/openrc-run\nORIGINAL\n" {
+		t.Fatalf("writeFile followed symlink and corrupted target: %q", got)
+	}
+	if got := readFile(t, link); got != "#!/sbin/openrc-run\nWRAPPER\n" {
+		t.Fatalf("writeFile did not write link path: %q", got)
+	}
+}
+
+func TestSysVNativeZapretSymlinkAndIgnoreNotFound(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	c := e.ctl(t, platSysV)
+	if err := c.Install(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(e.root, "etc", "init.d", "zapret2")
+	src := filepath.Join(e.p.ZapretRoot, "init.d", "sysv", "zapret2")
+	if runtime.GOOS != "windows" {
+		target, err := os.Readlink(dst)
+		if err != nil || target != src {
+			t.Fatalf("sysv zapret2 link = %q (%v), want %q", target, err, src)
+		}
+	}
+	// Когда update-rc.d и chkconfig отсутствуют (exec.ErrNotFound), uninstall не падает.
+	e.runner.resp = func(name string, args []string) ([]byte, error) {
+		if name == "update-rc.d" || name == "chkconfig" {
+			return nil, &exec.Error{Name: name, Err: exec.ErrNotFound}
+		}
+		return nil, nil
+	}
+	if err := c.Uninstall(ctx, UnitZapret2); err != nil {
+		t.Fatalf("uninstall should succeed when update-rc.d/chkconfig are absent: %v", err)
+	}
+}
+
+func TestProcdPreservesLocalAndCleansLinks(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	c := e.ctl(t, platProcd)
+
+	// 1. Локально изменённый скрипт без маркера zator сохраняется.
+	localPath := filepath.Join(e.root, "etc", "init.d", "zapret2")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	localBody := "#!/bin/sh /etc/rc.common\n# locally modified\nSTART=21\n"
+	if err := os.WriteFile(localPath, []byte(localBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Install(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, localPath); got != localBody {
+		t.Fatalf("local OpenWrt script overwritten: %q", got)
+	}
+
+	// 2. Скрипт с маркером "(создано zator)" заменяется на upstream и старые rc.d ссылки чистятся.
+	if err := os.WriteFile(localPath, []byte("#!/bin/sh /etc/rc.common\n# zapret2 (создано zator)\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Install(ctx, UnitZapret2); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, localPath); !strings.Contains(got, "# upstream-openwrt") {
+		t.Fatalf("zator-generated script not replaced by upstream: %q", got)
+	}
+
+	if runtime.GOOS != "windows" {
+		rcDir := filepath.Join(e.root, "etc", "rc.d")
+		if err := os.MkdirAll(rcDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(localPath, []byte("START=21\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"S90zapret2", "K89zapret2", "S21zapret2", "K10zapret2", "S90other"} {
+			if err := os.Symlink("../init.d/zapret2", filepath.Join(rcDir, name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := cleanupOpenWrtInitLinks(localPath, rcDir); err != nil {
+			t.Fatal(err)
+		}
+		for _, stale := range []string{"S90zapret2", "K89zapret2"} {
+			if _, err := os.Lstat(filepath.Join(rcDir, stale)); !os.IsNotExist(err) {
+				t.Errorf("stale link %s remains: %v", stale, err)
+			}
+		}
+		for _, keep := range []string{"S21zapret2", "K10zapret2", "S90other"} {
+			if _, err := os.Lstat(filepath.Join(rcDir, keep)); err != nil {
+				t.Errorf("expected link %s removed: %v", keep, err)
+			}
+		}
+	}
+}
+
+func TestExecRunnerDoesNotHangOnInheritedFD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell background descriptor test requires Unix/Linux")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not found")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	out, err := ExecRunner().Run(ctx, sh, "-c", "sleep 5 >/dev/null & echo started; echo warn >&2")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("ExecRunner failed: %v (output=%q)", err, string(out))
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("ExecRunner blocked on background child FD: elapsed=%v", elapsed)
+	}
+	text := string(out)
+	if !strings.Contains(text, "started") || !strings.Contains(text, "warn") {
+		t.Fatalf("unexpected ExecRunner output: %q", text)
+	}
+}
+
+func TestExecRunnerErrorMissingBinary(t *testing.T) {
+	_, err := ExecRunner().Run(context.Background(), "nonexistent-zator-cmd-xyz")
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("got %v, want exec.ErrNotFound", err)
+	}
+}
+
+func TestOpenRCInstallStopsLegacySysVBeforeOverwrite(t *testing.T) {
+	e := newEnv(t)
+	softlevel := filepath.Join(e.root, "run", "openrc", "softlevel")
+	if err := os.MkdirAll(filepath.Dir(softlevel), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(softlevel, []byte("default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(e.root, "etc", "init.d", "zator-webui")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte("#!/bin/sh\necho legacy\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	c := e.ctl(t, platOpenRC)
+	if err := c.Install(context.Background(), UnitWebUI); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"/etc/init.d/zator-webui stop",
+		"rc-update add zator-webui default",
+	}
+	if !reflect.DeepEqual(e.runner.calls, want) {
+		t.Fatalf("calls = %v, want %v", e.runner.calls, want)
+	}
+	if got := readFile(t, legacyPath); !strings.HasPrefix(got, "#!/sbin/openrc-run") {
+		t.Fatalf("legacy script was not replaced with openrc-run:\n%s", got)
 	}
 }

@@ -86,6 +86,7 @@ type InitSystem string
 
 const (
 	InitSystemd InitSystem = "systemd"
+	InitOpenRC  InitSystem = "openrc"
 	InitProcd   InitSystem = "procd"
 	InitSysV    InitSystem = "sysv"
 	InitEntware InitSystem = "entware"
@@ -222,16 +223,30 @@ func detectArch(goarch, cpuinfo string) Arch {
 	return arch
 }
 
+// HasOpenRCSoftlevel сообщает, запущен ли OpenRC как активная init-система
+// (наличие /run/openrc/softlevel или /var/run/openrc/softlevel).
+func HasOpenRCSoftlevel(root string) bool {
+	if root == "" {
+		root = "/"
+	}
+	d := Detector{Root: root}
+	return d.exists("run/openrc/softlevel") || d.exists("var/run/openrc/softlevel")
+}
+
 func (d Detector) detectInit(kind Kind) InitSystem {
 	switch {
 	case d.exists("run/systemd/system"):
 		return InitSystemd
+	case d.exists("run/openrc/softlevel") || d.exists("var/run/openrc/softlevel"):
+		return InitOpenRC
 	case kind == KindOpenWRT && (d.exists("sbin/procd") || d.exists("etc/rc.common")):
 		return InitProcd
 	case kind == KindEntware:
 		return InitEntware
 	case d.exists("sbin/procd"):
 		return InitProcd
+	case d.exists("sbin/openrc-run") || d.exists("sbin/rc-service") || d.exists("usr/sbin/rc-service"):
+		return InitOpenRC
 	}
 	return InitSysV
 }

@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/AloofLibra/zator/internal/fsutil"
-	"github.com/AloofLibra/zator/internal/platform"
 	"github.com/AloofLibra/zator/internal/service"
+	"github.com/AloofLibra/zator/internal/sysprofile"
 )
 
 const (
@@ -27,7 +27,8 @@ func (a *App) FwHookPresent() bool {
 	case service.HookKeenetic, service.HookMerlin:
 		return true
 	}
-	return a.resolveZapretInit() != ""
+	_, ok := a.firewallReloadCmd("")
+	return ok
 }
 
 // ArgsPresent — есть ли непустой nfqws2.args.
@@ -52,22 +53,9 @@ func (a *App) writeFwEnsure(status, detail string) {
 		[]byte(status+"\n"+detail+"\n"), 0o644)
 }
 
-func (a *App) resolveZapretInit() string {
-	cands := []string{}
-	if a.Platform.InitSystem == platform.InitProcd {
-		cands = append(cands, "/etc/init.d/zapret2")
-	}
-	cands = append(cands,
-		filepath.Join(a.Paths.ZapretRoot, "init.d", "sysv", "zapret2"),
-		"/opt/etc/init.d/S90-zapret2",
-		"/etc/init.d/zapret2",
-	)
-	for _, p := range cands {
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			return p
-		}
-	}
-	return ""
+func (a *App) firewallReloadCmd(root string) (sysprofile.CmdSpec, bool) {
+	prof := sysprofile.Resolve(a.Platform, sysprofile.Options{Root: root})
+	return prof.FirewallReloadCmd(a.Paths, root)
 }
 
 // EnsureFirewallApplied delegates firewall reconciliation to zapret2's native init.
@@ -76,8 +64,8 @@ func (a *App) EnsureFirewallApplied(ctx context.Context) error {
 		a.writeFwEnsure("skip", "platform not detected")
 		return nil
 	}
-	init := a.resolveZapretInit()
-	if init == "" {
+	spec, ok := a.firewallReloadCmd("")
+	if !ok {
 		err := fmt.Errorf("upstream zapret2 init not found")
 		a.writeFwEnsure("fail", err.Error())
 		return err
@@ -87,18 +75,17 @@ func (a *App) EnsureFirewallApplied(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, init, "restart-fw")
-	out, err := cmd.CombinedOutput()
+	out, err := service.ExecRunner().Run(ctx, spec.Name, spec.Args...)
 	detail := string(out)
 	if len(detail) > 200 {
 		detail = detail[:200]
 	}
 	if err != nil {
-		msg := fmt.Sprintf("%s restart-fw: %v %s", init, err, detail)
+		msg := fmt.Sprintf("%s %s: %v %s", spec.Name, strings.Join(spec.Args, " "), err, detail)
 		a.writeFwEnsure("fail", msg)
 		return fmt.Errorf("fw ensure: %w", err)
 	}
-	a.writeFwEnsure("ok", init)
+	a.writeFwEnsure("ok", spec.Name)
 	return nil
 }
 
