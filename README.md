@@ -117,21 +117,23 @@ make test
 | Раздел | Путь | Назначение |
 | --- | --- | --- |
 | **Обзор** | `#/` | health / warnings / TLS-check / старт·стоп·рестарт |
-| **Стратегии** | `#/strategies` | локи активных профилей 1–10 (ID 5 зарезервирован), проверка после лока |
-| **Вручную** | `#/manual` | desync / blob / googlevideo / суперсвип |
+| **Стратегии** | `#/strategies` | локи активных профилей 1–10 (включая QUIC/5 + `h3-curl`), проверка после лока |
+| **Подбор** | `#/sweep` | Supersweep и быстрый подбор (включая QUIC/5 в live-режиме) |
+| **Свои стратегии** | `#/custom-strats` | конструктор, импорт blockcheck2/nfqws2, перенумерация и ремап локов |
+| **Блобы и SNI** | `#/blobs-sni` | карта профилей, TLS/QUIC блобы, SNI-пул (rr/rand), свои бинарные блобы |
 | **Домены** | `#/domains` | hostlist / custom_rkn / исключения |
-| **Настройки** | `#/settings/…` | обновления, провайдер, бэкапы, TLS/WG, порты, scopes |
+| **Настройки** | `#/settings/…` | обновления, провайдер, бэкапы, WG, WSSIZE, порты, scopes, диагностика |
 
 ### Логика стратегий
 
 - Стратегии — строки `--lua-desync=…:strategy=N` в `NFQWS2_OPT`.
 - **Лок** пишет номер в `locked.tsv` (или `locked.manual.tsv` для fallback 8/9).
-- После «Зафиксировать» UI гоняет проверку и показывает **TLS 1.2 / TLS 1.3**.
+- После «Лок» UI гоняет проверку: TLS 1.2 / TLS 1.3 (+ media-диапазоны для П2 и HTTP/3 `h3-curl` для П5).
 
-### Вкладка «Вручную»
+### «Свои стратегии» и «Блобы и SNI»
 
-1. **Стратегия** — вставляет desync в блок профиля как `max+1`, опционально лочит.
-2. **Blob** — `.bin` в `/opt/zator/files/fake`, опционально сразу выбирает.
+1. **Свои стратегии** — добавление и импорт (`blockcheck2`/`nfqws2`, отклонение `zapret1`) в блоки `tpl`/`p4`/`p5`/`p6`/`p7`, автоматическое назначение номеров и перенос активных локов при применении и обновлении конфига.
+2. **Блобы и SNI** — загрузка бинарных фейков (до 256 КиБ), глобальный и по-профильный выбор TLS/QUIC блобов (`z2r_prof_*` с сохранением в `blob_files.tsv`), режим `classic/clone`, SNI-пины и ротация наборов `sni_zator.txt`/`sni_user.txt`.
 
 Подробный HTTP API: [`docs/API.md`](docs/API.md) (`/api/*`; `/cgi-bin/*.cgi` — алиас).
 
@@ -153,6 +155,10 @@ zator update
 zator uninstall -y [--purge]
 zator auth status|set-password|enable|disable
 zator service status|warnings|start|stop|restart [unit]
+zator custom list|add|edit|enable|disable|delete|import|apply
+zator blobs list|upload|add|edit|delete|apply
+zator sni status|pin|pool|policy|set-write|set-delete
+zator h3-curl status|install|update|remove
 zator locks clear -y
 zator restore z2r_backup_YYYYMMDD_HHMMSS.tar
 zator rollback
@@ -196,7 +202,10 @@ Release-бинарники собираются Garble `-tiny` и упаковы
 cmd/zator/           # CLI
 internal/
   app/               # install / update / bootstrap
-  config/            # NFQWS2_OPT / config zapret2
+  config/            # NFQWS2_OPT / config zapret2 / markers
+  orchestra/         # локи стратегий, overrides, blob_files, sni_pool, remap
+  customblobs/       # пользовательские бинарные блобы и секция #Z2R_CUSTOM_BLOBS
+  customstrats/      # пользовательские стратегии, валидатор и импорт blockcheck2
   orchestra/         # локи стратегий, overrides
   webapi/            # HTTP API для Web UI
   deploy/            # GitHub releases / apply update

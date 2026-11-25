@@ -70,6 +70,9 @@ function hasVerdict(item: CheckItem) {
           <span v-if="item.tls12_detail" :class="lineClass(item.tls12_detail.state)">{{ item.tls12_detail.text || 'TLS 1.2' }}</span>
           <span v-if="item.tls13_detail" :class="lineClass(item.tls13_detail.state)">{{ item.tls13_detail.text || 'TLS 1.3' }}</span>
           <span v-if="item.download" :class="downloadClass(item.download.state)">{{ item.download.text || 'Данные' }}</span>
+          <span v-if="item.quic" :class="verdictClass(item.verdict)">
+            HTTP/3: {{ item.quic.ok_count }}/{{ item.quic.total_probes }} проб (раундов: {{ item.quic.rounds }}){{ item.quic.reason ? ` · ${item.quic.reason}` : '' }}
+          </span>
         </template>
         <template v-else>
           <span :class="item.tls12 ? 'ok' : 'bad'">TLS 1.2: {{ item.tls12 ? 'OK' : 'FAIL' }}</span>

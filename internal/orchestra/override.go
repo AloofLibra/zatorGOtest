@@ -42,9 +42,60 @@ const (
 	CloneSizeFileName    = "clonesize.tsv"
 )
 
-// OverrideProfiles — профили, для которых CLI/WebUI предлагают переопределения
-// (Z2R_BLOB_PROFILES и аналоги). Хранилище не ограничивает номер профиля.
+// OverrideProfiles — профили, для которых CLI/WebUI предлагают клонирование
+// и SNI-переопределения (1/2/3/4/8). Хранилище не ограничивает номер профиля.
 var OverrideProfiles = []int{1, 2, 3, 4, 8}
+
+// BlobOverrideProfiles — профили с per-profile слотом блоба z2r_prof_N (включая QUIC 5).
+var BlobOverrideProfiles = []int{1, 2, 3, 4, 5, 8}
+
+// BlobSlotPrefix — префикс имён слотов в конфиге и blob_override.tsv.
+const BlobSlotPrefix = "z2r_prof_"
+
+// IsCloneProfile сообщает, поддерживает ли профиль clone/SNI-переопределения.
+func IsCloneProfile(profile string) bool {
+	for _, id := range OverrideProfiles {
+		if strconv.Itoa(id) == profile {
+			return true
+		}
+	}
+	return false
+}
+
+// IsBlobOverrideProfile сообщает, поддерживает ли профиль слот z2r_prof_N.
+func IsBlobOverrideProfile(profile string) bool {
+	for _, id := range BlobOverrideProfiles {
+		if strconv.Itoa(id) == profile {
+			return true
+		}
+	}
+	return false
+}
+
+// BlobSlotName возвращает имя слота в конфиге (`z2r_prof_<N>`).
+func BlobSlotName(profile string) string {
+	return BlobSlotPrefix + strings.TrimSpace(profile)
+}
+
+// ValidBlobFileForProfile проверяет допустимость имени файла блоба для профиля:
+// для профиля 5 (QUIC) допустимы только UDP-файлы, для TLS — tls_*.bin или custom_tls.bin.
+func ValidBlobFileForProfile(file, profile string) bool {
+	if file == "" || strings.ContainsAny(file, "/\\") || strings.Contains(file, "..") {
+		return false
+	}
+	low := strings.ToLower(file)
+	if !strings.HasSuffix(low, ".bin") {
+		return false
+	}
+	if strings.TrimSpace(profile) == "5" {
+		return strings.HasPrefix(low, "quic_") ||
+			strings.HasPrefix(low, "fake_quic_") ||
+			strings.HasPrefix(low, "discord_udp_") ||
+			strings.HasPrefix(low, "wg_initial_fake_") ||
+			strings.HasPrefix(low, "stun")
+	}
+	return strings.HasPrefix(low, "tls_") || low == "custom_tls.bin"
+}
 
 // ClonePresets — пресеты лимита клонов в меню (Z2R_CLONE_SIZE_PRESETS).
 var ClonePresets = []int{1200, 964, 512, 196}

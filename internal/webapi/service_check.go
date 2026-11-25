@@ -164,7 +164,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request, p params) {
 			resp.WaitedApply = true
 		}
 		opts := netcheck.ProfileCheckOptions{}
-		if id == 2 {
+		if id == 2 || id == 5 {
 			opts.MediaURL = strings.TrimSpace(p.Get("media_url"))
 			opts.VideoID = strings.TrimSpace(p.Get("video_id"))
 		}

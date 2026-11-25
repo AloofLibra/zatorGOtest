@@ -17,6 +17,7 @@ import (
 	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
+	"github.com/AloofLibra/zator/internal/paths"
 )
 
 // Ошибки изолированной пробы.
@@ -65,15 +66,26 @@ type Config struct {
 	Logf func(format string, args ...any)
 	// OnComplete уведомляет владельца после сохранения итогового отчёта.
 	OnComplete func(Report, error)
+
+	// Paths используется для поиска h3-curl при подборе Профиля 5 (QUIC).
+	Paths paths.Paths
+	// QUICProbe подменяет вызов h3-curl при тестировании Профиля 5.
+	QUICProbe func(ctx context.Context, strategy int, rounds int) netcheck.TargetResult
+	// QUICSettleDelay задаёт паузу устаканивания лока П5 в живом режиме (по умолчанию >=3s).
+	QUICSettleDelay time.Duration
 }
 
 // Params — параметры одного суперавтопрогона.
 type Params struct {
-	// QuickProfile selects one profile for a short strategy search (1, 2, 3, or 4).
+	// QuickProfile selects one profile for a short strategy search (1, 2, 3, 4, or 5).
 	// Zero keeps the full SuperSweep workflow.
 	QuickProfile int
 	// QuickAddress overrides the selected profile's default test URL.
 	QuickAddress string
+	// IncludeQUIC включает живую фазу Профиля 5 (HTTP/3 QUIC) в конец полного прогона.
+	IncludeQUIC bool
+	// QUICRounds задаёт число раундов QUIC-проверки на стратегию (1..5, по умолчанию 1).
+	QUICRounds int
 	// Scope — область локов ("" = default).
 	Scope string
 	// TLSPref — требование к версиям TLS: any|12|13|both.
@@ -130,6 +142,12 @@ func (p Params) Normalize() Params {
 	p.TLSPref = netcheck.ParseTLSPref(string(p.TLSPref))
 	if p.Scope == "" {
 		p.Scope = orchestra.ScopeDefault
+	}
+	if p.QUICRounds < 0 {
+		p.QUICRounds = 0
+	}
+	if p.QUICRounds > 5 {
+		p.QUICRounds = 5
 	}
 	return p
 }
@@ -329,7 +347,7 @@ func (c *Coordinator) logf(format string, args ...any) {
 
 func (c *Coordinator) prepare(ctx context.Context, p Params) (*run, error) {
 	p = p.Normalize()
-	if p.QuickProfile != 0 && p.QuickProfile != 1 && p.QuickProfile != 2 && p.QuickProfile != 3 && p.QuickProfile != 4 {
+	if p.QuickProfile < 0 || p.QuickProfile > 5 {
 		return nil, fmt.Errorf("sweep: некорректный профиль быстрого подбора %d", p.QuickProfile)
 	}
 	domains := p.Domains
@@ -350,7 +368,16 @@ func (c *Coordinator) prepare(ctx context.Context, p Params) (*run, error) {
 		return nil, ErrNoDomains
 	}
 	maxes := map[int]int{}
-	for _, prof := range []int{1, 2, 4, 3} {
+	var reqProfiles []int
+	switch {
+	case p.QuickProfile == 5:
+		reqProfiles = []int{5}
+	case p.QuickProfile == 0 && p.IncludeQUIC:
+		reqProfiles = []int{1, 2, 4, 3, 5}
+	default:
+		reqProfiles = []int{1, 2, 4, 3}
+	}
+	for _, prof := range reqProfiles {
 		n := c.cfg.MaxStrategy(prof)
 		if n < 1 {
 			return nil, fmt.Errorf("%w: профиль %d", ErrNoStrategies, prof)
@@ -667,7 +694,8 @@ func (r *run) execute(ctx context.Context) (Report, error) {
 func (r *run) prepareWorkers(ctx context.Context) ([]workerSpec, []string) {
 	c := r.c
 	gvURL := "https://" + netcheck.FallbackClusterDomain + "/"
-	if c.cfg.ResolveMedia != nil && (r.p.QuickProfile == 0 || r.p.QuickProfile == 2) && ctx.Err() == nil {
+	needMedia := r.p.QuickProfile == 2 || r.p.QuickProfile == 5 || r.p.QuickProfile == 0
+	if c.cfg.ResolveMedia != nil && needMedia && ctx.Err() == nil {
 		media, err := c.cfg.ResolveMedia(ctx)
 		if err != nil {
 			r.p.MediaStatus = err.Error()
@@ -684,12 +712,20 @@ func (r *run) prepareWorkers(ctx context.Context) ([]workerSpec, []string) {
 		}
 	}
 	specs := r.specs(gvURL)
-	phases := Phases
+	phases := append([]string(nil), Phases...)
+	if r.p.QuickProfile == 0 && r.p.IncludeQUIC {
+		specs = append(specs, workerSpec{WorkerQUIC, 5, []string{"udp"}, workerLabels[WorkerQUIC], "quic://googlevideo.com", r.maxes[5], r.p.Pause})
+		phases = append(phases, WorkerQUIC)
+	}
 	if r.p.QuickProfile != 0 {
-		if r.p.QuickProfile == 3 {
+		switch r.p.QuickProfile {
+		case 3:
 			specs = nil
 			phases = []string{WorkerRKN}
-		} else {
+		case 5:
+			specs = []workerSpec{{WorkerQUIC, 5, []string{"udp"}, workerLabels[WorkerQUIC], "quic://googlevideo.com", r.maxes[5], r.p.Pause}}
+			phases = []string{WorkerQUIC}
+		default:
 			name := profileWorkers[r.p.QuickProfile]
 			var selected []workerSpec
 			for _, spec := range specs {
@@ -757,6 +793,9 @@ func (r *run) collectPrev() {
 	add("profile", "2", "tls")
 	add("profile", "4", "tls")
 	add("profile", "3", "tls")
+	if r.p.IncludeQUIC || r.p.QuickProfile == 5 {
+		add("profile", "5", "udp")
+	}
 	for _, t := range r.targets {
 		add("domain", t.Domain, "tls")
 	}
@@ -777,6 +816,10 @@ type guarded struct {
 
 type probeReinstaller interface {
 	Reinstall(context.Context) error
+}
+
+type sniPoolPinner interface {
+	RefreshSNIPin()
 }
 
 func (g guarded) CheckTarget(ctx context.Context, label, url string) netcheck.TargetResult {
@@ -810,6 +853,9 @@ func unknownMediaTarget(targetURL, videoID, reason string) netcheck.TargetResult
 }
 
 func (g guarded) withProbe(ctx context.Context, label, url string, check func() netcheck.TargetResult) netcheck.TargetResult {
+	if pinner, ok := g.r.c.cfg.Probe.(sniPoolPinner); ok {
+		pinner.RefreshSNIPin()
+	}
 	var recoveryErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		if _, err := g.ensureHealthy(ctx); err != nil {
@@ -888,6 +934,16 @@ func (r *run) env(profile int) *Env {
 }
 
 func (r *run) runPhase(ctx context.Context, phase string, specs []workerSpec) error {
+	if phase == WorkerQUIC {
+		var spec workerSpec
+		for _, s := range specs {
+			if s.name == WorkerQUIC {
+				spec = s
+			}
+		}
+		r.c.logf("=== Фаза %s (профиль 5, живой режим) ===", phase)
+		return r.runQUIC(ctx, spec)
+	}
 	probeProfile := workerProfiles[phase]
 	if err := r.c.cfg.Probe.Start(ctx, probeProfile); err != nil {
 		return fmt.Errorf("%w: профиль %d: %v", ErrProbe, probeProfile, err)
@@ -964,6 +1020,177 @@ func (r *run) runProfile(ctx context.Context, s workerSpec) error {
 	_ = os.WriteFile(r.path(doneFile(s.name)), nil, 0o644)
 	removeIfExists(r.path(currentFile(s.name)))
 	return err
+}
+
+func (r *run) runQUIC(ctx context.Context, s workerSpec) error {
+	c := r.c
+	rounds := r.p.QUICRounds
+	if rounds < 1 {
+		rounds = 1
+	}
+
+	var probeFn func(ctx context.Context, strategy int, rounds int) netcheck.TargetResult
+	if c.cfg.QUICProbe != nil {
+		probeFn = c.cfg.QUICProbe
+	} else {
+		st := netcheck.DetectH3Curl(c.cfg.Paths)
+		if !st.Found || r.mediaURLs == nil {
+			reason := "h3-curl не установлен"
+			if st.Found && r.mediaURLs == nil {
+				reason = "не получен видеопоток YouTube"
+			}
+			c.logf("QUIC (профиль 5) пропущен: %s", reason)
+			_ = writeKV(r.path(bestFile(s.name)), kv{
+				{"best", ""},
+				{"best_kind", ""},
+				{"best_short", reason},
+				{"interrupted", "0"},
+			})
+			_ = os.WriteFile(r.path(doneFile(s.name)), nil, 0o644)
+			return nil
+		}
+		nc := netcheck.NewChecker(netcheck.DefaultOptions())
+		if base, ok := c.cfg.Checker.(*netcheck.Checker); ok {
+			nc = base
+		}
+		media := *r.mediaURLs
+		curlPath := st.Path
+		probeFn = func(pCtx context.Context, _ int, rnd int) netcheck.TargetResult {
+			return nc.CheckQUICMedia(pCtx, curlPath, media, rnd)
+		}
+	}
+
+	prevStrat, prevErr := c.cfg.Store.GetLock(r.p.Scope, "5", "udp")
+	res := ProfileSweepResult{}
+	restoreNeeded := true
+	defer func() {
+		if !restoreNeeded {
+			return
+		}
+		// Независимое восстановление исходного лока П5 при отмене или отсутствии победителя.
+		_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if prevErr == nil && prevStrat > 0 {
+			if err := c.cfg.Store.SetLock(r.p.Scope, "5", "udp", prevStrat); err != nil {
+				c.logf("Профиль 5: не удалось восстановить прежний лок %d: %v", prevStrat, err)
+			}
+		} else {
+			if err := c.cfg.Store.ClearLock(r.p.Scope, "5", "udp"); err != nil {
+				c.logf("Профиль 5: не удалось сбросить лок в auto: %v", err)
+			}
+		}
+	}()
+
+	settleDur := c.cfg.QUICSettleDelay
+	if settleDur <= 0 {
+		settleDur = r.p.Settle
+		if c.cfg.QUICProbe == nil && settleDur < 3*time.Second {
+			settleDur = 3 * time.Second
+		}
+	}
+
+	for n := 1; n <= s.max; n++ {
+		if ctx.Err() != nil {
+			res.Interrupted = true
+			break
+		}
+		_ = fsutil.AtomicWriteFile(r.path(currentFile(s.name)), []byte(s.url+"\t"+strconv.Itoa(n)+"\n"), 0o644)
+		if err := c.cfg.Store.SetLock(r.p.Scope, "5", "udp", orchestra.Strategy(n)); err != nil {
+			res.Interrupted = true
+			return err
+		}
+		if settleDur > 0 {
+			if err := r.sleep(ctx, settleDur); err != nil {
+				res.Interrupted = true
+				break
+			}
+		}
+		tr := probeFn(ctx, n, rounds)
+		if ctx.Err() != nil {
+			res.Interrupted = true
+			break
+		}
+
+		var tok, dlBytes, dlTime string
+		switch tr.Verdict {
+		case netcheck.VerdictOK:
+			tok = TokenOK
+			res.NOK++
+			res.Greens = append(res.Greens, n)
+			if res.Best == 0 || res.BestKind == BestKindWarn {
+				res.Best = n
+				res.BestKind = BestKindBest
+				res.BestShort = tr.Text
+			}
+		case netcheck.VerdictWarn:
+			tok = TokenWarn
+			res.NWarn++
+			res.Warns = append(res.Warns, n)
+			if res.Best == 0 {
+				res.Best = n
+				res.BestKind = BestKindWarn
+				res.BestShort = tr.Text
+			}
+		case netcheck.VerdictUnknown:
+			tok = TokenUnknown
+			res.NUnknown++
+		default:
+			tok = TokenFail
+			res.NFail++
+		}
+		if tr.Download != nil {
+			dlBytes = strconv.Itoa(tr.Download.Size)
+			dlTime = tr.Download.Time
+		}
+		row := ProgressRow{
+			Epoch:    c.now().Unix(),
+			Target:   strconv.Itoa(s.profile),
+			Strategy: n,
+			Token:    tok,
+			TLS12:    "h3",
+			TLS13:    "-",
+			DLBytes:  dlBytes,
+			DLTime:   dlTime,
+			Short:    tr.Text,
+		}
+		res.Rows = append(res.Rows, row)
+		_ = appendLine(r.path(progressFile(s.name)), row.TSV())
+		_ = r.writeStatus()
+
+		if n < s.max && s.pause > 0 {
+			_ = appendLine(r.path(filePacing), fmt.Sprintf("%s\t%d\t%d", s.name, n, int(s.pause.Seconds())))
+			if err := r.sleep(ctx, s.pause); err != nil {
+				res.Interrupted = true
+				break
+			}
+		}
+	}
+
+	if !res.Interrupted && res.Best > 0 && res.BestKind == BestKindBest {
+		// Есть зелёный победитель — оставляем его и не откатываем к сломанному исходному локу.
+		restoreNeeded = false
+	}
+
+	if r.profileResults == nil {
+		r.profileResults = make(map[string]ProfileSweepResult)
+	}
+	r.profileResults[s.name] = res
+	_ = writeKV(r.path(bestFile(s.name)), kv{
+		{"best", numOrEmpty(res.Best)},
+		{"best_kind", res.BestKind},
+		{"best_short", res.BestShort},
+		{"greens", joinInts(res.Greens)},
+		{"fulls", joinInts(res.Fulls)},
+		{"warns", joinInts(res.Warns)},
+		{"n_ok", strconv.Itoa(res.NOK)},
+		{"n_warn", strconv.Itoa(res.NWarn)},
+		{"n_fail", strconv.Itoa(res.NFail)},
+		{"n_unknown", strconv.Itoa(res.NUnknown)},
+		{"interrupted", b2s(res.Interrupted)},
+	})
+	_ = os.WriteFile(r.path(doneFile(s.name)), nil, 0o644)
+	removeIfExists(r.path(currentFile(s.name)))
+	return nil
 }
 
 func (r *run) runRKN(ctx context.Context) error {

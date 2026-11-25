@@ -17,8 +17,10 @@ npm run build
 | --- | --- |
 | `/` | OverviewView |
 | `/strategies` | StrategiesView |
-| `/manual` | ManualAddView |
-| `/domains` | DomainsView |
-| `/settings` | SettingsView (монолит) |
+| `/sweep` | SupersweepView |
+| `/custom-strats` | CustomStratsView |
+| `/blobs-sni` (`alias /custom-blobs`) | BlobsSniView |
+| `/domains/:list?` | DomainsView |
+| `/settings/:panel?` | SettingsView |
 
 API: только `/api/*` (см. `src/api/endpoints.ts`, `docs/API.md`).

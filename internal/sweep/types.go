@@ -35,10 +35,11 @@ var DefaultRKNDomains = []string{"xhamster.com", "anidub.com", "amnezia.org"}
 
 // Имена воркеров (фаз).
 const (
-	WorkerYT  = "yt"
-	WorkerGV  = "gv"
-	WorkerDS  = "ds"
-	WorkerRKN = "rkn"
+	WorkerYT   = "yt"
+	WorkerGV   = "gv"
+	WorkerDS   = "ds"
+	WorkerRKN  = "rkn"
+	WorkerQUIC = "quic"
 )
 
 // Phases — порядок фаз суперавтопрогона.

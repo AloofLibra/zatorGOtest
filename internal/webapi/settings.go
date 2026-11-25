@@ -130,6 +130,8 @@ func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) 
 		return s.configRawGet(), nil
 	case "nfqws2_errors", "errors":
 		return s.nfqws2ErrorsGet(), nil
+	case "h3_curl":
+		return s.h3Env().Detect(s.paths), nil
 	case "", "tls_blob":
 		return s.tlsBlobGet(cfg)
 	default:
@@ -159,18 +161,53 @@ func blobDisplay(v string) string {
 	return v + ".bin"
 }
 
+func (s *Server) listFakeProfile(profile int) []string {
+	entries, _ := os.ReadDir(s.paths.FakeDir)
+	profStr := strconv.Itoa(profile)
+	out := []string{}
+	for _, e := range entries {
+		if !e.IsDir() && orchestra.ValidBlobFileForProfile(e.Name(), profStr) {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Server) resolveProfileBlobDisplay(cfg *config.Config, raw string, blobFiles map[string]string) string {
+	if raw == "" || raw == blobDefault {
+		return raw
+	}
+	if strings.HasPrefix(raw, orchestra.BlobSlotPrefix) {
+		if cfg != nil {
+			if f, ok := cfg.SlotBlobFile(raw); ok && f != "" {
+				return f
+			}
+		}
+		if f, ok := blobFiles[raw]; ok && f != "" {
+			return f
+		}
+		return ""
+	}
+	return blobDisplay(raw)
+}
+
 func (s *Server) tlsBlobGet(cfg *config.Config) (any, error) {
 	blobs := map[string]string{}
 	modes := map[string]string{}
 	snis := map[string]string{}
 	sizes := map[string]string{}
 	blobMap, _ := s.store.OverrideMap(orchestra.OverrideBlob)
+	blobFiles, _ := s.store.BlobFilesMap()
 	sniMap, _ := s.store.OverrideMap(orchestra.OverrideSNI)
 	sizeMap, _ := s.store.OverrideMap(orchestra.OverrideCloneSize)
 	modeMap, _ := s.store.OverrideMap(orchestra.OverrideMode)
+	for _, id := range orchestra.BlobOverrideProfiles {
+		k := strconv.Itoa(id)
+		blobs[k] = s.resolveProfileBlobDisplay(cfg, blobMap[k], blobFiles)
+	}
 	for _, id := range orchestra.OverrideProfiles {
 		k := strconv.Itoa(id)
-		blobs[k] = blobDisplay(blobMap[k])
 		snis[k] = sniMap[k]
 		sizes[k] = sizeMap[k]
 		mode := modeMap[k]
@@ -183,6 +220,7 @@ func (s *Server) tlsBlobGet(cfg *config.Config) (any, error) {
 		"current_mode":      cfg.TLSBlobModeValue(),
 		"current_blob":      cfg.TLSBlobFile(),
 		"available_blobs":   s.listFake(tlsBlobFileRe),
+		"quic_blobs":        s.listFakeProfile(5),
 		"profile_blobs":     blobs,
 		"profile_modes":     modes,
 		"profile_snis":      snis,

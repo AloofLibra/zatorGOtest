@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build separate app and config resource archives plus latest.json.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 OUT="${1:?usage: pack-release.sh OUT_DIR}"
 VER="${VER:-${GITHUB_REF_NAME:-$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)}}"
 COMMIT="${COMMIT:-${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}}"
@@ -28,6 +28,8 @@ make_archive() {
     dest="/opt/zator/$rel"; class=auto
     case "$rel" in
       extra_strats/cache/orchestra/*) class=auto ;;
+      extra_strats/sni_zator.txt) class=auto ;;
+      extra_strats/sni_user.txt) class=keep-if-exists ;;
       lists/*|extra_strats/*) class=update-if-unmodified ;;
       files/fake/custom_tls.bin) class=keep-if-exists ;;
       blockcheck2/*) dest="/opt/zapret2/blockcheck2.d/${rel#blockcheck2/}" ;;
@@ -62,6 +64,26 @@ cp -a "$ROOT/assets/extra_strats/." "$CFG/extra_strats/"
 cp -a "$ROOT/assets/orchestra/." "$CFG/extra_strats/cache/orchestra/"
 cp -a "$ROOT/assets/blockcheck2/." "$CFG/blockcheck2/"
 cp "$ROOT/assets/config.default" "$CFG/config/config.default"
+
+normalize_lf_tree() {
+  local base="$1" f tmp
+  while IFS= read -r -d '' f; do
+    tmp="$f.lf.tmp"
+    tr -d '\r' <"$f" >"$tmp"
+    cat "$tmp" >"$f"
+    rm -f "$tmp"
+  done < <(find "$base" -type f \( \
+    -path "$base/init/*" -o \
+    -path "$base/blockcheck2/*" -o \
+    -name '*.sh' -o \
+    -name '*.lua' -o \
+    -name '*.txt' -o \
+    -name '*.tsv' -o \
+    -path "$base/config/config.default" \
+  \) -print0)
+}
+normalize_lf_tree "$APP"
+normalize_lf_tree "$CFG"
 
 WEBUI_SHA=$(find "$APP/webui" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
 CONFIG_SHA=$(find "$CFG" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
