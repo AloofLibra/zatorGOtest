@@ -144,7 +144,7 @@ func TestDefaultTargets(t *testing.T) {
 
 func TestCheckProfile_NoTLSProfiles(t *testing.T) {
 	c := NewChecker(testOpts())
-	for _, p := range []int{5, 6} {
+	for _, p := range []int{6} {
 		r := c.CheckProfile(context.Background(), p)
 		if len(r.Results) != 0 || r.Results == nil || r.Message != MessageUDPProfile {
 			t.Errorf("profile %d: %+v", p, r)

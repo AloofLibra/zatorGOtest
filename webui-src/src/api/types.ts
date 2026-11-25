@@ -87,6 +87,27 @@ export interface CheckDetail {
   state?: string
 }
 
+export interface QUICProbeResult {
+  offset: number
+  count: number
+  state: string
+  reason: string
+  http_code: number
+  http_version: string
+  bytes: number
+  ttfb?: string
+  total?: string
+  speed?: string
+}
+
+export interface QUICProbeSummary {
+  ok_count: number
+  total_probes: number
+  rounds: number
+  reason?: string
+  details?: QUICProbeResult[]
+}
+
 export interface CheckItem {
   label?: string
   target?: string
@@ -97,6 +118,7 @@ export interface CheckItem {
   tls12_detail?: CheckDetail
   tls13_detail?: CheckDetail
   download?: CheckDetail
+  quic?: QUICProbeSummary
   media?: {
     class?: string
     text?: string
@@ -138,6 +160,7 @@ export interface TlsBlobSettings {
   current_mode?: string
   current_blob?: string
   available_blobs?: string[]
+  quic_blobs?: string[]
   // «профиль -> значение»: "" = как глобальный, fake_default_tls | файл слота
   profile_blobs?: Record<string, string>
   // «профиль -> режим фейков»: classic | clone (нет строки = classic)
@@ -304,6 +327,10 @@ export interface DomainsListPayload {
 export interface ApplyResult {
   restarted?: boolean
   restart_required?: boolean
+  apply_required?: boolean
+  id?: number
+  moved?: number
+  dropped?: number
   added?: number
   skipped?: string
   name?: string
@@ -393,6 +420,84 @@ export interface StatePayload {
   flowoffload?: ValueSetting
   ifaces?: IfacesSettings
   client_scope?: ScopesPayload
-  nfqws2_errors?: { available?: boolean; content?: string; path?: string; lines?: number }
+  nfqws2_errors?: { available?: boolean; content?: string; path?: string; lines?: number; suppressed_conntrack?: number }
   backups: BackupsPayload
+}
+
+export interface H3CurlStatus {
+  found?: boolean
+  path?: string
+  arch?: string
+  managed?: boolean
+}
+
+export interface CustomBlockInfo {
+  block: string
+  label: string
+  profiles: string
+  transport: 'tcp' | 'udp' | 'both' | string
+}
+
+export interface CustomStrategy {
+  id: number
+  block: string
+  spec: string
+  enabled: boolean
+  comment: string
+  assigned: string
+}
+
+export interface CustomListPayload {
+  blocks?: CustomBlockInfo[]
+  strategies?: CustomStrategy[]
+}
+
+export interface CustomImportResult {
+  added?: number
+  dups?: number
+  skipped?: number
+  failed?: number
+  errors?: { line: string; reason: string }[]
+  notes?: string[]
+  total?: number
+  limit?: number
+  apply_required?: boolean
+}
+
+export interface CustomBlobInfo {
+  id: number
+  name: string
+  file: string
+  comment: string
+  refs: number
+}
+
+export interface SniProfileInfo {
+  id: string
+  title: string
+  pin?: string
+  pool?: string
+  set?: string
+  policy?: string
+  effective?: string[]
+}
+
+export interface SniSetInfo {
+  name: string
+  origin: 'user' | 'zator'
+  domains: string[]
+}
+
+export interface SniState {
+  profiles?: SniProfileInfo[]
+  sets?: SniSetInfo[]
+}
+
+export interface CustomBlobsPayload {
+  dir?: string
+  blobs?: CustomBlobInfo[]
+  files?: string[]
+  stock?: string[]
+  config_dirty?: boolean
+  sni?: SniState | null
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/firewall"
+	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/provider"
 	"github.com/AloofLibra/zator/internal/telemetry"
@@ -51,6 +52,7 @@ func init() {
 		"update_apply":      (*Server).postUpdateApply,
 		"update_preflight":  (*Server).postUpdatePreflight,
 		"strategy_register": (*Server).postStrategyRegister,
+		"h3_curl":           (*Server).postH3Curl,
 	}
 	for _, t := range toggles {
 		t := t
@@ -300,11 +302,12 @@ func (s *Server) postTLSBlob(r *http.Request, p params) (map[string]any, error) 
 		}
 		return nil, err
 	}
+	_ = s.store.SetBlobFile("maxru", v)
 	s.notifyTelemetry()
 	return map[string]any{"ok": true, "restarted": s.maybeRestart(r.Context(), p)}, nil
 }
 
-// overrideProfile проверяет profile из набора профилей с переопределениями.
+// overrideProfile проверяет profile из набора профилей с переопределениями (1,2,3,4,8).
 func overrideProfile(p params) (string, error) {
 	pr := p.Get("profile")
 	for _, id := range orchestra.OverrideProfiles {
@@ -316,47 +319,64 @@ func overrideProfile(p params) (string, error) {
 }
 
 func (s *Server) postTLSBlobProfile(r *http.Request, p params) (map[string]any, error) {
-	profile, err := overrideProfile(p)
-	if err != nil {
-		return nil, err
+	profile := p.Get("profile")
+	if !orchestra.IsBlobOverrideProfile(profile) {
+		return nil, errf(http.StatusBadRequest, "Некорректный профиль: "+profile)
 	}
+	profNum, _ := strconv.Atoi(profile)
 	v := p.Get("value")
+	slotName := orchestra.BlobSlotName(profile)
 	switch {
-	case v == "":
+	case v == "" || v == "global":
 		if err := s.store.ClearOverride(orchestra.OverrideBlob, profile); err != nil {
 			return nil, err
 		}
 		s.notifyTelemetry()
 		return map[string]any{"ok": true, "restarted": false, "restart_required": false}, nil
 	case v == blobDefault:
+		if profNum == 5 {
+			return nil, errf(http.StatusBadRequest, "fake_default_tls неприменим к QUIC-профилю (только TLS-профили)")
+		}
 		if err := s.store.SetOverride(orchestra.OverrideBlob, profile, blobDefault); err != nil {
 			return nil, err
 		}
 		s.notifyTelemetry()
 		return map[string]any{"ok": true, "restarted": false, "restart_required": false}, nil
-	case !tlsBlobFileRe.MatchString(v):
+	case !orchestra.ValidBlobFileForProfile(v, profile):
 		return nil, errf(http.StatusBadRequest, "Некорректное значение блоба: "+v)
 	case !s.blobExists(v):
 		return nil, errf(http.StatusBadRequest, "Файл блоба не существует: "+v)
 	}
-	slot := regexp.MustCompile(`(?m)^(\s*--blob=z2r_prof_` + profile + `:@\S*/)[^/\s]+`)
-	err = s.editConfigs(func(c *config.Config) error {
-		return editOpt(c, func(opt string) (string, error) {
-			if !slot.MatchString(opt) {
-				return "", fmt.Errorf("%w: слот z2r_prof_%s", config.ErrNotFound, profile)
-			}
-			return slot.ReplaceAllString(opt, "${1}"+v), nil
-		})
+
+	var slotChanged bool
+	if live, lErr := config.Load(s.paths.ZapretConfig); lErr == nil {
+		prev, ok := live.SlotBlobFile(slotName)
+		slotChanged = !ok || prev != v
+	} else {
+		slotChanged = true
+	}
+
+	err := s.editConfigs(func(c *config.Config) error {
+		if _, e := c.EnsureSlotBlob(slotName, v); e != nil {
+			return e
+		}
+		return c.SetSlotBlobFile(slotName, v)
 	})
 	if err != nil {
 		if errors.Is(err, config.ErrNotFound) {
-			return nil, errf(http.StatusInternalServerError, "Слот блоба z2r_prof_"+profile+" не найден в конфиге")
+			return nil, errf(http.StatusInternalServerError, "Слот блоба "+slotName+" не найден в конфиге")
 		}
 		return nil, err
 	}
-	out := map[string]any{"ok": true, "restarted": s.maybeRestart(r.Context(), p), "restart_required": true}
-	if err := s.store.SetOverride(orchestra.OverrideBlob, profile, strings.TrimSuffix(v, ".bin")); err != nil {
-		// Конфиг уже с новым blob — не откатываем и не отдаём 500.
+	restarted := false
+	if slotChanged {
+		restarted = s.maybeRestart(r.Context(), p)
+	}
+	out := map[string]any{"ok": true, "restarted": restarted, "restart_required": slotChanged}
+	if err := s.store.SetBlobFile(slotName, v); err != nil {
+		out["warning"] = "Конфиг обновлён, но blob_files не сохранён: " + err.Error()
+	}
+	if err := s.store.SetOverride(orchestra.OverrideBlob, profile, slotName); err != nil {
 		out["warning"] = "Конфиг обновлён, но override не сохранён: " + err.Error()
 	}
 	s.notifyTelemetry()
@@ -759,4 +779,44 @@ func (s *Server) postWssizeRamp(r *http.Request, p params) (map[string]any, erro
 		}
 	}
 	return out, nil
+}
+
+func (s *Server) h3Env() netcheck.H3Env {
+	if base, ok := s.checker.(*netcheck.Checker); ok {
+		return base.H3Env
+	}
+	return netcheck.H3Env{}
+}
+
+func (s *Server) postH3Curl(r *http.Request, p params) (map[string]any, error) {
+	action := strings.ToLower(p.Get("action"))
+	if action == "" {
+		action = strings.ToLower(p.Get("value"))
+	}
+	env := s.h3Env()
+	switch action {
+	case "install", "update":
+		if _, err := env.Install(r.Context(), s.paths, action == "update"); err != nil {
+			switch {
+			case errors.Is(err, netcheck.ErrH3Offline), errors.Is(err, netcheck.ErrH3ArchUnsupported):
+				return nil, errf(http.StatusBadRequest, err.Error())
+			default:
+				return nil, errf(http.StatusBadGateway, "Не удалось установить h3-curl: "+err.Error())
+			}
+		}
+	case "remove":
+		if err := netcheck.RemoveH3Curl(s.paths); err != nil {
+			return nil, errf(http.StatusInternalServerError, err.Error())
+		}
+	default:
+		return nil, errf(http.StatusBadRequest, "Некорректное действие: "+action)
+	}
+	st := env.Detect(s.paths)
+	return map[string]any{
+		"ok":      true,
+		"found":   st.Found,
+		"path":    st.Path,
+		"arch":    st.Arch,
+		"managed": st.Managed,
+	}, nil
 }

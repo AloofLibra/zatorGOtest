@@ -136,19 +136,32 @@ func (s *Server) nfqws2ErrorsGet() map[string]any {
 		if len(data) > maxErrLogBytes {
 			data = data[len(data)-maxErrLogBytes:]
 		}
-		text := string(data)
-		n := 0
+		text := strings.ReplaceAll(string(data), "\r\n", "\n")
+		suppressed := 0
+		var kept []string
 		for _, line := range strings.Split(text, "\n") {
-			if strings.TrimSpace(line) != "" {
-				n++
+			trim := strings.TrimSpace(line)
+			if trim == "" {
+				continue
 			}
+			if strings.Contains(trim, "conntrack is missing") {
+				suppressed++
+				continue
+			}
+			kept = append(kept, line)
+		}
+		filtered := strings.Join(kept, "\n")
+		if len(kept) > 0 {
+			filtered += "\n"
 		}
 		out["available"] = true
 		out["path"] = p
-		out["content"] = text
-		out["lines"] = n
+		out["content"] = filtered
+		out["lines"] = len(kept)
+		out["suppressed_conntrack"] = suppressed
 		return out
 	}
+	out["suppressed_conntrack"] = 0
 	return out
 }
 

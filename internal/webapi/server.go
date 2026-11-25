@@ -146,7 +146,9 @@ func New(opts Options) (*Server, error) {
 		s.timeout = 2 * time.Minute
 	}
 	if s.checker == nil {
-		s.checker = netcheck.NewChecker(netcheck.DefaultOptions())
+		ch := netcheck.NewChecker(netcheck.DefaultOptions())
+		ch.Paths = s.paths
+		s.checker = ch
 	}
 	if s.provider == nil {
 		s.provider = provider.New(s.paths)
@@ -193,6 +195,8 @@ var endpoints = map[string]endpoint{
 	"scopes":        (*Server).handleScopes,
 	"settings":      (*Server).handleSettings,
 	"blob-upload":   (*Server).handleBlobUpload,
+	"custom":        (*Server).handleCustom,
+	"blobs":         (*Server).handleBlobs,
 	"login":         (*Server).handleLogin,
 	"logout":        (*Server).handleLogout,
 }
@@ -277,6 +281,9 @@ func (p params) Get(key string) string { return strings.TrimSpace(url.Values(p).
 
 // Raw возвращает значение ключа без обрезки (многострочные списки).
 func (p params) Raw(key string) string { return url.Values(p).Get(key) }
+
+// Has сообщает, присутствовал ли ключ в запросе или форме.
+func (p params) Has(key string) bool { _, ok := url.Values(p)[key]; return ok }
 
 func parseParams(w http.ResponseWriter, r *http.Request) (params, error) {
 	q := r.URL.Query()

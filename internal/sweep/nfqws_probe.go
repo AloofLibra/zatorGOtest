@@ -16,6 +16,7 @@ import (
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/firewall"
 	"github.com/AloofLibra/zator/internal/fsutil"
+	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/paths"
 	"github.com/AloofLibra/zator/internal/zapret"
 )
@@ -292,6 +293,8 @@ func (p *NfqwsProbe) Stop() error {
 }
 
 func (p *NfqwsProbe) stopLocked(_ context.Context) error {
+	// Пин SNI-пула прогона снимаем первым: глобальный sni_pool.pin не трогаем.
+	_ = os.Remove(filepath.Join(p.cfg.OrchestraDir, orchestra.SNIPoolPinFileName))
 	// Всегда Background: canceled sweep-ctx обрывает iptables mid-cleanup.
 	cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -368,7 +371,9 @@ func (p *NfqwsProbe) stopLocked(_ context.Context) error {
 
 func (p *NfqwsProbe) writeProbeLua(luaDir string) error {
 	srcDir := p.cfg.Paths.LuaDir
-	for _, name := range []string{"locked.lua", "strategy-lock-manager.lua"} {
+	probeOrch := filepath.ToSlash(p.cfg.OrchestraDir)
+	extraStratsSlash := filepath.ToSlash(p.cfg.Paths.ExtraStratsDir)
+	for _, name := range []string{"locked.lua", "strategy-lock-manager.lua", "sni-pool.lua"} {
 		src := filepath.Join(srcDir, name)
 		data, err := os.ReadFile(src)
 		if err != nil {
@@ -378,10 +383,12 @@ func (p *NfqwsProbe) writeProbeLua(luaDir string) error {
 			}
 			return err
 		}
-		probeOrch := filepath.ToSlash(p.cfg.OrchestraDir)
 		out := strings.ReplaceAll(string(data), productionOrchestraLuaPath, probeOrch)
 		out = strings.ReplaceAll(out, "/tmp/auto_locked.tsv", filepath.ToSlash(filepath.Join(p.cfg.OrchestraDir, "auto_locked.tsv")))
 		out = strings.ReplaceAll(out, "/tmp/z2r-auto-locked.reload", filepath.ToSlash(filepath.Join(p.cfg.OrchestraDir, "auto_locked.reload")))
+		if extraStratsSlash != "" && extraStratsSlash != "/opt/zator/extra_strats" {
+			out = strings.ReplaceAll(out, "/opt/zator/extra_strats/sni_", extraStratsSlash+"/sni_")
+		}
 		// На случай кастомных корней: замена state/orchestra и cache/orchestra путей.
 		for _, old := range []string{
 			filepath.ToSlash(filepath.Join(p.cfg.Paths.ExtraStratsDir, "cache", "orchestra")),
@@ -395,11 +402,12 @@ func (p *NfqwsProbe) writeProbeLua(luaDir string) error {
 			return err
 		}
 	}
-	// locked.lua resolves profile blob/clone settings beside its private lock
-	// files. Snapshot the user's menu-16 overrides so an isolated run sees the
-	// same blob, clone mode, SNI, and size as the production queue.
+	// locked.lua / sni-pool.lua resolve profile settings beside their private lock files.
+	// Snapshot menu-16 overrides and SNI pool files so isolated runs see the same config
+	// without touching global sni_pool.pin.
 	for _, name := range []string{
 		"blob_override.tsv", "mode_override.tsv", "sni_override.tsv", "clonesize.tsv",
+		orchestra.SNIPoolFileName, orchestra.SNIPoolPolicyFileName,
 	} {
 		src := filepath.Join(p.cfg.Paths.StateOrchestraDir(), name)
 		dst := filepath.Join(p.cfg.OrchestraDir, name)
@@ -417,7 +425,19 @@ func (p *NfqwsProbe) writeProbeLua(luaDir string) error {
 			return fmt.Errorf("%w: snapshot %s: %v", ErrProbe, name, err)
 		}
 	}
+	if fileExists(filepath.Join(luaDir, "sni-pool.lua")) {
+		p.RefreshSNIPin()
+	}
 	return nil
+}
+
+// RefreshSNIPin обновляет timestamp-файл sni_pool.pin только внутри изолированного каталога пробника.
+func (p *NfqwsProbe) RefreshSNIPin() {
+	if p == nil || p.cfg.OrchestraDir == "" {
+		return
+	}
+	ts := strconv.FormatInt(time.Now().Unix(), 10) + "\n"
+	_ = fsutil.AtomicWriteFile(filepath.Join(p.cfg.OrchestraDir, orchestra.SNIPoolPinFileName), []byte(ts), 0o644)
 }
 
 func (p *NfqwsProbe) buildArgs(luaDir string) ([]string, error) {
@@ -433,10 +453,14 @@ func (p *NfqwsProbe) buildArgs(luaDir string) ([]string, error) {
 	if p.profile < 1 || p.profile > 4 {
 		return nil, fmt.Errorf("%w: некорректный профиль %d", ErrProbe, p.profile)
 	}
-	opt := []string{
-		"--lua-init=@" + filepath.ToSlash(filepath.Join(luaDir, "locked.lua")),
-		"--lua-init=@" + filepath.ToSlash(filepath.Join(p.cfg.Paths.LuaDir, "fake-adapt.lua")),
+	var opt []string
+	if fileExists(filepath.Join(luaDir, "sni-pool.lua")) {
+		opt = append(opt, "--lua-init=@"+filepath.ToSlash(filepath.Join(luaDir, "sni-pool.lua")))
 	}
+	opt = append(opt,
+		"--lua-init=@"+filepath.ToSlash(filepath.Join(luaDir, "locked.lua")),
+		"--lua-init=@"+filepath.ToSlash(filepath.Join(p.cfg.Paths.LuaDir, "fake-adapt.lua")),
+	)
 	lines := strings.Split(raw, "\n")
 	template, foundTemplate := false, false
 	for _, rawLine := range lines {

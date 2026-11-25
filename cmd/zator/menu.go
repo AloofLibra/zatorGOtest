@@ -409,7 +409,7 @@ func menuBackups(r *bufio.Reader, out, errw io.Writer) int {
 }
 
 func menuTools(r *bufio.Reader, out, errw io.Writer) int {
-	fmt.Fprintln(out, " 1. Проверить HTTPS/TLS (blockcheck2)\n 2. Запустить Web UI\n 3. Статус авторизации\n 4. Включить авторизацию\n 5. Отключить авторизацию\n 6. Справка CLI\n 0. Назад")
+	fmt.Fprintln(out, " 1. Проверить HTTPS/TLS (blockcheck2)\n 2. Свои стратегии\n 3. Блобы и SNI\n 4. h3-curl (HTTP/3 для Профиля 5)\n 5. Запустить Web UI\n 6. Статус авторизации\n 7. Включить авторизацию\n 8. Отключить авторизацию\n 9. Справка CLI\n 0. Назад")
 	c, err := menuRead(r, out, "Выберите пункт: ")
 	if err != nil {
 		return menuBack
@@ -429,18 +429,24 @@ func menuTools(r *bufio.Reader, out, errw io.Writer) int {
 		}
 		return cmdBlockcheck([]string{"-y", domain}, out, errw)
 	case "2":
-		return cmdServe("webui", nil, out, errw)
+		return menuCustomStrategies(r, out, errw)
 	case "3":
-		return cmdAuth([]string{"status"}, out, errw)
+		return menuBlobsAndSNI(r, out, errw)
 	case "4":
-		return cmdAuth([]string{"enable"}, out, errw)
+		return menuH3Curl(r, out, errw)
 	case "5":
+		return cmdServe("webui", nil, out, errw)
+	case "6":
+		return cmdAuth([]string{"status"}, out, errw)
+	case "7":
+		return cmdAuth([]string{"enable"}, out, errw)
+	case "8":
 		ok, e := menuConfirm(r, out, "Отключить проверку доступа к Web UI?")
 		if e != nil || !ok {
 			return 0
 		}
 		return cmdAuth([]string{"disable", "-y"}, out, errw)
-	case "6":
+	case "9":
 		fmt.Fprint(out, usage)
 	default:
 		fmt.Fprintln(out, "Некорректный выбор.")
@@ -582,6 +588,15 @@ func menuSweep(r *bufio.Reader, out, errw io.Writer) int {
 		if e != nil {
 			return 0
 		}
+		incQ, _ := menuConfirm(r, out, "Включить подбор Профиля 5 (YouTube QUIC HTTP/3, живой режим)?")
+		vals := map[string]string{"tls_pref": pref, "domain": domains}
+		if incQ {
+			vals["include_quic"] = "1"
+			rnd, _ := menuRead(r, out, "Число раундов QUIC на стратегию (1..5, Enter=1): ")
+			if rnd != "" {
+				vals["quic_rounds"] = rnd
+			}
+		}
 		ok, e = menuConfirm(r, out, "Полный Supersweep проверит профили и домены, может выполняться долго и менять фиксации. Начать?")
 		if e != nil || !ok {
 			return 0
@@ -590,33 +605,43 @@ func menuSweep(r *bufio.Reader, out, errw io.Writer) int {
 		if !ok {
 			return 0
 		}
+		vals["scope"] = scope
 		menuClearScreen(out)
 		fmt.Fprintf(out, "%s · scope %s\n\n", menuColor("96;1", "ПОЛНЫЙ SUPERSWEEP"), scope)
-		result, err = s.CLISupersweep(ctx, "start", map[string]string{"scope": scope, "tls_pref": pref, "domain": domains})
+		result, err = s.CLISupersweep(ctx, "start", vals)
 	case "3":
-		ptext, e := menuRead(r, out, "Профиль быстрого подбора (1 YouTube, 2 Googlevideo, 3 РКН, 4 Discord): ")
+		ptext, e := menuRead(r, out, "Профиль быстрого подбора (1 YouTube, 2 Googlevideo, 3 РКН, 4 Discord, 5 YouTube QUIC): ")
 		if e != nil {
 			return 0
 		}
 		p, pe := strconv.Atoi(ptext)
-		if pe != nil || p < 1 || p > 4 {
-			fmt.Fprintln(errw, "Допустимы профили 1..4.")
+		if pe != nil || p < 1 || p > 5 {
+			fmt.Fprintln(errw, "Допустимы профили 1..5.")
 			return 1
 		}
-		addr, e := menuRead(r, out, "Адрес проверки (Enter — стандартный): ")
-		if e != nil {
-			return 0
-		}
-		pref, ok := menuChooseTLS(r, out)
-		if !ok {
-			return 0
-		}
-		if addr == "" {
-			addr = "стандартный"
+		addr := ""
+		pref := "any"
+		quicRounds := ""
+		if p == 5 {
+			fmt.Fprintln(out, "Внимание: подбор Профиля 5 выполняется в живом режиме через h3-curl (без изоляции).")
+			quicRounds, _ = menuRead(r, out, "Число раундов QUIC (1..5, Enter=1): ")
+		} else {
+			addr, e = menuRead(r, out, "Адрес проверки (Enter — стандартный): ")
+			if e != nil {
+				return 0
+			}
+			var okTLS bool
+			pref, okTLS = menuChooseTLS(r, out)
+			if !okTLS {
+				return 0
+			}
+			if addr == "" {
+				addr = "стандартный"
+			}
 		}
 		menuClearScreen(out)
-		fmt.Fprintf(out, "%s · профиль %d · TLS %s\nАдрес: %s\n\n", menuColor("96;1", "БЫСТРЫЙ ПОДБОР"), p, pref, addr)
-		ok, e = menuConfirm(r, out, "Начать быстрый подбор? Будут созданы временные тестовые правила.")
+		fmt.Fprintf(out, "%s · профиль %d\n\n", menuColor("96;1", "БЫСТРЫЙ ПОДБОР"), p)
+		ok, e := menuConfirm(r, out, "Начать быстрый подбор?")
 		if e != nil || !ok {
 			return 0
 		}
@@ -626,7 +651,13 @@ func menuSweep(r *bufio.Reader, out, errw io.Writer) int {
 		}
 		menuClearScreen(out)
 		fmt.Fprintf(out, "%s · scope %s\n\n", menuColor("96;1", "БЫСТРЫЙ ПОДБОР"), scope)
-		result, err = s.CLIStartQuickSweep(ctx, p, addr, scope, pref)
+		vals := map[string]string{"quick_profile": fmt.Sprint(p), "scope": scope, "tls_pref": pref}
+		if p != 5 {
+			vals["address"] = addr
+		} else if quicRounds != "" {
+			vals["quic_rounds"] = quicRounds
+		}
+		result, err = s.CLISupersweep(ctx, "start", vals)
 	case "4":
 		ok, e := menuConfirm(r, out, "Отменить именно тестирование Supersweep?")
 		if e != nil || !ok {

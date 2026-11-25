@@ -20,7 +20,8 @@ const primaryTabs = [
   { to: '/domains', name: 'domains', label: 'Домены и списки', hint: 'Hostlist и Googlevideo', icon: 'M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0 M3 12h18 M12 3a15 15 0 0 1 0 18 M12 3a15 15 0 0 0 0 18' },
 ]
 const extraTabs = [
-  { to: '/tools', name: 'tools', label: 'Инструменты', hint: 'Ручные стратегии и blob', icon: 'M14.7 6.3a4 4 0 0 0-5 5L3 18l3 3 6.7-6.7a4 4 0 0 0 5-5l-2.3 2.3-3-3z' },
+  { to: '/custom-strats', name: 'custom-strats', label: 'Свои стратегии', hint: 'Конструктор и импорт', icon: 'M14.7 6.3a4 4 0 0 0-5 5L3 18l3 3 6.7-6.7a4 4 0 0 0 5-5l-2.3 2.3-3-3z' },
+  { to: '/blobs-sni', name: 'blobs-sni', label: 'Блобы и SNI', hint: 'TLS/QUIC, пул SNI, файлы', icon: 'M12 2L3 7l9 5 9-5-9-5z M3 17l9 5 9-5 M3 12l9 5 9-5' },
   { to: '/settings', name: 'settings', label: 'Настройки', hint: 'Система, сеть, диагностика', icon: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M19.4 15a7.9 7.9 0 0 0 0-6l2-1.5-2-3.4L17 5a8 8 0 0 0-5-2l-.5-2h-4L7 3a8 8 0 0 0-4 2L1 4l-2 3.5L1 9a8 8 0 0 0 0 6l-2 1.5L1 20l2-1a8 8 0 0 0 4 2l.5 2h4l.5-2a8 8 0 0 0 4-2l2 1 2-3.5z' },
 ]
 const themes: { id: ThemeMode; label: string }[] = [
@@ -166,7 +167,7 @@ onUnmounted(stopUpdateScheduler)
         <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="tab.icon" /></svg><span>{{ tab.name === 'strategies' ? 'Профили' : tab.name === 'sweep' ? 'Подбор' : tab.name === 'domains' ? 'Домены' : 'Обзор' }}</span>
       </router-link>
       <div class="mobile-more-wrap">
-        <button type="button" :class="{ 'is-active': ['tools', 'settings'].includes(active) }" aria-haspopup="menu" :aria-expanded="mobileMoreOpen" @click="mobileMoreOpen = !mobileMoreOpen">
+        <button type="button" :class="{ 'is-active': ['custom-strats', 'blobs-sni', 'settings'].includes(active) }" aria-haspopup="menu" :aria-expanded="mobileMoreOpen" @click="mobileMoreOpen = !mobileMoreOpen">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg><span>Ещё</span>
         </button>
         <div v-if="mobileMoreOpen" class="mobile-more-menu" role="menu">

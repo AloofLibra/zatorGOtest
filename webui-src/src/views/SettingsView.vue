@@ -11,7 +11,7 @@ import {
   fallbackSettings, ifacesSettings, modeSettings, ports, provider, settingsLoaded, telemetrySettings,
   tlsBlobSettings, udpGamesSettings, wgBlobSettings, wgStateSettings, wssizeRampSettings,
   refreshFallbackSettings, refreshIfacesSettings, refreshModeSetting, refreshPorts, refreshProvider,
-  refreshTlsBlobSettings, refreshUdpGamesSettings, refreshWgBlobSettings, refreshWgStateSettings,
+  refreshUdpGamesSettings, refreshWgBlobSettings, refreshWgStateSettings,
   refreshWssizeRampSettings,
 } from '../stores/settings'
 import type { ClientScopeMapping, Recommendations, WssizeRampSettings } from '../api/types'
@@ -82,15 +82,6 @@ const ifaceOptions = computed(() => {
   return names
 })
 
-const tlsMode = ref('fake_default_tls')
-const tlsBlob = ref('')
-watch(tlsBlobSettings, (t) => {
-  if (!t) return
-  // API отдаёт fake_default_tls | maxru | mixed — в UI: встроенный vs файл.
-  tlsMode.value = t.current_mode === 'fake_default_tls' ? 'fake_default_tls' : 'custom'
-  tlsBlob.value = t.current_blob || ''
-}, { immediate: true })
-
 const wgOn = ref(false)
 const wgBlob = ref('')
 const wgRepeats = ref(2)
@@ -143,7 +134,7 @@ watch(scopes, (s) => {
 const configText = ref('')
 const configPath = ref('')
 const configLoaded = ref(false)
-const errors = ref({ available: false, content: '', path: '', lines: 0 })
+const errors = ref({ available: false, content: '', path: '', lines: 0, suppressed_conntrack: 0 })
 const wssizeOn = ref(false)
 const wssizeMode = ref<WssizeRampSettings['mode']>('full')
 const wssizeScale = ref(1)
@@ -197,26 +188,6 @@ async function saveSelect(setting: string, value: string, label: string) {
       const res = await api('/api/settings', formBody({ setting, value }))
       showToast(`${label}: ${value}.${restartSuffix(res)}`)
       await fetchAndApplyState()
-    })
-  } catch (e) {
-    showToast((e as Error).message, 'error')
-  }
-}
-
-async function saveTls() {
-  if (tlsMode.value !== 'fake_default_tls' && !tlsBlob.value) {
-    showToast('Выберите файл TLS blob', 'error')
-    return
-  }
-  try {
-    await withBusy('tls', async () => {
-      announceRestart()
-      const res = tlsMode.value === 'fake_default_tls'
-        ? await applySetting.tls_blob('fake_default_tls')
-        : await applySetting.tls_blob(tlsBlob.value)
-      showToast(`TLS blob сохранён.${restartSuffix(res)}`)
-      await refreshTlsBlobSettings()
-      await refreshAll()
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -414,6 +385,7 @@ async function loadErrors() {
         content: data.content || '',
         path: data.path || '',
         lines: data.lines || 0,
+        suppressed_conntrack: data.suppressed_conntrack || 0,
       }
     })
   } catch (e) {
@@ -770,25 +742,16 @@ onMounted(async () => {
       </section>
 
       <section id="sec-tls" class="panel">
-        <div class="panel-h"><h2>TLS blob</h2><span class="chip">{{ tlsBlobSettings?.current_mode || '—' }}</span></div>
-        <p class="panel-d">Глобальный blob ClientHello для TLS-фейков.</p>
-        <div class="grid-2">
-          <label class="field">
-            <span>Режим</span>
-            <select v-model="tlsMode" :disabled="busyActive">
-              <option value="fake_default_tls">fake_default_tls (встроенный)</option>
-              <option value="custom">файл maxru</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Файл</span>
-            <select v-model="tlsBlob" :disabled="busyActive || tlsMode === 'fake_default_tls'">
-              <option v-for="b in (tlsBlobSettings?.available_blobs || [])" :key="b" :value="b">{{ b }}</option>
-            </select>
-          </label>
+        <div class="panel-h">
+          <h2>TLS / QUIC блобы и SNI</h2>
+          <span class="chip">{{ tlsBlobSettings?.current_mode || '—' }}</span>
         </div>
-        <div class="actions" style="margin-top:0.8rem">
-          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'tls' }" @click="saveTls">Сохранить TLS</button>
+        <p class="panel-d">
+          Глобальный TLS blob: <code>{{ tlsBlobSettings?.current_blob || tlsBlobSettings?.current_mode || '—' }}</code>.
+          Управление глобальным и профильными блобами (включая QUIC/5), режимами фейков, SNI-пулом и загрузкой бинарных файлов вынесено в отдельный раздел.
+        </p>
+        <div class="actions">
+          <router-link class="btn-link" to="/blobs-sni">Открыть «Блобы и SNI» →</router-link>
         </div>
       </section>
 
@@ -989,7 +952,12 @@ onMounted(async () => {
         <p class="panel-d">Последние сообщения демона nfqws2.</p>
         <p v-if="!errors.available" class="panel-d">Журнал пуст или не найден.</p>
         <template v-else>
-          <p class="panel-d"><code>{{ errors.path }}</code> · строк: {{ errors.lines }}</p>
+          <p class="panel-d">
+            <code>{{ errors.path }}</code> · строк: {{ errors.lines }}
+            <span v-if="errors.suppressed_conntrack > 0" class="chip" style="margin-left:0.4rem">
+              скрыто conntrack-сообщений: {{ errors.suppressed_conntrack }}
+            </span>
+          </p>
           <pre class="error-log">{{ errors.content || '(пусто)' }}</pre>
         </template>
       </section>

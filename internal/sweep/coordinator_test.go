@@ -531,7 +531,7 @@ func TestCoordinator_DNSGate(t *testing.T) {
 
 func TestCoordinator_ParamValidation(t *testing.T) {
 	e := newCoordEnv(t, fullScenario, nil)
-	if _, err := e.c.Run(context.Background(), Params{QuickProfile: 5}); err == nil {
+	if _, err := e.c.Run(context.Background(), Params{QuickProfile: 6}); err == nil {
 		t.Error("invalid quick profile must be rejected")
 	}
 	if _, err := e.c.Run(context.Background(), Params{QuickProfile: 1, QuickAddress: "not a URL"}); err == nil {

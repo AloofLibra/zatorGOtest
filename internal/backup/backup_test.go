@@ -697,3 +697,63 @@ func TestCreateThenRestoreIntoFreshRoot(t *testing.T) {
 		t.Error("lists mode must not create config")
 	}
 }
+
+func Test160ArtifactsBackupAndWssizeSmartApply(t *testing.T) {
+	src := newEnv(t)
+	src.seed(t)
+	write(t, src.p.ZapretConfig, oldConfig+"Z2R_WSSIZE_RAMP_ENABLE=1\nZ2R_WSSIZE_RAMP_MODE=full\nZ2R_WSSIZE_RAMP_SCALE=2\n")
+	write(t, src.p.BlobFilesTSV(), "maxru\ttls_clienthello_2.bin\n")
+	write(t, src.p.CustomBlobsTSV(), "# hdr\n1\tmyb\tmyb.bin\tc\n")
+	write(t, src.p.CustomStrategiesTSV(), "# hdr\n1\ttpl\tfake:blob=myb\t1\t\t44\n")
+	write(t, src.p.SNIPoolTSV(), "1\t@google\n")
+	write(t, src.p.SNIPoolPolicyTSV(), "1\trand\n")
+	write(t, src.p.SNIUserTxt(), "# set: myset\ncustom.example.org\n")
+	write(t, filepath.Join(src.p.CustomBlobDir(), "myb.bin"), "BLOBDATA")
+
+	info, err := src.m.Create(CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Restore onto target with wssize_ramp support (should transfer Z2R_WSSIZE_RAMP_* + 1.6.0 state files).
+	dst := newEnv(t)
+	write(t, dst.p.ZapretConfig, liveConfig+"# wssize_ramp\nZ2R_WSSIZE_RAMP_ENABLE=0\nZ2R_WSSIZE_RAMP_MODE=lite\nZ2R_WSSIZE_RAMP_SCALE=1\n")
+	res, err := dst.m.RestoreFile(info.Path, RestoreOptions{Mode: ModeSmart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wantVar := range []string{"Z2R_WSSIZE_RAMP_ENABLE", "Z2R_WSSIZE_RAMP_MODE", "Z2R_WSSIZE_RAMP_SCALE"} {
+		found := false
+		for _, a := range res.SmartApplied {
+			if a == wantVar {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("SmartApplied missing %s: %+v", wantVar, res.SmartApplied)
+		}
+	}
+	if read(t, filepath.Join(dst.p.CustomBlobDir(), "myb.bin")) != "BLOBDATA" {
+		t.Error("custom_blob file not restored")
+	}
+	if read(t, dst.p.SNIUserTxt()) != "# set: myset\ncustom.example.org\n" {
+		t.Error("sni_user.txt not restored")
+	}
+	if read(t, dst.p.CustomStrategiesTSV()) == "" || read(t, dst.p.SNIPoolTSV()) != "1\t@google\n" {
+		t.Error("new orchestra TSV files not restored")
+	}
+
+	// Restore onto target without wssize_ramp must NOT inject Z2R_WSSIZE_RAMP_* vars.
+	dstNoWssize := newEnv(t)
+	write(t, dstNoWssize.p.ZapretConfig, liveConfig)
+	res2, err := dstNoWssize.m.RestoreFile(info.Path, RestoreOptions{Mode: ModeSmart})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range res2.SmartApplied {
+		if strings.HasPrefix(a, "Z2R_WSSIZE_RAMP_") {
+			t.Errorf("unexpected wssize smart var on unsupported target: %s", a)
+		}
+	}
+}

@@ -12,7 +12,11 @@ import (
 
 	"github.com/AloofLibra/zator"
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/customblobs"
+	"github.com/AloofLibra/zator/internal/customstrats"
 	"github.com/AloofLibra/zator/internal/deploy"
+	"github.com/AloofLibra/zator/internal/fsutil"
+	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/telemetry"
 	"github.com/AloofLibra/zator/internal/uiembed"
 )
@@ -207,6 +211,11 @@ func (a *App) copyDevelopmentAssets() error {
 	if err := copyFSKeepExisting(os.DirFS(filepath.Join(root, "extra_strats")), a.Paths.ExtraStratsDir); err != nil {
 		return err
 	}
+	if sniZator, err := os.ReadFile(filepath.Join(root, "extra_strats", "sni_zator.txt")); err == nil {
+		if err := fsutil.AtomicWriteFile(a.Paths.SNIZatorTxt(), sniZator, 0o644); err != nil {
+			return err
+		}
+	}
 	if err := copyFSKeepCustomTLS(os.DirFS(filepath.Join(root, "files", "fake")), a.Paths.FakeDir); err != nil {
 		return err
 	}
@@ -294,15 +303,24 @@ func (a *App) seedZapretConfig(template []byte) error {
 		return fmt.Errorf("запись %s: %w", cfg, err)
 	}
 	if c, err := config.Load(cfg); err == nil {
-		changed, e := a.ensureNetworkIfaces(c)
+		overlayChanged, oErr := a.ReapplyConfigOverlays(c)
+		if oErr != nil {
+			return fmt.Errorf("оверлеи блобов и стратегий: %w", oErr)
+		}
+		ifaceChanged, e := a.ensureNetworkIfaces(c)
 		if e != nil {
+			if overlayChanged {
+				if err := c.Save(); err != nil {
+					return err
+				}
+			}
 			// На сборочном хосте (Windows) маршрутов роутера нет — не валим install.
 			if !a.isRouterHost() {
 				return nil
 			}
 			return fmt.Errorf("автоопределение IFACE_WAN/LAN: %w", e)
 		}
-		if changed {
+		if overlayChanged || ifaceChanged {
 			if err := c.Save(); err != nil {
 				return err
 			}
@@ -311,12 +329,55 @@ func (a *App) seedZapretConfig(template []byte) error {
 	return nil
 }
 
-// ensureOrchestraState создаёт каталоги и пустые файлы состояния orchestra
-// (locked.tsv, locked.manual.tsv), чтобы Lua и WebUI видели их с первого запуска.
+// ReapplyConfigOverlays применяет сохранённые выборы блобов (blob_files.tsv),
+// пользовательские блобы (custom_blobs.tsv) и пользовательские стратегии (custom_strategies.tsv).
+func (a *App) ReapplyConfigOverlays(cfg *config.Config) (bool, error) {
+	if cfg == nil {
+		return false, nil
+	}
+	before := cfg.String()
+	orch := orchestra.NewStore(a.Paths.StateOrchestraDir())
+	slotFn := func(slot string) string { f, _ := cfg.SlotBlobFile(slot); return f }
+	fileFn := func(file string) bool {
+		if a.Paths.FakeDir == "" {
+			return true
+		}
+		_, err := os.Stat(filepath.Join(a.Paths.FakeDir, file))
+		return err == nil
+	}
+	_, _ = orch.MigrateLegacyBlobOverrides(slotFn, fileFn)
+	if bf, err := orch.BlobFilesMap(); err == nil && len(bf) > 0 {
+		_, _ = cfg.ApplyBlobFiles(bf, a.Paths.FakeDir)
+	}
+	blobsTSV := a.Paths.CustomBlobsTSV()
+	if blobsTSV != "" {
+		cb := customblobs.NewStore(blobsTSV, a.Paths.CustomBlobDir())
+		if _, err := cb.Apply(cfg); err != nil {
+			return cfg.String() != before, err
+		}
+	}
+	stratsTSV := a.Paths.CustomStrategiesTSV()
+	if stratsTSV != "" {
+		cs := customstrats.NewStore(stratsTSV, blobsTSV, orch, a.Paths.AutoLockedTSV)
+		if _, err := cs.Apply(cfg); err != nil {
+			return cfg.String() != before, err
+		}
+	}
+	return cfg.String() != before, nil
+}
+
+// ensureOrchestraState создаёт каталоги и файлы состояния orchestra
+// (locked.tsv, locked.manual.tsv, auto_locked.tsv, sni_pool.tsv, custom_blob/),
+// чтобы Lua и WebUI видели их с первого запуска.
 func (a *App) ensureOrchestraState() error {
 	dir := a.Paths.StateOrchestraDir()
 	if err := os.MkdirAll(filepath.Join(dir, "scopes"), 0o755); err != nil {
 		return fmt.Errorf("каталог orchestra: %w", err)
+	}
+	if customDir := a.Paths.CustomBlobDir(); customDir != "" {
+		if err := os.MkdirAll(customDir, 0o755); err != nil {
+			return fmt.Errorf("каталог custom_blob: %w", err)
+		}
 	}
 	for _, p := range []string{a.Paths.LockedTSV, a.Paths.LockedManualTSV, a.Paths.AutoLockedTSV} {
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o644)
@@ -324,6 +385,23 @@ func (a *App) ensureOrchestraState() error {
 			return fmt.Errorf("файл состояния %s: %w", p, err)
 		}
 		f.Close()
+	}
+	orch := orchestra.NewStore(dir)
+	if err := orch.EnsureDefaultSNIPool(); err != nil {
+		return fmt.Errorf("дефолтный sni_pool: %w", err)
+	}
+	if a.Paths.ZapretConfig != "" {
+		if cfg, err := config.Load(a.Paths.ZapretConfig); err == nil {
+			slotFn := func(slot string) string { f, _ := cfg.SlotBlobFile(slot); return f }
+			fileFn := func(file string) bool {
+				if a.Paths.FakeDir == "" {
+					return true
+				}
+				_, err := os.Stat(filepath.Join(a.Paths.FakeDir, file))
+				return err == nil
+			}
+			_, _ = orch.MigrateLegacyBlobOverrides(slotFn, fileFn)
+		}
 	}
 	return nil
 }

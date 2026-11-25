@@ -1,3 +1,4 @@
+-- fakemultisplit/fakemultidisorder are based on avatarDD/zapret-gui; see upstream zator THIRD_PARTY_NOTICES.md.
 -- Канон: те же файлы, что пишет Go WebUI (state/orchestra).
 local LOCKED_PATH = "/opt/zator/state/orchestra/locked.tsv"
 local LOCKED_MANUAL_PATH = "/opt/zator/state/orchestra/locked.manual.tsv"
@@ -661,7 +662,7 @@ local Z2R_CAP_FIELD = "z2r_blob_cap"
 local function z2r_clone_limit_for(profile_key)
   -- Явный диагностический режим полного клона; обычные профили ограничены 1200.
   if tonumber(_G.Z2R_CLONE_MAX_SIZE) == 0 then return 0 end
-  local v = CLONE_SIZES["0"]
+  local v = CLONE_SIZES["0"] or (profile_key and CLONE_SIZES[tostring(profile_key)])
   if type(v) == "number" and v >= 64 and v <= Z2R_TLS_FAKE_LIMIT_MAX then return v end
   return Z2R_TLS_FAKE_LIMIT_MAX
 end
@@ -946,6 +947,7 @@ function gv_cycle_profile_blob(profile_key)
   if not next_name or next_name == current then
     return nil
   end
+  -- Переписать файл целиком, сохранив остальные профили.
   local lines = {}
   local found = false
   local f = io.open(BLOB_OVERRIDE_PATH, "r")
@@ -983,17 +985,41 @@ function gv_cycle_profile_blob(profile_key)
   return next_name
 end
 
+-- Какие значения blob=/fake_blob= подлежат подмене per-profile override'ом
+-- (blob_override.tsv). TLS-профили 1/2/3/4/8 — maxru|fake_default_tls (зеркало
+-- глобальных sed'ов п.16). QUIC-профиль 5 — именованные UDP-блобы, на которых
+-- построены стратегии блока key=5 (литеральный 0x00 — не имя, остаётся как есть).
+local Z2R_BLOB_SWAP_TLS = { maxru = true, fake_default_tls = true }
+local Z2R_BLOB_SWAP_QUIC = {
+  quic_google = true, quic5 = true, discord_fake = true,
+  stun_fake = true, discord_udp_1 = true, discord_udp_2 = true,
+}
+local function z2r_blob_override_swap(profile_key, value)
+  if value == nil then return false end
+  if tostring(profile_key) == "5" then
+    return Z2R_BLOB_SWAP_QUIC[value] == true
+  end
+  return Z2R_BLOB_SWAP_TLS[value] == true
+end
+
 -- Подмена per-profile TLS блоба на исполнении стратегии (blob_override.tsv),
 -- режим фейков профиля (mode_override.tsv) и per-profile SNI клон-стратегий
 -- (sni_override.tsv). Порядок: режим (clone строит клон CH юзера) -> блоб-
 -- override -> sni_first. Меняются только args blob/fake_blob со значением
--- maxru|fake_default_tls и arg sni_first; исходные значения восстанавливаются —
--- план может быть переисполнен (replay/desync_copy). Имя блоба должно быть
--- объявлено в конфиге (--blob=ИМЯ:@...) или быть встроенным, иначе подмены нет.
+-- maxru|fake_default_tls (QUIC-профиль 5 — именованные UDP-блобы) и arg
+-- sni_first; исходные значения восстанавливаются — план может быть переисполнен
+-- (replay/desync_copy). Имя блоба должно быть объявлено в конфиге
+-- (--blob=ИМЯ:@...) или быть встроенным, иначе подмены нет.
 function blob_override_execute(desync, verdict, instance, profile_key)
   local mode = profile_key and MODE_OVERRIDES[tostring(profile_key)]
   local name = profile_key and BLOB_OVERRIDES[tostring(profile_key)]
   local sni = profile_key and SNI_OVERRIDES[tostring(profile_key)]
+  -- zator sni-pool (lua/sni-pool.lua): пул невинных SNI с автосменой; явный
+  -- пин sni_override.tsv выше приоритетом. Модуля нет (старая установка или
+  -- изолированный прогон) -> тихий no-op, прежнее поведение.
+  if sni == nil and type(z2r_sni_pool_pick) == "function" then
+    sni = z2r_sni_pool_pick(desync, profile_key)
+  end
   local fake_arg = (instance and instance.arg and z2r_fake_blob_arg(instance.func)) or nil
   local native_clone = instance and instance.func == "tls_client_hello_clone"
   if (not mode and not name and not sni and not fake_arg and not native_clone) or not instance or not instance.arg then
@@ -1018,11 +1044,11 @@ function blob_override_execute(desync, verdict, instance, profile_key)
   local saved_blob = instance.arg.blob
   local saved_fake_blob = instance.arg.fake_blob
   local swapped = false
-  if target and (saved_blob == "maxru" or saved_blob == "fake_default_tls") then
+  if target and z2r_blob_override_swap(profile_key, saved_blob) then
     instance.arg.blob = target
     swapped = true
   end
-  if target and (saved_fake_blob == "maxru" or saved_fake_blob == "fake_default_tls") then
+  if target and z2r_blob_override_swap(profile_key, saved_fake_blob) then
     instance.arg.fake_blob = target
     swapped = true
   end
@@ -1102,7 +1128,13 @@ function circular_locked(ctx, desync)
   end
   local allow_nohost_enabled = desync_allow_nohost(desync)
   if not desync.track and not allow_nohost_enabled then
-    DLOG_ERR("circular_locked: conntrack is missing but required")
+    -- Соединение началось до старта nfqws2 (SYN не попадал в очередь):
+    -- пакет уходит без обработки, штатно после рестарта. Лог не чаще
+    -- раза в 10 сек, иначе всплеск засоряет журнал.
+    if os.time() - (_Z2R_CONNTRACK_NOTE_TS or 0) >= 10 then
+      _Z2R_CONNTRACK_NOTE_TS = os.time()
+      DLOG_ERR("circular_locked: conntrack is missing but required (connection started before nfqws2 start, packet passed undesynced - normal after daemon restart)")
+    end
     return circular_locked_passthrough(ctx, desync)
   end
 
@@ -1172,6 +1204,15 @@ function circular_locked(ctx, desync)
 
   local scope = desync_client_scope(desync)
   local locked = locked_strategy_for_profile(profile, proto, scope)
+  -- Profile 2 uses circular_locked in the stable default config. Consume only
+  -- verified Go/Lua auto-locks; transfer seeds remain proposals, and an
+  -- explicit per-host lock above keeps precedence.
+  if not locked and base_profile == "2" and host and type(slm_get_verified_auto_locked) == "function" then
+    locked = slm_get_verified_auto_locked(base_profile, host, scope)
+    if locked then
+      DLOG("circular_locked: verified Googlevideo hostkey lock "..tostring(locked))
+    end
+  end
   if (not locked) and profile ~= base_profile then
     locked = locked_strategy_for_profile(base_profile, proto, scope)
     if locked then

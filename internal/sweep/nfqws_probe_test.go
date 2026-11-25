@@ -250,3 +250,76 @@ func containsArg(args []string, want string) bool {
 	}
 	return false
 }
+
+func TestWriteProbeLuaIsolatesSNIPoolAndPin(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(root, filepath.Join(root, "zapret2"))
+	for _, dir := range []string{p.LuaDir, p.StateOrchestraDir(), p.ExtraStratsDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = os.WriteFile(filepath.Join(p.LuaDir, "locked.lua"), []byte(`local L="/opt/zator/state/orchestra/locked.tsv"`), 0o644)
+	_ = os.WriteFile(filepath.Join(p.LuaDir, "sni-pool.lua"), []byte(`local SP="/opt/zator/state/orchestra/sni_pool.tsv"
+local PIN="/opt/zator/state/orchestra/sni_pool.pin"
+local SZ="/opt/zator/extra_strats/sni_zator.txt"`), 0o644)
+	_ = os.WriteFile(p.SNIPoolTSV(), []byte("1\t@google\n"), 0o644)
+	_ = os.WriteFile(p.SNIPoolPolicyTSV(), []byte("1\trr\n"), 0o644)
+
+	cfg := config.Parse(`FWTYPE=iptables
+NFQWS2_OPT="
+--template=z2r_tcp_tls_common
+--new
+#Z2R_AUTO_STANDARD_1_BEGIN
+--filter-tcp=443 --hostlist=/profile1.txt
+--lua-desync=circular_locked:key=1
+--import=z2r_tcp_tls_common
+#Z2R_AUTO_STANDARD_1_END
+--new
+"
+`)
+	probe, err := NewNfqwsProbe(NfqwsProbeConfig{
+		Paths: p, Config: cfg, Runner: firewall.NewRecordingRunner(),
+		User: "nobody", UID: 65534, GID: 65534,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	luaDir := filepath.Join(probe.WorkDir(), "lua")
+	_ = os.MkdirAll(luaDir, 0o755)
+	if err := probe.writeProbeLua(luaDir); err != nil {
+		t.Fatal(err)
+	}
+	probeLua, err := os.ReadFile(filepath.Join(luaDir, "sni-pool.lua"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOrch := filepath.ToSlash(probe.OrchestraDir())
+	if !strings.Contains(string(probeLua), wantOrch+"/sni_pool.pin") {
+		t.Fatalf("sni_pool.pin path not rewritten to probe dir:\n%s", probeLua)
+	}
+	if _, err := os.Stat(filepath.Join(probe.OrchestraDir(), "sni_pool.pin")); err != nil {
+		t.Fatalf("expected private probe sni_pool.pin: %v", err)
+	}
+	if _, err := os.Stat(p.SNIPoolPin()); !os.IsNotExist(err) {
+		t.Fatalf("global sni_pool.pin must not be touched by probe, err=%v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(probe.OrchestraDir(), "sni_pool.tsv")); string(got) != "1\t@google\n" {
+		t.Fatalf("sni_pool.tsv snapshot mismatch: %q", got)
+	}
+	probe.profile = 1
+	args, err := probe.buildArgs(luaDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInit := "--lua-init=@" + filepath.ToSlash(filepath.Join(luaDir, "sni-pool.lua"))
+	if !containsArg(args, wantInit) {
+		t.Fatalf("missing sni-pool --lua-init in args: %v", args)
+	}
+	if err := probe.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(probe.OrchestraDir(), "sni_pool.pin")); !os.IsNotExist(err) {
+		t.Fatalf("probe sni_pool.pin should be cleaned up on Stop, err=%v", err)
+	}
+}
