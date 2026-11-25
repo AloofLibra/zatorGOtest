@@ -45,6 +45,7 @@ import (
 	"github.com/AloofLibra/zator/internal/service"
 	"github.com/AloofLibra/zator/internal/sweep"
 	"github.com/AloofLibra/zator/internal/uiembed"
+	"github.com/AloofLibra/zator/internal/zapret"
 )
 
 // CookieName — имя cookie сессии после login.
@@ -121,6 +122,11 @@ type Server struct {
 
 	sweepMu sync.Mutex
 	sweeper Sweeper
+
+	zapretRelMu    sync.Mutex
+	zapretRelCache *zapretReleasesCache
+	zapretHTTP     *http.Client
+	zapretInstall  func(ctx context.Context, opts zapret.Options) (*zapret.Result, error)
 }
 
 // New создаёт сервер.

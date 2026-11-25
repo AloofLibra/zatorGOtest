@@ -54,6 +54,7 @@ func init() {
 		"update_preflight":  (*Server).postUpdatePreflight,
 		"strategy_register": (*Server).postStrategyRegister,
 		"h3_curl":           (*Server).postH3Curl,
+		"zapret_version":    (*Server).postZapretVersion,
 	}
 	for _, t := range toggles {
 		t := t

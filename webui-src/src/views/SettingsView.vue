@@ -20,6 +20,8 @@ import { fetchAndApplyState } from '../stores/state'
 import { refreshAll, scopes, status } from '../stores/status'
 import { announceRestart, restartSuffix, showToast } from '../stores/toast'
 import { applyUpdate, refreshUpdateCheck, updateCheckError, updateCheckResult, updateCheckState, updateMode } from '../stores/updates'
+import ZapretVersionManager from '../components/ui/ZapretVersionManager.vue'
+import { loadZapretReleases, zapretReleasesState } from '../stores/zapretReleases'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,6 +39,7 @@ const sections = [
   { id: 'sec-ifaces', label: 'Интерфейсы', group: 'Сеть' },
   { id: 'sec-ports', label: 'Порты', group: 'Сеть' },
   { id: 'sec-scopes', label: 'Scopes', group: 'Сеть' },
+  { id: 'sec-zapret', label: 'Версия zapret2', group: 'Сервис' },
   { id: 'sec-config', label: 'Конфиг', group: 'Сервис' },
   { id: 'sec-errors', label: 'Ошибки', group: 'Сервис' },
 ]
@@ -45,7 +48,7 @@ const settingGroups = [
   { id: 'grp-bypass', key: 'bypass', title: 'Обход DPI', desc: 'Режимы стратегий, TLS/WG blob и wssize.', first: 'sec-modes' },
   { id: 'grp-net', key: 'network', title: 'Сеть', desc: 'Firewall, интерфейсы WAN/LAN, порты NFQUEUE и client scopes.', first: 'sec-firewall' },
   { id: 'grp-system', key: 'system', title: 'Система', desc: 'Обновления, провайдер, телеметрия и резервные копии.', first: 'sec-updates' },
-  { id: 'grp-svc', key: 'diagnostics', title: 'Диагностика', desc: 'Сырой конфиг zapret2 и журнал ошибок.', first: 'sec-config' },
+  { id: 'grp-svc', key: 'diagnostics', title: 'Диагностика', desc: 'Версия zapret2, сырой конфиг и журнал ошибок.', first: 'sec-zapret' },
 ]
 
 const modes = [
@@ -580,7 +583,7 @@ const panelAliases: Record<string, string> = {
   firewall: 'sec-firewall', fwtype: 'sec-firewall', flowoffload: 'sec-firewall',
   ifaces: 'sec-ifaces', iface: 'sec-ifaces', interfaces: 'sec-ifaces',
   ports: 'sec-ports', scopes: 'sec-scopes', 'client-scope': 'sec-scopes',
-  config: 'sec-config', errors: 'sec-errors',
+  zapret: 'sec-zapret', 'zapret-version': 'sec-zapret', config: 'sec-config', errors: 'sec-errors',
 }
 
 function panelIdFromRoute(): string {
@@ -594,6 +597,12 @@ const activeCategory = computed(() => {
   const group = section?.group
   return group === 'Обход' ? 'bypass' : group === 'Сеть' ? 'network' : group === 'Сервис' ? 'diagnostics' : 'system'
 })
+
+watch(activeCategory, (cat) => {
+  if (cat === 'diagnostics' && zapretReleasesState.value === 'idle') {
+    void loadZapretReleases(false)
+  }
+}, { immediate: true })
 
 function goSection(id: string, ev?: Event) {
   ev?.preventDefault()
@@ -949,8 +958,12 @@ onMounted(async () => {
       <div class="settings-category" v-show="activeCategory === 'diagnostics'">
       <div id="grp-svc" class="settings-group">
         <h2>Диагностика</h2>
-        <p>Сырой конфиг zapret2 и журнал ошибок.</p>
+        <p>Версия zapret2, сырой конфиг и журнал ошибок.</p>
       </div>
+
+      <section id="sec-zapret" class="panel">
+        <ZapretVersionManager />
+      </section>
 
       <section id="sec-config" class="panel">
         <div class="panel-h">

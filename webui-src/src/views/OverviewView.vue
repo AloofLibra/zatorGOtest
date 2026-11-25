@@ -2,10 +2,12 @@
 import { computed, ref } from 'vue'
 import { runCheck, serviceAction } from '../api/endpoints'
 import CheckResults from '../components/ui/CheckResults.vue'
+import ZapretVersionManager from '../components/ui/ZapretVersionManager.vue'
 import { busyActive, busyButton, withBusy } from '../stores/busy'
 import { confirmDialog } from '../stores/confirm'
 import { refreshAll, scope, status, statusCheck, statusCheckRan, statusCheckAt, statusLoaded, versionInfo, versionInfoFresh } from '../stores/status'
 import { showToast } from '../stores/toast'
+import { loadZapretReleases, zapretBranchShort, zapretReleasesState } from '../stores/zapretReleases'
 
 const running = computed(() => Boolean(status.value?.zapret2_running))
 const health = computed(() => status.value?.health)
@@ -26,7 +28,20 @@ const disabledProfiles = computed(() => profiles.value.filter((p) => String(p.cu
 const autoMode = computed(() => status.value?.auto_mode || '—')
 const watchdog = computed(() => health.value?.watchdog ?? status.value?.nfqws_watchdog)
 const configPending = computed(() => !!versionInfo.value?.config_update_pending)
+const zapretVersionLabel = computed(() => {
+  const v = versionInfo.value?.zapret2_version
+  if (!v) return '—'
+  const tag = v === 'self-built' ? v : `v${v}`
+  const br = zapretBranchShort(versionInfo.value?.zapret2_source)
+  return br ? `${tag} (${br})` : tag
+})
 const checkTime = ref<number | null>(statusCheckAt.value)
+
+function onDiagToggle(ev: Event) {
+  if ((ev.target as HTMLDetailsElement).open && zapretReleasesState.value === 'idle') {
+    void loadZapretReleases(false)
+  }
+}
 
 function yn(value: boolean | undefined) {
   return value === true ? 'Включён' : value === false ? 'Выключен' : 'Неизвестно'
@@ -151,7 +166,7 @@ async function svc(action: 'start' | 'stop' | 'restart') {
             <p v-if="!profiles.length" class="panel-d">Профили пока не загружены.</p>
           </div>
         </article>
-        <details class="diagnostics-card">
+        <details class="diagnostics-card" @toggle="onDiagToggle">
           <summary><span><strong>Диагностика службы</strong><small>Технические детали доступны по запросу</small></span><b>⌄</b></summary>
           <dl>
             <div><dt>Scope</dt><dd>{{ scope }}</dd></div>
@@ -160,9 +175,14 @@ async function svc(action: 'start' | 'stop' | 'restart') {
             <div><dt>Firewall hook</dt><dd>{{ health?.fw_hook_present ?? status?.fw_hook_present ?? '—' }}</dd></div>
             <div><dt>Проверка после обновления</dt><dd>{{ health?.post_update_verify || status?.post_update_verify || '—' }}</dd></div>
             <div><dt>Версия ZatorGO</dt><dd>{{ versionInfo?.zator_version || '—' }}</dd></div>
+            <div><dt>Версия zapret2</dt><dd>{{ zapretVersionLabel }}</dd></div>
           </dl>
+          <ZapretVersionManager compact />
           <div v-if="warnings.length" class="warning-list"><strong>Предупреждения</strong><p v-for="(warning, index) in warnings" :key="index">{{ warning }}</p></div>
-          <router-link class="text-button" to="/settings/errors">Все сообщения службы →</router-link>
+          <div class="diagnostics-links">
+            <router-link class="text-button" to="/settings/zapret">Все версии zapret2 →</router-link>
+            <router-link class="text-button" to="/settings/errors">Все сообщения службы →</router-link>
+          </div>
         </details>
       </section>
     </template>

@@ -54,6 +54,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, p params
 		s.writeSupersweep(w)
 		return
 	}
+	if name == "zapret_releases" {
+		writeJSON(w, http.StatusOK, s.zapretReleasesGet(r.Context(), p.Get("refresh") == "1"))
+		return
+	}
 	cfg, _ := s.readConfig()
 	out, err := s.settingGet(r.Context(), cfg, name)
 	if err != nil {
@@ -64,7 +68,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, p params
 }
 
 // settingGet возвращает полезную нагрузку настройки (GET settings.cgi?setting=name).
-func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) (any, error) {
+func (s *Server) settingGet(ctx context.Context, cfg *config.Config, name string) (any, error) {
 	switch normSetting(name) {
 	case "wg_blob":
 		return s.wgBlobGet(cfg), nil
@@ -133,6 +137,8 @@ func (s *Server) settingGet(_ context.Context, cfg *config.Config, name string) 
 		return s.nfqws2ErrorsGet(), nil
 	case "h3_curl":
 		return s.h3Env().Detect(s.paths), nil
+	case "zapret_releases":
+		return s.zapretReleasesGet(ctx, false), nil
 	case "", "tls_blob":
 		return s.tlsBlobGet(cfg)
 	default:

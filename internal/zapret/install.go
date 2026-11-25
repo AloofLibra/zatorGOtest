@@ -396,6 +396,12 @@ func commit(root, stage, archDir string, lua bool) error {
 			}
 		}
 	}
+	for _, rel := range []string{"init.d/sysv/zapret2", "init.d/openrc/zapret2", "init.d/openwrt/zapret2"} {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if fileExists(p) {
+			_ = os.Chmod(p, 0o755)
+		}
+	}
 	return nil
 }
 

@@ -249,7 +249,23 @@ export const backups = {
 
 import type {
   CustomBlobsPayload, CustomImportResult, CustomListPayload, H3CurlStatus,
+  ZapretReleasesPayload, ZapretSwitchResult,
 } from './types'
+
+export const fetchZapretReleases = (refresh = false) =>
+  api<ZapretReleasesPayload>(
+    refresh ? '/api/settings?setting=zapret_releases&refresh=1' : '/api/settings?setting=zapret_releases',
+  )
+
+export const switchZapretVersion = (source: 'fork' | 'official', version: string, force = false) =>
+  api<ZapretSwitchResult>(
+    '/api/settings',
+    formBody(
+      force
+        ? { setting: 'zapret_version', source, version, force: '1' }
+        : { setting: 'zapret_version', source, version },
+    ),
+  )
 
 export const fetchH3Curl = (signal?: AbortSignal) =>
   api<H3CurlStatus>('/api/settings?setting=h3_curl', { signal })

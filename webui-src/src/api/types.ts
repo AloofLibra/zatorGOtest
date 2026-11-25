@@ -361,6 +361,8 @@ export interface DomainsImportResult {
 
 export interface VersionInfo {
   zapret2_version: string
+  zapret2_source?: 'fork' | 'official' | ''
+  zapret2_arch?: string
   zator_version: string
   zator_date: string
   webui_version: string
@@ -505,4 +507,39 @@ export interface CustomBlobsPayload {
   stock?: string[]
   config_dirty?: boolean
   sni?: SniState | null
+}
+
+export interface ZapretRelease {
+  source: 'fork' | 'official'
+  version: string
+  tag: string
+  name?: string
+  published_at?: string
+  prerelease?: boolean
+  url?: string
+}
+
+export interface ZapretReleasesPayload {
+  installed: {
+    version: string
+    source: 'fork' | 'official' | ''
+    arch: string
+  }
+  platform_arch?: string
+  embedded?: boolean
+  default_source?: 'fork' | 'official'
+  fork: ZapretRelease[]
+  official: ZapretRelease[]
+  errors?: Record<string, string>
+  checked_at?: string
+  cached?: boolean
+}
+
+export interface ZapretSwitchResult {
+  ok: boolean
+  version: string
+  source: 'fork' | 'official'
+  arch: string
+  skipped?: boolean
+  restarted?: boolean
 }
