@@ -388,3 +388,21 @@ func TestBundledGooglevideoIPv4(t *testing.T) {
 func TestCentralList_ImplementsChecker(t *testing.T) {
 	var _ CentralChecker = (*CentralList)(nil)
 }
+
+func TestListURLFromEnv(t *testing.T) {
+	t.Setenv(EnvListURL, "")
+	if got := ListURLFromEnv(); got != LegacyRemoteListURL {
+		t.Fatalf("unset ListURLFromEnv() = %q, want %q", got, LegacyRemoteListURL)
+	}
+	for _, off := range []string{"off", "OFF", "none", "0", "false", "disabled", "  Off "} {
+		t.Setenv(EnvListURL, off)
+		if got := ListURLFromEnv(); got != "" {
+			t.Errorf("ListURLFromEnv(%q) = %q, want empty", off, got)
+		}
+	}
+	const mirror = "https://mirror.example/ips.txt"
+	t.Setenv(EnvListURL, " "+mirror+" ")
+	if got := ListURLFromEnv(); got != mirror {
+		t.Errorf("custom ListURLFromEnv() = %q, want %q", got, mirror)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/provider"
@@ -704,5 +705,24 @@ func TestSettings160QuicBlobsH3CurlAndConntrack(t *testing.T) {
 		if errsMap["suppressed_conntrack"] != float64(1) || strings.Contains(errsMap["content"].(string), "conntrack is missing") {
 			t.Errorf("expected 1 suppressed conntrack line, got %v", errsMap)
 		}
+	}
+}
+
+func TestSettingsWssizeRefreshIPs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("# googlevideo IPv4; generated=2026-11-25T10:00:00Z; max_age=604800s\n8.8.8.8\n8.8.4.4\n1.1.1.1\n"))
+	}))
+	defer srv.Close()
+	t.Setenv(googlevideo.EnvListURL, srv.URL)
+
+	e := newEnv(t, envOpts{})
+	resp, out := e.post("/api/settings", "setting", "wssize_ramp", "refresh_ips", "1")
+	wantOK(t, resp, out)
+	if out["restarted"] != false || out["ipv4_count"] != float64(3) || out["ipv4_status"] != "fetched" {
+		t.Fatalf("unexpected refresh response: %v", out)
+	}
+	w := settingGetMap(t, e, "wssize_ramp")
+	if w["googlevideo_ips"] != float64(3) || w["googlevideo_feed_enabled"] != true || w["googlevideo_generated"] != "2026-11-25T10:00:00Z" {
+		t.Fatalf("wssize_ramp = %v", w)
 	}
 }

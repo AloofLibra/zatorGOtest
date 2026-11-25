@@ -1,4 +1,4 @@
-# Last modified: 2026-11-10 15:03:39 UTC
+# Last modified: 2026-11-22 22:11:39 UTC
 # this file is included from init scripts
 # change values here
 
@@ -289,8 +289,6 @@ ${Z2R_WSSIZE_RAMP_SKIP} --filter-l3=ipv4 --filter-tcp=443 --filter-mark=${Z2R_WS
 #Z2R_CUSTOM_P4_BEGIN
 #Z2R_CUSTOM_P4_END
 #Z2R_AUTO_STANDARD_4_END
-
---new
 
 --new
 

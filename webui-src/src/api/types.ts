@@ -197,6 +197,11 @@ export interface WssizeRampSettings {
   mode: 'full' | 'lite'
   scale: number
   googlevideo_ips: number
+  googlevideo_ipv4_fresh?: boolean
+  googlevideo_generated?: string
+  googlevideo_feed_enabled?: boolean
+  googlevideo_hosts?: number
+  googlevideo_local_ips?: number
   googlevideo_local_collection: 'enabled' | 'disabled' | 'unsupported'
 }
 

@@ -505,7 +505,14 @@ func (m *manager) templateData(u Unit) TemplateData {
 	switch u {
 	case UnitZapret2:
 		d.Description = "zapret2 (nfqws2)"
-		d.Command = []string{slash(filepath.Join(m.cfg.Paths.ZapretRoot, "nfq2", "nfqws2")), "@" + slash(m.cfg.ArgsFile)}
+		// nfqws2 @file жёстко ограничен MAX_CONFIG_FILE_SIZE (16 КБ) в nfq2/nfqws.c,
+		// а полный nfqws2.args > 32 КБ — запускаем через zator exec-nfqws2 (execve → argv).
+		d.Command = []string{
+			slash(m.cfg.ZatorBin),
+			"exec-nfqws2",
+			slash(filepath.Join(m.cfg.Paths.ZapretRoot, "nfq2", "nfqws2")),
+			slash(m.cfg.ArgsFile),
+		}
 		d.Start = 90
 		if m.cfg.FWHook != "" {
 			d.WssizeBin = slash(m.cfg.ZatorBin)

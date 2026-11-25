@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/firewall"
@@ -745,6 +746,36 @@ func (s *Server) postWssizeRamp(r *http.Request, p params) (map[string]any, erro
 		vars["Z2R_WSSIZE_RAMP_SCALE"] = strconv.Itoa(n)
 	}
 	if len(vars) == 0 {
+		if p.Get("refresh_ips") == "1" {
+			refreshCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+			defer cancel()
+			feedRes, feedErr := s.app.RefreshGooglevideoIPv4(refreshCtx, true)
+			sniAdded, _ := s.app.SyncGooglevideoHosts()
+			sniRes, _ := s.app.ResolveGooglevideoHosts(refreshCtx, true)
+			centralCount := feedRes.Count
+			if feedErr != nil {
+				if cl := s.app.GooglevideoCentralList(); cl != nil {
+					centralCount = cl.Count()
+				}
+				if centralCount == 0 && len(sniRes.LiveIPs) == 0 {
+					return nil, errf(http.StatusBadGateway, "Не удалось обновить список Googlevideo IP: "+feedErr.Error())
+				}
+			}
+			out := map[string]any{
+				"ok":               true,
+				"restarted":        false,
+				"ipv4_status":      feedRes.Status,
+				"ipv4_count":       centralCount,
+				"ipv4_generated":   feedRes.Generated,
+				"sni_hosts_added":  sniAdded,
+				"sni_resolved_ips": sniRes.Resolved,
+				"local_ips":        len(sniRes.LiveIPs),
+			}
+			if feedErr != nil {
+				out["ipv4_error"] = feedErr.Error()
+			}
+			return out, nil
+		}
 		return nil, errf(http.StatusBadRequest, "Некорректное значение: ")
 	}
 	if vars["Z2R_WSSIZE_RAMP_ENABLE"] == "1" {
@@ -774,8 +805,16 @@ func (s *Server) postWssizeRamp(r *http.Request, p params) (map[string]any, erro
 		if res, e := s.app.RefreshGooglevideoIPv4(r.Context(), force); e == nil {
 			out["ipv4_status"] = res.Status
 			out["ipv4_count"] = res.Count
+			out["ipv4_generated"] = res.Generated
 		} else {
 			out["ipv4_error"] = e.Error()
+		}
+		if force {
+			sniAdded, _ := s.app.SyncGooglevideoHosts()
+			sniRes, _ := s.app.ResolveGooglevideoHosts(r.Context(), true)
+			out["sni_hosts_added"] = sniAdded
+			out["sni_resolved_ips"] = sniRes.Resolved
+			out["local_ips"] = len(sniRes.LiveIPs)
 		}
 	}
 	return out, nil

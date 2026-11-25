@@ -4,6 +4,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -122,8 +123,11 @@ func (p Paths) GooglevideoHostsFile() string {
 	return filepath.Join(p.ListsDir, "googlevideo-hosts.txt")
 }
 
-// GooglevideoStateDir — tmpfs-состояние коллектора/SNI-лога.
+// GooglevideoStateDir — tmpfs-состояние коллектора/SNI-лога (Z2R_GV_TMPDIR).
 func (p Paths) GooglevideoStateDir() string {
+	if v := strings.TrimSpace(os.Getenv("Z2R_GV_TMPDIR")); v != "" {
+		return filepath.Clean(v)
+	}
 	return "/tmp/z2r-googlevideo"
 }
 

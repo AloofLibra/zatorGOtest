@@ -427,6 +427,26 @@ async function saveWssize() {
   }
 }
 
+async function refreshWssizeIps() {
+  try {
+    await withBusy('wssize-refresh', async () => {
+      const res = await applySetting.wssize_refresh_ips()
+      const parts = [`Googlevideo IP: ${res.ipv4_count ?? 0}`]
+      if ((res.local_ips ?? 0) > 0 || (res.sni_resolved_ips ?? 0) > 0) {
+        parts.push(`локально: ${res.local_ips ?? 0}`)
+      }
+      if (res.ipv4_error) {
+        showToast(`${parts.join(', ')} (feed: ${res.ipv4_error})`, 'warning')
+      } else {
+        showToast(parts.join(', '))
+      }
+      await refreshWssizeRampSettings()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
 async function saveIfaces() {
   if (!ifaceWan.value.trim() || !ifaceLan.value.trim()) {
     showToast('Укажите WAN и LAN', 'error')
@@ -783,8 +803,8 @@ onMounted(async () => {
         <p v-if="!wssizeRampSettings" class="panel-d">Настройка недоступна в этой сборке / ещё не загружена.</p>
         <template v-else>
           <p class="panel-d">
-            Googlevideo IP: {{ wssizeRampSettings.googlevideo_ips }} ·
-            локальный DNS-сбор: {{ wssizeRampSettings.googlevideo_local_collection }}
+            Googlevideo IP: {{ wssizeRampSettings.googlevideo_ips }}<template v-if="(wssizeRampSettings.googlevideo_local_ips ?? 0) > 0"> · локально: {{ wssizeRampSettings.googlevideo_local_ips }}</template><template v-if="(wssizeRampSettings.googlevideo_hosts ?? 0) > 0"> · SNI-хостов: {{ wssizeRampSettings.googlevideo_hosts }}</template> ·
+            локальный DNS-сбор: {{ wssizeRampSettings.googlevideo_local_collection }}<template v-if="wssizeRampSettings.googlevideo_generated"> · от {{ wssizeRampSettings.googlevideo_generated.slice(0, 16).replace('T', ' ') }} UTC</template>
           </p>
           <div class="grid-2">
             <label class="toggle"><input v-model="wssizeOn" type="checkbox" :disabled="busyActive"><span>Включить wssize_ramp</span></label>
@@ -802,6 +822,7 @@ onMounted(async () => {
           </div>
           <div class="actions" style="margin-top:0.8rem">
             <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'wssize' }" @click="saveWssize">Сохранить</button>
+            <button type="button" class="ghost" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'wssize-refresh' }" @click="refreshWssizeIps">Обновить IP</button>
           </div>
         </template>
       </section>

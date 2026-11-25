@@ -186,20 +186,24 @@ func TestRenderSystemd(t *testing.T) {
 	}
 	nfq := filepath.ToSlash(filepath.Join(e.p.ZapretRoot, "nfq2", "nfqws2"))
 	args := filepath.ToSlash(filepath.Join(e.p.ZapretRoot, "nfqws2.args"))
+	zbin := filepath.ToSlash(filepath.Join(e.p.BinDir, "zator"))
 	for _, want := range []string{
 		"[Unit]", "Description=zapret2 (nfqws2)", "[Service]", "Type=simple",
 		"Environment=ZATOR_ROOT=" + filepath.ToSlash(e.p.ZatorRoot),
 		"Environment=ZAPRET2_ROOT=" + filepath.ToSlash(e.p.ZapretRoot),
-		"ExecStart=" + nfq + " @" + args,
+		"ExecStart=" + zbin + " exec-nfqws2 " + nfq + " " + args,
 		"ExecStartPre=-/opt/zapret2/fw.sh start",
 		"ExecStopPost=-/opt/zapret2/fw.sh stop",
-		"ExecStartPre=-" + filepath.ToSlash(filepath.Join(e.p.BinDir, "zator")) + " wssize-hook start",
-		"ExecStopPost=-" + filepath.ToSlash(filepath.Join(e.p.BinDir, "zator")) + " wssize-hook stop",
+		"ExecStartPre=-" + zbin + " wssize-hook start",
+		"ExecStopPost=-" + zbin + " wssize-hook stop",
 		"Restart=on-failure", "WantedBy=multi-user.target",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("в unit нет %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "@"+args) {
+		t.Errorf("systemd unit не должен запускать nfqws2 через @args (лимит 16 КБ):\n%s", got)
 	}
 	if strings.Contains(got, "{{") {
 		t.Errorf("остались необработанные директивы:\n%s", got)
@@ -209,7 +213,6 @@ func TestRenderSystemd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	zbin := filepath.ToSlash(filepath.Join(e.p.BinDir, "zator"))
 	if !strings.Contains(web, "ExecStart="+zbin+" webui") || strings.Contains(web, "ExecStartPre") || strings.Contains(web, "wssize-hook") {
 		t.Errorf("unit webui:\n%s", web)
 	}
@@ -241,15 +244,19 @@ func TestRenderProcd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	args := filepath.ToSlash(filepath.Join(e.p.ZapretRoot, "nfqws2.args"))
 	for _, want := range []string{
 		"#!/bin/sh /etc/rc.common", "START=90", "USE_PROCD=1", "procd_open_instance",
-		"procd_set_param command", "nfqws2", "procd_set_param respawn", "procd_close_instance",
+		"procd_set_param command", "exec-nfqws2", "nfqws2", "nfqws2.args", "procd_set_param respawn", "procd_close_instance",
 		"/opt/zapret2/fw.sh start", "wssize-hook start", "wssize-hook stop", "EXTRA_COMMANDS=\"restart_fw\"",
 		"export ZATOR_ROOT ZAPRET2_ROOT",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("в procd-скрипте нет %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "@"+args) {
+		t.Errorf("procd-скрипт не должен запускать nfqws2 через @args (лимит 16 КБ):\n%s", got)
 	}
 	web, _ := RenderProcd(c.templateData(UnitWebUI))
 	if !strings.Contains(web, "START=95") || strings.Contains(web, "fw.sh") || strings.Contains(web, "wssize-hook") || !strings.Contains(web, "webui") {
@@ -265,14 +272,18 @@ func TestRenderSysV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	args := filepath.ToSlash(filepath.Join(e.p.ZapretRoot, "nfqws2.args"))
 	for _, want := range []string{
-		"#!/bin/sh", "NAME=zapret2", "PIDFILE=/opt/var/run/zapret2.pid", "LOGFILE=", "nohup", "nfqws2",
+		"#!/bin/sh", "NAME=zapret2", "PIDFILE=/opt/var/run/zapret2.pid", "LOGFILE=", "nohup", "exec-nfqws2", "nfqws2", "nfqws2.args",
 		"LOG_MAX_BYTES", "не запустился", "restart-fw) fw restart", "status)",
 		"wssize-hook \"$1\"", "ZATOR_ROOT=",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("в sysv-скрипте нет %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "@"+args) {
+		t.Errorf("sysv-скрипт не должен запускать nfqws2 через @args (лимит 16 КБ):\n%s", got)
 	}
 	sysv := e.ctl(t, platSysV).(*manager)
 	if got, _ := RenderSysV(sysv.templateData(UnitWebUI)); !strings.Contains(got, "PIDFILE=/var/run/zator-webui.pid") {

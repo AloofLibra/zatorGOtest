@@ -87,6 +87,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdService(rest, stdout, stderr)
 	case "wssize-hook":
 		return cmdWssizeHook(rest, stdout, stderr)
+	case "exec-nfqws2":
+		return cmdExecNfqws2(rest, stderr)
 	case "locks":
 		return cmdLocks(rest, stdout, stderr)
 	case "restore":

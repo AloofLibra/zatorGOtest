@@ -13,6 +13,7 @@ import (
 
 	"github.com/AloofLibra/zator/internal/config"
 	"github.com/AloofLibra/zator/internal/deploy"
+	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/telemetry"
 )
@@ -260,11 +261,19 @@ func (s *Server) wssizeGet(cfg *config.Config) any {
 	}
 	ips := 0
 	ipv4Fresh := false
+	generated := ""
 	if cl := s.app.GooglevideoCentralList(); cl != nil {
 		ips = cl.Count()
 		ipv4Fresh = cl.Fresh()
+		if l, lerr := cl.Load(); lerr == nil {
+			generated = l.Generated
+		}
 	} else if lines, err := readListLines(filepath.Join(s.paths.ListsDir, "googlevideo-ipv4.txt")); err == nil {
 		ips = len(listEntries(lines))
+	}
+	hostsCount := 0
+	if hosts, herr := s.app.GooglevideoHosts().List(); herr == nil {
+		hostsCount = len(hosts)
 	}
 	return map[string]any{
 		"enabled":                      cfg.GetDefault("Z2R_WSSIZE_RAMP_ENABLE", "1") == "1",
@@ -272,6 +281,10 @@ func (s *Server) wssizeGet(cfg *config.Config) any {
 		"scale":                        scale,
 		"googlevideo_ips":              ips,
 		"googlevideo_ipv4_fresh":       ipv4Fresh,
+		"googlevideo_generated":        generated,
+		"googlevideo_feed_enabled":     googlevideo.ListURLFromEnv() != "",
+		"googlevideo_hosts":            hostsCount,
+		"googlevideo_local_ips":        s.app.GooglevideoLocalIPCount(),
 		"googlevideo_local_collection": s.app.GooglevideoCollectionStatus(),
 	}
 }

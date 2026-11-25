@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -123,5 +124,130 @@ func TestValidateNfqws2Args(t *testing.T) {
 	c := Parse(`NFQWS2_OPT="--new --filter-tcp=80;evil"`)
 	if err := c.WriteNfqws2Args(filepath.Join(t.TempDir(), "a")); err == nil {
 		t.Fatal("write must reject metachar")
+	}
+	if err := ValidateNfqws2Args([]string{"--qnum=300", "--new", "--new", "--filter-udp=443"}); err == nil {
+		t.Fatal("consecutive --new must be rejected")
+	}
+}
+
+func TestCollapseDuplicateNew(t *testing.T) {
+	raw := `NFQWS2_OPT="
+--new
+
+#Z2R_AUTO_STANDARD_4_END
+
+--new
+
+# комментарий перед следующим --new
+--new
+
+#Стратегии для UDP_YT
+--filter-udp=443
+"`
+	c := Parse(raw)
+	changed, err := c.CollapseDuplicateNew()
+	if err != nil {
+		t.Fatalf("CollapseDuplicateNew: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected consecutive --new across blank lines and comments to collapse")
+	}
+	opt, _ := c.NFQWS2Opt()
+	if !strings.Contains(opt, "#Z2R_AUTO_STANDARD_4_END") || !strings.Contains(opt, "# комментарий перед следующим --new") {
+		t.Fatalf("comments/markers lost:\n%s", opt)
+	}
+	if got := strings.Count(opt, "--new"); got != 2 {
+		t.Fatalf("expected 2 --new separators (leading + one before UDP_YT), got %d:\n%s", got, opt)
+	}
+	changedAgain, err := c.CollapseDuplicateNew()
+	if err != nil || changedAgain {
+		t.Fatalf("second CollapseDuplicateNew = (%v, %v), want (false, nil)", changedAgain, err)
+	}
+
+	inline := Parse("NFQWS2_OPT=\"\n--new --new --filter-udp=443\n--new\n\"\n")
+	if ch, err := inline.CollapseDuplicateNew(); err != nil || !ch {
+		t.Fatalf("inline collapse = (%v, %v), want (true, nil)", ch, err)
+	}
+	inOpt, _ := inline.NFQWS2Opt()
+	if !strings.Contains(inOpt, "\n--new --filter-udp=443\n") {
+		t.Fatalf("inline duplicate --new not normalized:\n%s", inOpt)
+	}
+	if ch, err := inline.CollapseDuplicateNew(); err != nil || ch {
+		t.Fatalf("single trailing --new should stay untouched: (%v, %v)", ch, err)
+	}
+
+	stock, err := Load(filepath.Join("..", "..", "assets", "config.default"))
+	if err != nil {
+		t.Fatalf("load config.default: %v", err)
+	}
+	if ch, err := stock.CollapseDuplicateNew(); err != nil || ch {
+		t.Fatalf("assets/config.default unexpectedly modified by CollapseDuplicateNew: (%v, %v)", ch, err)
+	}
+}
+
+func TestBuildNfqws2ArgsCollapsesConsecutiveNew(t *testing.T) {
+	c := Parse(`EMPTY=
+QNUM=210
+NFQWS2_OPT="
+--filter-tcp=443
+--new
+${EMPTY}
+--new
+--qnum=210
+--new
+--filter-udp=443
+"
+`)
+	args := c.BuildNfqws2Args()
+	for i := 1; i < len(args); i++ {
+		if args[i] == "--new" && args[i-1] == "--new" {
+			t.Fatalf("BuildNfqws2Args left duplicate --new: %v", args)
+		}
+	}
+	rt := c.BuildNfqws2RuntimeArgs("/opt/zapret2/lua", "nobody", "")
+	for i := 1; i < len(rt); i++ {
+		if rt[i] == "--new" && rt[i-1] == "--new" {
+			t.Fatalf("BuildNfqws2RuntimeArgs left duplicate --new after stripping --qnum: %v", rt)
+		}
+	}
+	if err := ValidateNfqws2Args(rt); err != nil {
+		t.Fatalf("runtime args invalid: %v\n%v", err, rt)
+	}
+}
+
+func TestReadNfqws2ArgsFile(t *testing.T) {
+	if _, err := ReadNfqws2ArgsFile(filepath.Join(t.TempDir(), "missing.args")); err == nil {
+		t.Fatal("expected error for missing file")
+	}
+
+	c := Parse(`NFQWS2_OPT="
+--new
+--filter-tcp=80
+--filter-udp=443
+"
+`)
+	p := filepath.Join(t.TempDir(), "nfqws2.args")
+	if err := c.WriteNfqws2Args(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadNfqws2ArgsFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := c.BuildNfqws2Args()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round-trip = %v, want %v", got, want)
+	}
+
+	withComments := filepath.Join(t.TempDir(), "commented.args")
+	if err := os.WriteFile(withComments, []byte("# comment\n\n  --qnum=300  \n--new\n# another\n--new\n--filter-udp=443\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ReadNfqws2ArgsFile(withComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateNfqws2Args(parsed); err == nil {
+		t.Fatalf("expected ReadNfqws2ArgsFile to preserve duplicate --new for validation: %v", parsed)
 	}
 }

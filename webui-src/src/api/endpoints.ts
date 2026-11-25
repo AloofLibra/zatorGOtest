@@ -190,6 +190,9 @@ export const applySetting = {
     api<ApplyResult & WssizeRampSettings>('/api/settings',
       formBody({ setting: 'wssize_ramp', value: settings.enabled ? '1' : '0',
         mode: settings.mode, scale: String(settings.scale) })),
+  wssize_refresh_ips: () =>
+    api<ApplyResult & { ipv4_status?: string; ipv4_count?: number; ipv4_generated?: string; ipv4_error?: string; sni_hosts_added?: number; sni_resolved_ips?: number; local_ips?: number }>(
+      '/api/settings', formBody({ setting: 'wssize_ramp', refresh_ips: '1' })),
   ifaces: (opts: { lan: string; wan: string } | { action: 'redetect' }) =>
     api<ApplyResult & IfacesSettings>('/api/settings',
       formBody('action' in opts

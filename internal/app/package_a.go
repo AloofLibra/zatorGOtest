@@ -122,6 +122,11 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 	} else if ok {
 		dirty = true
 	}
+	if ok, e := cfg.CollapseDuplicateNew(); e != nil {
+		return "", fmt.Errorf("санация --new: %w", e)
+	} else if ok {
+		dirty = true
+	}
 	if dirty {
 		if err := cfg.Save(); err != nil {
 			return "", err
@@ -129,6 +134,7 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 		defPath := filepath.Join(a.Paths.ConfigDir, "config.default")
 		if def, e := config.Load(defPath); e == nil {
 			_ = a.migratePackageA(def)
+			_, _ = def.CollapseDuplicateNew()
 			_ = def.Save()
 		}
 	}
