@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/orchestra"
 	"github.com/AloofLibra/zator/internal/provider"
@@ -621,4 +622,107 @@ func TestSupersweepEndpoints(t *testing.T) {
 	wantError(t, resp, out, 409, "Суперавтопрогон не запущен")
 	resp, out = e.post("/cgi-bin/settings.cgi", "setting", "supersweep", "value", "explode")
 	wantStatus(t, resp, 400)
+}
+
+func TestSettings160QuicBlobsH3CurlAndConntrack(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	// Create a QUIC blob candidate and verify GET tls_blob exposes quic_blobs and profile 5.
+	_ = os.WriteFile(filepath.Join(e.app.Paths.FakeDir, "quic_custom_1.bin"), []byte("quic"), 0o644)
+
+	resp, out := e.post("/api/settings", "setting", "tls_blob_profile", "profile", "5", "value", "quic_custom_1.bin")
+	wantOK(t, resp, out)
+	if out["restart_required"] != true {
+		t.Errorf("expected restart_required=true on slot change, got %v", out)
+	}
+
+	// Verify blob_override.tsv holds slot name `z2r_prof_5` (1.6.0 fix) AND blob_files.tsv holds filename.
+	bov, err := os.ReadFile(filepath.Join(e.app.Paths.StateOrchestraDir(), orchestra.BlobOverrideFileName))
+	if err != nil || !strings.Contains(string(bov), "5\tz2r_prof_5\n") {
+		t.Fatalf("blob_override.tsv missing 5\\tz2r_prof_5: %q err=%v", bov, err)
+	}
+	bfiles, err := os.ReadFile(e.app.Paths.BlobFilesTSV())
+	if err != nil || !strings.Contains(string(bfiles), "z2r_prof_5\tquic_custom_1.bin\n") {
+		t.Fatalf("blob_files.tsv missing z2r_prof_5 mapping: %q err=%v", bfiles, err)
+	}
+	if !strings.Contains(e.zapretConfig(), "--blob=z2r_prof_5:@/opt/zator/files/fake/quic_custom_1.bin") {
+		t.Error("config missing updated z2r_prof_5 blob")
+	}
+
+	// fake_default_tls must be rejected for profile 5.
+	resp, out = e.post("/api/settings", "setting", "tls_blob_profile", "profile", "5", "value", "fake_default_tls")
+	wantStatus(t, resp, 400)
+
+	// GET tls_blob lists quic_blobs and profile_blobs["5"].
+	tls := settingGetMap(t, e, "tls_blob")
+	pBlobs := tls["profile_blobs"].(map[string]any)
+	if pBlobs["5"] != "quic_custom_1.bin" {
+		t.Errorf("profile_blobs[5] = %v, want quic_custom_1.bin", pBlobs["5"])
+	}
+	qBlobs := tls["quic_blobs"].([]any)
+	foundQB := false
+	for _, x := range qBlobs {
+		if x == "quic_custom_1.bin" {
+			foundQB = true
+		}
+	}
+	if !foundQB {
+		t.Errorf("quic_blobs missing quic_custom_1.bin: %v", qBlobs)
+	}
+
+	// SuperSweep accepts quick_profile=5, include_quic=1, quic_rounds=3.
+	resp, out = e.post("/api/settings", "setting", "supersweep", "value", "start", "quick_profile", "5", "quic_rounds", "4")
+	wantOK(t, resp, out)
+	if e.sweeper.params.QuickProfile != 5 || e.sweeper.params.QUICRounds != 4 {
+		t.Errorf("quick_profile=5 params = %+v", e.sweeper.params)
+	}
+	_ = e.sweeper.Cancel()
+	resp, out = e.post("/api/settings", "setting", "supersweep", "value", "start", "include_quic", "1", "quic_rounds", "2")
+	wantOK(t, resp, out)
+	if !e.sweeper.params.IncludeQUIC || e.sweeper.params.QUICRounds != 2 {
+		t.Errorf("include_quic params = %+v", e.sweeper.params)
+	}
+	_ = e.sweeper.Cancel()
+
+	// GET h3_curl returns status object cleanly without error.
+	h3 := settingGetMap(t, e, "h3_curl")
+	if _, ok := h3["found"]; !ok {
+		t.Errorf("h3_curl missing found field: %v", h3)
+	}
+
+	// nfqws2ErrorsGet suppresses benign conntrack noise cleanly.
+	errLogPath := filepath.Join(os.TempDir(), "nfqws2_1.err")
+	prevErr, prevStat := os.ReadFile(errLogPath)
+	_ = os.WriteFile(errLogPath, []byte("circular_locked: conntrack is missing\nfatal startup error\n"), 0o644)
+	t.Cleanup(func() {
+		if prevStat == nil {
+			_ = os.WriteFile(errLogPath, prevErr, 0o644)
+		} else {
+			_ = os.Remove(errLogPath)
+		}
+	})
+	errsMap := settingGetMap(t, e, "nfqws2_errors")
+	if errsMap["path"] == errLogPath {
+		if errsMap["suppressed_conntrack"] != float64(1) || strings.Contains(errsMap["content"].(string), "conntrack is missing") {
+			t.Errorf("expected 1 suppressed conntrack line, got %v", errsMap)
+		}
+	}
+}
+
+func TestSettingsWssizeRefreshIPs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("# googlevideo IPv4; generated=2026-11-25T10:00:00Z; max_age=604800s\n8.8.8.8\n8.8.4.4\n1.1.1.1\n"))
+	}))
+	defer srv.Close()
+	t.Setenv(googlevideo.EnvListURL, srv.URL)
+
+	e := newEnv(t, envOpts{})
+	resp, out := e.post("/api/settings", "setting", "wssize_ramp", "refresh_ips", "1")
+	wantOK(t, resp, out)
+	if out["restarted"] != false || out["ipv4_count"] != float64(3) || out["ipv4_status"] != "fetched" {
+		t.Fatalf("unexpected refresh response: %v", out)
+	}
+	w := settingGetMap(t, e, "wssize_ramp")
+	if w["googlevideo_ips"] != float64(3) || w["googlevideo_feed_enabled"] != true || w["googlevideo_generated"] != "2026-11-25T10:00:00Z" {
+		t.Fatalf("wssize_ramp = %v", w)
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/AloofLibra/zator/internal/fetch"
@@ -242,7 +243,7 @@ func DownloadAndInstall(ctx context.Context, opts Options) (*Result, error) {
 		includeLua = true // по умолчанию всегда тянем upstream lua
 	}
 	err = fetch.SafeUntarFiltered(archive, stage, func(name string, mode os.FileMode) (string, bool) {
-		if mode.IsDir() || !mode.IsRegular() {
+		if mode.IsDir() || (!mode.IsRegular() && mode&os.ModeSymlink == 0) {
 			return "", false
 		}
 		return stageRel(name, archDir, includeLua)
@@ -275,14 +276,20 @@ func DownloadAndInstall(ctx context.Context, opts Options) (*Result, error) {
 }
 
 func preserveCustomInit(root, stage string) error {
-	for _, rel := range []string{"init.d/sysv/custom.d", "init.d/openwrt/custom.d"} {
+	for _, rel := range []string{"init.d/sysv/custom.d", "init.d/openwrt/custom.d", "init.d/openrc/custom.d"} {
 		src := filepath.Join(root, filepath.FromSlash(rel))
-		if st, err := os.Stat(src); os.IsNotExist(err) || err == nil && !st.IsDir() {
+		st, err := os.Lstat(src)
+		if os.IsNotExist(err) || err == nil && (st.Mode()&os.ModeSymlink != 0 || !st.IsDir()) {
 			continue
 		} else if err != nil {
 			return err
 		}
 		dst := filepath.Join(stage, filepath.FromSlash(rel))
+		if dstSt, err := os.Lstat(dst); err == nil && dstSt.Mode()&os.ModeSymlink != 0 {
+			continue
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
 		if err := os.RemoveAll(dst); err != nil {
 			return err
 		}
@@ -387,6 +394,12 @@ func commit(root, stage, archDir string, lua bool) error {
 			if err := os.Chmod(p, 0o755); err != nil {
 				return fmt.Errorf("zapret: %w", err)
 			}
+		}
+	}
+	for _, rel := range []string{"init.d/sysv/zapret2", "init.d/openrc/zapret2", "init.d/openwrt/zapret2"} {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if fileExists(p) {
+			_ = os.Chmod(p, 0o755)
 		}
 	}
 	return nil
@@ -571,9 +584,51 @@ func copyTree(src, dst string) error {
 			return err
 		}
 		target := filepath.Join(dst, rel)
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			if err := checkRelativeSymlink(src, p, link); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			_ = os.Remove(target)
+			if err := os.Symlink(link, target); err != nil {
+				if runtime.GOOS == "windows" {
+					resolved := filepath.Join(filepath.Dir(p), filepath.FromSlash(link))
+					if st, serr := os.Stat(resolved); serr == nil && st.Mode().IsRegular() {
+						return copyFile(resolved, target, st.Mode().Perm())
+					}
+				}
+				return err
+			}
+			return nil
+		}
 		if info.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 		return copyFile(p, target, info.Mode().Perm())
 	})
+}
+
+func checkRelativeSymlink(base, entryPath, link string) error {
+	if link == "" || strings.ContainsRune(link, 0) || strings.Contains(link, `\`) ||
+		strings.HasPrefix(link, "/") || (len(link) >= 2 && link[1] == ':') || filepath.IsAbs(link) {
+		return fmt.Errorf("%w: символическая ссылка %q -> %q", fetch.ErrUnsafePath, entryPath, link)
+	}
+	relEntry, err := filepath.Rel(base, entryPath)
+	if err != nil {
+		return fmt.Errorf("%w: %v", fetch.ErrUnsafePath, err)
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(relEntry), filepath.FromSlash(link)))
+	if resolved == ".." || strings.HasPrefix(resolved, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%w: символическая ссылка %q -> %q", fetch.ErrUnsafePath, entryPath, link)
+	}
+	return nil
 }

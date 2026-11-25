@@ -3,7 +3,16 @@
 Референс: ветка `feat/googlevideo-fix` репозитория AloofLibra/zator.
 Цель: весь управляющий функционал доступен через bootstrap CLI + Web UI.
 
-## Текущая контрольная точка (2026-11-16)
+## Текущая контрольная точка (паритет `zator 1.6.0`)
+
+- Поддержан полный функциональный паритет Go-порта с релизом `AloofLibra/zator 1.6.0`:
+  - **Пользовательские стратегии (`internal/customstrats`, `/api/custom`, `zator custom`, `#/custom-strats`):** CRUD, вкл/выкл, уплотнение ID, строгий whitelist-валидатор для блоков `tpl`/`p4`/`p5`/`p6`/`p7`, пакетный импорт (`blockcheck2`/`nfqws2` с склейкой комбо и отклонением `zapret1`), инжект в `#Z2R_CUSTOM_*` и автоматический ремап локов (`locked.tsv`, `locked.manual.tsv`, `scopes/mark_*.tsv`, `auto_locked.tsv`) через `orchestra.RemapLocks`.
+  - **Пользовательские блобы и `blob_files.tsv` (`internal/customblobs`, `/api/blobs`, `zator blobs`, `#/blobs-sni`):** загрузка бинарных файлов (1 Б..256 КиБ), CRUD с каскадным переименованием в `custom_strategies.tsv` и защитой от удаления при `refs > 0`; исправлена запись слота `z2r_prof_<N>` в `blob_override.tsv`, добавлен per-profile выбор QUIC/UDP-блоба профиля 5 (`--blob=z2r_prof_5`), и сохранность настроек через `blob_files.tsv` + `app.ReapplyConfigOverlays` при обновлении `config`.
+  - **SNI-пулы (`lua/sni-pool.lua`, `internal/orchestra/snipool.go`, `sni_zator.txt`/`sni_user.txt`):** ротация `rr`/`rand`, пины и пользовательские наборы с защитой от удаления используемых/проектных наборов; изоляция `sni-pool.lua` и `sni_pool.pin` внутри `NfqwsProbe`.
+  - **QUIC / HTTP/3 Профиль 5 (`internal/netcheck/{h3curl,quic_media}.go`, `internal/sweep`):** автодетект/установка/обновление/удаление внешнего `h3-curl` (`MarkinAlexander/z2r-curl-h3`), передача подписанных URL через временный `--config` (`0600`), live-фаза Профиля 5 в `SuperSweep` (`QuickProfile=5`, `IncludeQUIC`, `QUICRounds=1..5`) с гарантированным откатом лока в `defer`.
+  - **Прочее 1.5–1.6.0:** фильтрация шума `conntrack is missing` в `nfqws2_errors` (`suppressed_conntrack`) и Lua-дедупликация `conntrack`, бэкап/smart restore архивов формата как Go, так и `zator 1.6.0` (`extra_strats/cache/orchestra/*`, `sni_user.txt`, `custom_blob/*`, `Z2R_WSSIZE_RAMP_*`).
+
+Историческая контрольная точка от 2026-11-16 (апстрим `ead4db75` vs `feat/googlevideo-fix`):
 
 - `zatorGO` и `origin/zatorGO` совпадают на `ead4db75f7da49c9d8b36543490067baa5bce948`; Bash-эталон `feat/googlevideo-fix` проверен на `fe97cd9e64b1c7e6d811f54bce7e399acd264bd5`.
 - Тестовый OpenWrt `192.168.1.37` работает на `zator 0.1.40-test19`. Установленный бинарник SHA-256 `43826b56d66605f95feab31f3a4307b2e14deae27e18032e11090780c79055af`; `/opt/zator/state/deploy/version.env` связывает его с commit выше. `zator-webui`, `zator-strategy-validator` и `zapret2` запущены; локальный API отвечает. SHA `/opt/zapret2/config` — `9a995f37f98facc6726f405ed3f7038b19bdba0f70401c9c562858655e421da2`.

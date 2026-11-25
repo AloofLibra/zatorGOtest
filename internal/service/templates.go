@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -349,6 +350,98 @@ esac
 	return b.String(), nil
 }
 
+// RenderOpenRC формирует нативный скрипт службы OpenRC (#!/sbin/openrc-run).
+func RenderOpenRC(d TemplateData) (string, error) {
+	desc := strings.NewReplacer("\r", " ", "\n", " ").Replace(d.Description)
+	var b strings.Builder
+	b.Grow(768)
+	b.WriteString("#!/sbin/openrc-run\n# ")
+	b.WriteString(desc)
+	b.WriteString(" (создано zator)\ndescription=")
+	b.WriteString(shellQuote(desc))
+	b.WriteString("\ncommand=")
+	b.WriteString(shellQuote(d.Exe()))
+	if len(d.Command) > 1 {
+		b.WriteString("\ncommand_args=")
+		b.WriteString(openrcCommandArgs(d.Command[1:]))
+	}
+	b.WriteString("\ncommand_background=\"yes\"\npidfile=\"/run/${RC_SVCNAME}.pid\"")
+	if d.LogFile != "" {
+		qLog := shellQuote(d.LogFile)
+		b.WriteString("\noutput_log=")
+		b.WriteString(qLog)
+		b.WriteString("\nerror_log=")
+		b.WriteString(qLog)
+	}
+	b.WriteString("\n\ndepend() {\n\tneed net\n}\n\nstart_pre() {\n\tPATH=\"${PATH:+$PATH:}\"")
+	b.WriteString(shellQuote(d.Path))
+	b.WriteString("\n\texport PATH\n\tZATOR_ROOT=")
+	b.WriteString(shellQuote(d.ZatorRoot))
+	b.WriteString("\n\tZAPRET2_ROOT=")
+	b.WriteString(shellQuote(d.ZapretRoot))
+	b.WriteString("\n\texport ZATOR_ROOT ZAPRET2_ROOT")
+	if validReleaseRepository(d.ReleaseOwner, d.ReleaseRepo) {
+		b.WriteString("\n\tZATOR_OWNER=")
+		b.WriteString(shellQuote(d.ReleaseOwner))
+		b.WriteString("\n\tZATOR_REPO=")
+		b.WriteString(shellQuote(d.ReleaseRepo))
+		b.WriteString("\n\texport ZATOR_OWNER ZATOR_REPO")
+	}
+	if d.LogFile != "" {
+		b.WriteString("\n\tmkdir -p \"$(dirname \"$pidfile\")\" \"$(dirname \"$output_log\")\"")
+	} else {
+		b.WriteString("\n\tmkdir -p \"$(dirname \"$pidfile\")\"")
+	}
+	b.WriteString("\n}\n")
+	return b.String(), nil
+}
+
+// RenderOpenRCZapretWrapper формирует тонкий OpenRC-скрипт для zapret2 поверх
+// штатного init.d/sysv/zapret2 (запасной вариант при отсутствии init.d/openrc/zapret2).
+func RenderOpenRCZapretWrapper(sysvScript string) (string, error) {
+	if strings.TrimSpace(sysvScript) == "" {
+		return "", fmt.Errorf("service: пустой путь к SysV init zapret2")
+	}
+	if err := validatePath(sysvScript); err != nil {
+		return "", fmt.Errorf("service: %w", err)
+	}
+	q := shellQuote(filepath.ToSlash(sysvScript))
+	var b strings.Builder
+	b.Grow(384)
+	b.WriteString("#!/sbin/openrc-run\n# zapret2 (создано zator)\ndescription=\"zapret2 (nfqws2)\"\nextra_commands=\"restart_fw\"\n\ndepend() {\n\tneed net\n}\n\nstart() {\n\tebegin \"Starting zapret2\"\n\t")
+	b.WriteString(q)
+	b.WriteString(" start\n\teend $?\n}\n\nstop() {\n\tebegin \"Stopping zapret2\"\n\t")
+	b.WriteString(q)
+	b.WriteString(" stop\n\teend $?\n}\n\nstatus() {\n\t")
+	b.WriteString(q)
+	b.WriteString(" status\n}\n\nrestart_fw() {\n\tebegin \"Reloading zapret2 firewall\"\n\t")
+	b.WriteString(q)
+	b.WriteString(" restart-fw\n\teend $?\n}\n")
+	return b.String(), nil
+}
+
+func openrcCommandArgs(args []string) string {
+	q := make([]string, len(args))
+	for i, a := range args {
+		q[i] = shellQuote(a)
+	}
+	joined := strings.Join(q, " ")
+	var b strings.Builder
+	b.Grow(len(joined) + 4)
+	b.WriteByte('"')
+	for i := 0; i < len(joined); i++ {
+		switch c := joined[i]; c {
+		case '\\', '"', '$', '`':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
 // RenderKeeneticHook формирует ndm-хук netfilter.d.
 func RenderKeeneticHook(d TemplateData) (string, error) {
 	var b strings.Builder
@@ -412,7 +505,14 @@ func (m *manager) templateData(u Unit) TemplateData {
 	switch u {
 	case UnitZapret2:
 		d.Description = "zapret2 (nfqws2)"
-		d.Command = []string{slash(filepath.Join(m.cfg.Paths.ZapretRoot, "nfq2", "nfqws2")), "@" + slash(m.cfg.ArgsFile)}
+		// nfqws2 @file жёстко ограничен MAX_CONFIG_FILE_SIZE (16 КБ) в nfq2/nfqws.c,
+		// а полный nfqws2.args > 32 КБ — запускаем через zator exec-nfqws2 (execve → argv).
+		d.Command = []string{
+			slash(m.cfg.ZatorBin),
+			"exec-nfqws2",
+			slash(filepath.Join(m.cfg.Paths.ZapretRoot, "nfq2", "nfqws2")),
+			slash(m.cfg.ArgsFile),
+		}
 		d.Start = 90
 		if m.cfg.FWHook != "" {
 			d.WssizeBin = slash(m.cfg.ZatorBin)
@@ -432,8 +532,11 @@ func (m *manager) templateData(u Unit) TemplateData {
 		d.ReleaseRepo = os.Getenv("ZATOR_REPO")
 	}
 	runDir := "/var/run"
-	if m.cfg.Backend == BackendEntware {
+	switch m.cfg.Backend {
+	case BackendEntware:
 		runDir = "/opt/var/run"
+	case BackendOpenRC:
+		runDir = "/run"
 	}
 	d.PIDFile = runDir + "/" + string(u) + ".pid"
 	d.LogFile = slash(filepath.Join(os.TempDir(), "zator", "logs", string(u)+".log"))

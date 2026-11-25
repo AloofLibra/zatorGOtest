@@ -176,6 +176,8 @@ type TargetResult struct {
 	Download    *Download     `json:"download"` // nil -> null (этап пропущен)
 	// Media — классификация googlevideo mid-stream / tiny (Package B); nil если не применимо.
 	Media *MediaProbe `json:"media,omitempty"`
+	// QUIC — статистика HTTP/3 проверки медиапотока (профиль 5); nil если не применимо.
+	QUIC *QUICProbeSummary `json:"quic,omitempty"`
 }
 
 // CheckResponse — тело ответа check.cgi.

@@ -6,13 +6,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/AloofLibra/zator/internal/paths"
 	"github.com/AloofLibra/zator/internal/platform"
+	"github.com/AloofLibra/zator/internal/sysprofile"
 )
 
 // Unit — управляемая служба.
@@ -40,6 +43,7 @@ type Backend string
 
 const (
 	BackendSystemd Backend = "systemd"
+	BackendOpenRC  Backend = "openrc"
 	BackendProcd   Backend = "procd"
 	BackendEntware Backend = "entware"
 	BackendSysV    Backend = "sysv"
@@ -61,6 +65,8 @@ func DetectBackend(p platform.Platform) Backend {
 	switch p.InitSystem {
 	case platform.InitSystemd:
 		return BackendSystemd
+	case platform.InitOpenRC:
+		return BackendOpenRC
 	case platform.InitProcd:
 		return BackendProcd
 	case platform.InitEntware:
@@ -133,10 +139,36 @@ type Runner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
+const maxExecOutputBytes = 64 << 10
+
 type execRunner struct{}
 
 func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	f, err := os.CreateTemp("", "zator-svc-*")
+	if err != nil {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.WaitDelay = 2 * time.Second
+		return cmd.CombinedOutput()
+	}
+	tmpName := f.Name()
+	defer func() {
+		_ = f.Close()
+		_ = os.Remove(tmpName)
+	}()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = f
+	cmd.Stderr = f
+	runErr := cmd.Run()
+
+	if _, serr := f.Seek(0, io.SeekStart); serr != nil {
+		return nil, runErr
+	}
+	out, rerr := io.ReadAll(io.LimitReader(f, maxExecOutputBytes))
+	if rerr != nil {
+		return nil, runErr
+	}
+	return out, runErr
 }
 
 // ExecRunner — Runner на os/exec.
@@ -170,8 +202,12 @@ type Config struct {
 
 // New создаёт Controller для платформы.
 func New(cfg Config) (Controller, error) {
+	var prof sysprofile.Profile
 	if cfg.Backend == "" {
 		cfg.Backend = DetectBackend(cfg.Platform)
+		prof = sysprofile.Resolve(cfg.Platform, sysprofile.Options{Root: cfg.Root})
+	} else {
+		prof = profileForBackend(cfg.Backend, cfg.Platform.Kind, cfg.Root)
 	}
 	if cfg.Hook == "" {
 		cfg.Hook = DetectHook(cfg.Platform)
@@ -200,10 +236,16 @@ func New(cfg Config) (Controller, error) {
 		}
 	}
 
-	m := &manager{cfg: cfg, scan: Scanner{ProcRoot: cfg.ProcRoot, Runner: cfg.Runner}}
+	m := &manager{
+		cfg:     cfg,
+		profile: prof,
+		scan:    Scanner{ProcRoot: cfg.ProcRoot, Runner: cfg.Runner},
+	}
 	switch cfg.Backend {
 	case BackendSystemd:
 		m.impl = systemdBackend{m}
+	case BackendOpenRC:
+		m.impl = openrcBackend{m}
 	case BackendProcd:
 		m.impl = procdBackend{m}
 	case BackendEntware:
@@ -214,6 +256,23 @@ func New(cfg Config) (Controller, error) {
 		return nil, fmt.Errorf("service: неизвестный backend %q", cfg.Backend)
 	}
 	return m, nil
+}
+
+func profileForBackend(b Backend, kind platform.Kind, root string) sysprofile.Profile {
+	var initSys platform.InitSystem
+	switch b {
+	case BackendSystemd:
+		initSys = platform.InitSystemd
+	case BackendOpenRC:
+		initSys = platform.InitOpenRC
+	case BackendProcd:
+		initSys = platform.InitProcd
+	case BackendEntware:
+		initSys = platform.InitEntware
+	case BackendSysV:
+		initSys = platform.InitSysV
+	}
+	return sysprofile.ResolveForInit(initSys, kind, sysprofile.Options{Root: root})
 }
 
 // validatePath отвергает пути, которые нельзя безопасно подставить в unit/init-файл.
@@ -234,9 +293,10 @@ type backendImpl interface {
 }
 
 type manager struct {
-	cfg  Config
-	impl backendImpl
-	scan Scanner
+	cfg     Config
+	profile sysprofile.Profile
+	impl    backendImpl
+	scan    Scanner
 }
 
 func (m *manager) Backend() Backend { return m.cfg.Backend }
@@ -324,6 +384,46 @@ func (m *manager) run(ctx context.Context, name string, args ...string) error {
 			return fmt.Errorf("service: %s %s: %w: %s", name, strings.Join(args, " "), err, msg)
 		}
 		return fmt.Errorf("service: %s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+func (m *manager) runSpec(ctx context.Context, spec sysprofile.CmdSpec) error {
+	return m.run(ctx, spec.Name, spec.Args...)
+}
+
+func (m *manager) runOp(ctx context.Context, op sysprofile.CommandOp) error {
+	err := m.runSpec(ctx, op.Primary)
+	if err == nil {
+		return nil
+	}
+	if op.Fallback != nil {
+		err2 := m.runSpec(ctx, *op.Fallback)
+		if err2 == nil {
+			return nil
+		}
+		if op.BestEffort {
+			return nil
+		}
+		if op.IgnoreNotFound && errors.Is(err, exec.ErrNotFound) && errors.Is(err2, exec.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("%s: %v; %s: %w", op.Primary.Name, err, op.Fallback.Name, err2)
+	}
+	if op.BestEffort {
+		return nil
+	}
+	if op.IgnoreNotFound && errors.Is(err, exec.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+func (m *manager) runOps(ctx context.Context, ops []sysprofile.CommandOp) error {
+	for _, op := range ops {
+		if err := m.runOp(ctx, op); err != nil {
+			return err
+		}
 	}
 	return nil
 }

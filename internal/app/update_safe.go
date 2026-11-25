@@ -180,19 +180,10 @@ func (a *App) VerifyAfterUpdate() error {
 	argsPath := filepath.Join(a.Paths.ZapretRoot, "nfqws2.args")
 	if st, err := os.Stat(argsPath); err != nil || st.Size() == 0 {
 		soft = append(soft, "нет или пуст nfqws2.args")
-	} else if raw, err := os.ReadFile(argsPath); err != nil {
+	} else if toks, err := config.ReadNfqws2ArgsFile(argsPath); err != nil {
 		soft = append(soft, "не читается nfqws2.args")
-	} else {
-		var toks []string
-		for _, ln := range strings.Split(string(raw), "\n") {
-			ln = strings.TrimSpace(ln)
-			if ln != "" && !strings.HasPrefix(ln, "#") {
-				toks = append(toks, ln)
-			}
-		}
-		if err := config.ValidateNfqws2Args(toks); err != nil {
-			soft = append(soft, "nfqws2.args: "+err.Error())
-		}
+	} else if err := config.ValidateNfqws2Args(toks); err != nil {
+		soft = append(soft, "nfqws2.args: "+err.Error())
 	}
 	_, _ = deploy.ReadVersion(a.Paths) // version.env опционален
 

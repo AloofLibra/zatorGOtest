@@ -11,7 +11,7 @@ import {
   fallbackSettings, ifacesSettings, modeSettings, ports, provider, settingsLoaded, telemetrySettings,
   tlsBlobSettings, udpGamesSettings, wgBlobSettings, wgStateSettings, wssizeRampSettings,
   refreshFallbackSettings, refreshIfacesSettings, refreshModeSetting, refreshPorts, refreshProvider,
-  refreshTlsBlobSettings, refreshUdpGamesSettings, refreshWgBlobSettings, refreshWgStateSettings,
+  refreshUdpGamesSettings, refreshWgBlobSettings, refreshWgStateSettings,
   refreshWssizeRampSettings,
 } from '../stores/settings'
 import type { ClientScopeMapping, Recommendations, WssizeRampSettings } from '../api/types'
@@ -20,6 +20,8 @@ import { fetchAndApplyState } from '../stores/state'
 import { refreshAll, scopes, status } from '../stores/status'
 import { announceRestart, restartSuffix, showToast } from '../stores/toast'
 import { applyUpdate, refreshUpdateCheck, updateCheckError, updateCheckResult, updateCheckState, updateMode } from '../stores/updates'
+import ZapretVersionManager from '../components/ui/ZapretVersionManager.vue'
+import { loadZapretReleases, zapretReleasesState } from '../stores/zapretReleases'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,6 +39,7 @@ const sections = [
   { id: 'sec-ifaces', label: 'Интерфейсы', group: 'Сеть' },
   { id: 'sec-ports', label: 'Порты', group: 'Сеть' },
   { id: 'sec-scopes', label: 'Scopes', group: 'Сеть' },
+  { id: 'sec-zapret', label: 'Версия zapret2', group: 'Сервис' },
   { id: 'sec-config', label: 'Конфиг', group: 'Сервис' },
   { id: 'sec-errors', label: 'Ошибки', group: 'Сервис' },
 ]
@@ -45,7 +48,7 @@ const settingGroups = [
   { id: 'grp-bypass', key: 'bypass', title: 'Обход DPI', desc: 'Режимы стратегий, TLS/WG blob и wssize.', first: 'sec-modes' },
   { id: 'grp-net', key: 'network', title: 'Сеть', desc: 'Firewall, интерфейсы WAN/LAN, порты NFQUEUE и client scopes.', first: 'sec-firewall' },
   { id: 'grp-system', key: 'system', title: 'Система', desc: 'Обновления, провайдер, телеметрия и резервные копии.', first: 'sec-updates' },
-  { id: 'grp-svc', key: 'diagnostics', title: 'Диагностика', desc: 'Сырой конфиг zapret2 и журнал ошибок.', first: 'sec-config' },
+  { id: 'grp-svc', key: 'diagnostics', title: 'Диагностика', desc: 'Версия zapret2, сырой конфиг и журнал ошибок.', first: 'sec-zapret' },
 ]
 
 const modes = [
@@ -81,15 +84,6 @@ const ifaceOptions = computed(() => {
   }
   return names
 })
-
-const tlsMode = ref('fake_default_tls')
-const tlsBlob = ref('')
-watch(tlsBlobSettings, (t) => {
-  if (!t) return
-  // API отдаёт fake_default_tls | maxru | mixed — в UI: встроенный vs файл.
-  tlsMode.value = t.current_mode === 'fake_default_tls' ? 'fake_default_tls' : 'custom'
-  tlsBlob.value = t.current_blob || ''
-}, { immediate: true })
 
 const wgOn = ref(false)
 const wgBlob = ref('')
@@ -143,7 +137,7 @@ watch(scopes, (s) => {
 const configText = ref('')
 const configPath = ref('')
 const configLoaded = ref(false)
-const errors = ref({ available: false, content: '', path: '', lines: 0 })
+const errors = ref({ available: false, content: '', path: '', lines: 0, suppressed_conntrack: 0 })
 const wssizeOn = ref(false)
 const wssizeMode = ref<WssizeRampSettings['mode']>('full')
 const wssizeScale = ref(1)
@@ -197,26 +191,6 @@ async function saveSelect(setting: string, value: string, label: string) {
       const res = await api('/api/settings', formBody({ setting, value }))
       showToast(`${label}: ${value}.${restartSuffix(res)}`)
       await fetchAndApplyState()
-    })
-  } catch (e) {
-    showToast((e as Error).message, 'error')
-  }
-}
-
-async function saveTls() {
-  if (tlsMode.value !== 'fake_default_tls' && !tlsBlob.value) {
-    showToast('Выберите файл TLS blob', 'error')
-    return
-  }
-  try {
-    await withBusy('tls', async () => {
-      announceRestart()
-      const res = tlsMode.value === 'fake_default_tls'
-        ? await applySetting.tls_blob('fake_default_tls')
-        : await applySetting.tls_blob(tlsBlob.value)
-      showToast(`TLS blob сохранён.${restartSuffix(res)}`)
-      await refreshTlsBlobSettings()
-      await refreshAll()
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -414,6 +388,7 @@ async function loadErrors() {
         content: data.content || '',
         path: data.path || '',
         lines: data.lines || 0,
+        suppressed_conntrack: data.suppressed_conntrack || 0,
       }
     })
   } catch (e) {
@@ -449,6 +424,26 @@ async function saveWssize() {
       showToast(`wssize_ramp сохранён.${restartSuffix(res)}`)
       await refreshWssizeRampSettings()
       await refreshAll()
+    })
+  } catch (e) {
+    showToast((e as Error).message, 'error')
+  }
+}
+
+async function refreshWssizeIps() {
+  try {
+    await withBusy('wssize-refresh', async () => {
+      const res = await applySetting.wssize_refresh_ips()
+      const parts = [`Googlevideo IP: ${res.ipv4_count ?? 0}`]
+      if ((res.local_ips ?? 0) > 0 || (res.sni_resolved_ips ?? 0) > 0) {
+        parts.push(`локально: ${res.local_ips ?? 0}`)
+      }
+      if (res.ipv4_error) {
+        showToast(`${parts.join(', ')} (feed: ${res.ipv4_error})`, 'warning')
+      } else {
+        showToast(parts.join(', '))
+      }
+      await refreshWssizeRampSettings()
     })
   } catch (e) {
     showToast((e as Error).message, 'error')
@@ -588,7 +583,7 @@ const panelAliases: Record<string, string> = {
   firewall: 'sec-firewall', fwtype: 'sec-firewall', flowoffload: 'sec-firewall',
   ifaces: 'sec-ifaces', iface: 'sec-ifaces', interfaces: 'sec-ifaces',
   ports: 'sec-ports', scopes: 'sec-scopes', 'client-scope': 'sec-scopes',
-  config: 'sec-config', errors: 'sec-errors',
+  zapret: 'sec-zapret', 'zapret-version': 'sec-zapret', config: 'sec-config', errors: 'sec-errors',
 }
 
 function panelIdFromRoute(): string {
@@ -602,6 +597,12 @@ const activeCategory = computed(() => {
   const group = section?.group
   return group === 'Обход' ? 'bypass' : group === 'Сеть' ? 'network' : group === 'Сервис' ? 'diagnostics' : 'system'
 })
+
+watch(activeCategory, (cat) => {
+  if (cat === 'diagnostics' && zapretReleasesState.value === 'idle') {
+    void loadZapretReleases(false)
+  }
+}, { immediate: true })
 
 function goSection(id: string, ev?: Event) {
   ev?.preventDefault()
@@ -770,25 +771,16 @@ onMounted(async () => {
       </section>
 
       <section id="sec-tls" class="panel">
-        <div class="panel-h"><h2>TLS blob</h2><span class="chip">{{ tlsBlobSettings?.current_mode || '—' }}</span></div>
-        <p class="panel-d">Глобальный blob ClientHello для TLS-фейков.</p>
-        <div class="grid-2">
-          <label class="field">
-            <span>Режим</span>
-            <select v-model="tlsMode" :disabled="busyActive">
-              <option value="fake_default_tls">fake_default_tls (встроенный)</option>
-              <option value="custom">файл maxru</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Файл</span>
-            <select v-model="tlsBlob" :disabled="busyActive || tlsMode === 'fake_default_tls'">
-              <option v-for="b in (tlsBlobSettings?.available_blobs || [])" :key="b" :value="b">{{ b }}</option>
-            </select>
-          </label>
+        <div class="panel-h">
+          <h2>TLS / QUIC блобы и SNI</h2>
+          <span class="chip">{{ tlsBlobSettings?.current_mode || '—' }}</span>
         </div>
-        <div class="actions" style="margin-top:0.8rem">
-          <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'tls' }" @click="saveTls">Сохранить TLS</button>
+        <p class="panel-d">
+          Глобальный TLS blob: <code>{{ tlsBlobSettings?.current_blob || tlsBlobSettings?.current_mode || '—' }}</code>.
+          Управление глобальным и профильными блобами (включая QUIC/5), режимами фейков, SNI-пулом и загрузкой бинарных файлов вынесено в отдельный раздел.
+        </p>
+        <div class="actions">
+          <router-link class="btn-link" to="/blobs-sni">Открыть «Блобы и SNI» →</router-link>
         </div>
       </section>
 
@@ -820,8 +812,8 @@ onMounted(async () => {
         <p v-if="!wssizeRampSettings" class="panel-d">Настройка недоступна в этой сборке / ещё не загружена.</p>
         <template v-else>
           <p class="panel-d">
-            Googlevideo IP: {{ wssizeRampSettings.googlevideo_ips }} ·
-            локальный DNS-сбор: {{ wssizeRampSettings.googlevideo_local_collection }}
+            Googlevideo IP: {{ wssizeRampSettings.googlevideo_ips }}<template v-if="(wssizeRampSettings.googlevideo_local_ips ?? 0) > 0"> · локально: {{ wssizeRampSettings.googlevideo_local_ips }}</template><template v-if="(wssizeRampSettings.googlevideo_hosts ?? 0) > 0"> · SNI-хостов: {{ wssizeRampSettings.googlevideo_hosts }}</template> ·
+            локальный DNS-сбор: {{ wssizeRampSettings.googlevideo_local_collection }}<template v-if="wssizeRampSettings.googlevideo_generated"> · от {{ wssizeRampSettings.googlevideo_generated.slice(0, 16).replace('T', ' ') }} UTC</template>
           </p>
           <div class="grid-2">
             <label class="toggle"><input v-model="wssizeOn" type="checkbox" :disabled="busyActive"><span>Включить wssize_ramp</span></label>
@@ -839,6 +831,7 @@ onMounted(async () => {
           </div>
           <div class="actions" style="margin-top:0.8rem">
             <button type="button" class="primary" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'wssize' }" @click="saveWssize">Сохранить</button>
+            <button type="button" class="ghost" :disabled="busyActive" :class="{ 'is-busy': busyButton === 'wssize-refresh' }" @click="refreshWssizeIps">Обновить IP</button>
           </div>
         </template>
       </section>
@@ -965,8 +958,12 @@ onMounted(async () => {
       <div class="settings-category" v-show="activeCategory === 'diagnostics'">
       <div id="grp-svc" class="settings-group">
         <h2>Диагностика</h2>
-        <p>Сырой конфиг zapret2 и журнал ошибок.</p>
+        <p>Версия zapret2, сырой конфиг и журнал ошибок.</p>
       </div>
+
+      <section id="sec-zapret" class="panel">
+        <ZapretVersionManager />
+      </section>
 
       <section id="sec-config" class="panel">
         <div class="panel-h">
@@ -989,7 +986,12 @@ onMounted(async () => {
         <p class="panel-d">Последние сообщения демона nfqws2.</p>
         <p v-if="!errors.available" class="panel-d">Журнал пуст или не найден.</p>
         <template v-else>
-          <p class="panel-d"><code>{{ errors.path }}</code> · строк: {{ errors.lines }}</p>
+          <p class="panel-d">
+            <code>{{ errors.path }}</code> · строк: {{ errors.lines }}
+            <span v-if="errors.suppressed_conntrack > 0" class="chip" style="margin-left:0.4rem">
+              скрыто conntrack-сообщений: {{ errors.suppressed_conntrack }}
+            </span>
+          </p>
           <pre class="error-log">{{ errors.content || '(пусто)' }}</pre>
         </template>
       </section>

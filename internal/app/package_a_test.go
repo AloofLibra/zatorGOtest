@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/AloofLibra/zator/internal/config"
+	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/paths"
 	"github.com/AloofLibra/zator/internal/platform"
 )
@@ -113,6 +114,7 @@ NFQWS2_OPT="
 }
 
 func TestApplyZapretRuntimeWritesArgs(t *testing.T) {
+	t.Setenv(googlevideo.EnvListURL, "off")
 	root := t.TempDir()
 	p := paths.Paths{
 		ZatorRoot:  root,
@@ -175,5 +177,63 @@ NFQWS2_OPT="
 	}
 	if v, _ := live.Get("Z2R_WSSIZE_RAMP_SKIP"); v != "" {
 		t.Fatalf("live SKIP=%q", v)
+	}
+}
+
+func TestApplyZapretRuntimeCollapsesDuplicateNew(t *testing.T) {
+	t.Setenv(googlevideo.EnvListURL, "off")
+	root := t.TempDir()
+	p := paths.Paths{
+		ZatorRoot:  root,
+		StateDir:   filepath.Join(root, "state"),
+		ConfigDir:  filepath.Join(root, "config"),
+		ZapretRoot: filepath.Join(root, "zapret2"),
+		LuaDir:     filepath.Join(root, "lua"),
+	}
+	p.ZapretConfig = filepath.Join(p.ZapretRoot, "config")
+	if err := os.MkdirAll(p.ZapretRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := NewWith(p, platform.Platform{})
+
+	cfg := config.Parse(`Z2R_WSSIZE_RAMP_ENABLE=1
+NFQWS2_OPT="
+#Z2R_AUTO_STANDARD_BEGIN
+--filter-tcp=443
+#Z2R_AUTO_STANDARD_4_END
+
+--new
+
+--new
+
+--filter-udp=443
+"
+`)
+	cfg.SetPath(p.ZapretConfig)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ApplyZapretRuntime(); err != nil {
+		t.Fatalf("ApplyZapretRuntime: %v", err)
+	}
+
+	live, err := config.Load(p.ZapretConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt, _ := live.NFQWS2Opt()
+	if strings.Contains(opt, "--new\n\n--new") {
+		t.Fatalf("live config still contains duplicate --new:\n%s", opt)
+	}
+	if ch, err := live.CollapseDuplicateNew(); err != nil || ch {
+		t.Fatalf("expected live config to have no remaining duplicate --new: (%v, %v)", ch, err)
+	}
+
+	toks, err := config.ReadNfqws2ArgsFile(filepath.Join(p.ZapretRoot, "nfqws2.args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ValidateNfqws2Args(toks); err != nil {
+		t.Fatalf("generated nfqws2.args invalid: %v", err)
 	}
 }

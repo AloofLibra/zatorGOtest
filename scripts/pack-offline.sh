@@ -49,7 +49,7 @@ done
 cp "$ROOT/dist"/zator-linux-* "$OUT/vendor/" 2>/dev/null || true
 
 # zapret2 в vendor/ — установка без GitHub (ZATOR_VENDOR / LocalArchive).
-ZAPRET_VER="${ZAPRET2_VERSION:-1.0.7-reasm-fix}"
+ZAPRET_VER="${ZAPRET2_VERSION:-1.0.8-reasm-fix}"
 ZAPRET_ASSET="zapret2-v${ZAPRET_VER}.tar.gz"
 ZAPRET_URL="${ZAPRET2_ARCHIVE_URL:-https://github.com/MarkinAlexander/zapret2/releases/download/v${ZAPRET_VER}/${ZAPRET_ASSET}}"
 if [[ -f "$ROOT/vendor/$ZAPRET_ASSET" && ! -f "$OUT/vendor/$ZAPRET_ASSET" ]]; then

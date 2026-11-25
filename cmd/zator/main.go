@@ -44,6 +44,10 @@ const usage = `zator — управление zapret2 через Web UI
   restore     smart-восстановление из backup
   rollback    восстановить последний pre-update backup
   blockcheck2 перебор HTTPS TLS 1.2/1.3 списков zapret2
+  custom      свои стратегии (list|add|edit|enable|disable|delete|import|apply)
+  blobs       свои блобы (list|add|edit|delete|apply)
+  sni         управление SNI-пулом и наборами (status|pin|pool-set|pool-custom|pool-clear|policy|set-write|set-delete)
+  h3-curl     управление curl HTTP/3 для Профиля 5 (status|install|update|remove)
   install     установить zator (каталоги, Web UI, конфигурация)
   update      обновить ресурсы и бинарник с GitHub (-force — всегда скачать)
   uninstall   удалить runtime (-y); --purge сносит весь каталог
@@ -83,6 +87,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdService(rest, stdout, stderr)
 	case "wssize-hook":
 		return cmdWssizeHook(rest, stdout, stderr)
+	case "exec-nfqws2":
+		return cmdExecNfqws2(rest, stderr)
 	case "locks":
 		return cmdLocks(rest, stdout, stderr)
 	case "restore":
@@ -91,6 +97,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRollback(rest, stdout, stderr)
 	case "blockcheck2":
 		return cmdBlockcheck(rest, stdout, stderr)
+	case "custom":
+		return cmdCustom(rest, stdout, stderr)
+	case "blobs":
+		return cmdBlobs(rest, stdout, stderr)
+	case "sni":
+		return cmdSNI(rest, stdout, stderr)
+	case "h3-curl":
+		return cmdH3Curl(rest, stdout, stderr)
 	case "install":
 		return cmdInstall(rest, stdout, stderr)
 	case "update":

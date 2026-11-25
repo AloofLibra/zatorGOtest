@@ -23,13 +23,17 @@ const error = ref('')
 const runScope = ref(props.scope || 'default')
 const domainsText = ref('')
 const tlsPref = ref('any')
+const includeQuic = ref(false)
+const quicRounds = ref(2)
 const quickProfile = ref(1)
 const quickAddressDefaults: Record<number, string> = {
   1: 'www.youtube.com',
   2: 'rr2---sn-4g5ednly.googlevideo.com',
   3: 'xhamster.com',
   4: 'discord.com',
+  5: '',
 }
+const showQuicOptions = computed(() => includeQuic.value || quickProfile.value === 5)
 const quickAddress = ref(quickAddressDefaults[quickProfile.value])
 const states = {
   idle: 'Нет прогона', starting: 'Подготовка', running: 'Выполняется', applying: 'Применение результатов',
@@ -118,7 +122,9 @@ function visibilityChanged() {
 async function startRun() {
   const ok = await confirmDialog({
     title: 'Запустить суперсвип?',
-    message: 'Прогон подберёт стратегии для профилей и доменов РКН, затем применит победителей. Это может занять несколько минут.',
+    message: includeQuic.value
+      ? 'Прогон подберёт стратегии для профилей 1–4, доменов РКН и в конце протестирует профиль 5 (QUIC) на живом nfqws2. Требуется h3-curl.'
+      : 'Прогон подберёт стратегии для профилей и доменов РКН, затем применит победителей. Это может занять несколько минут.',
   })
   if (!ok) return
   try {
@@ -127,6 +133,8 @@ async function startRun() {
         scope: runScope.value || 'default',
         domain: domainsText.value,
         tls_pref: tlsPref.value,
+        include_quic: includeQuic.value,
+        quic_rounds: includeQuic.value ? quicRounds.value : undefined,
       })
       showToast('Суперсвип запущен')
       emit('started')
@@ -139,13 +147,15 @@ async function startRun() {
 }
 
 async function startQuickRun() {
-  if (!quickAddress.value.trim()) {
+  if (quickProfile.value !== 5 && !quickAddress.value.trim()) {
     showToast('Укажите адрес для быстрого подбора', 'error')
     return
   }
   const ok = await confirmDialog({
     title: 'Запустить быстрый подбор?',
-    message: `Будут проверены стратегии профиля ${quickProfile.value} для ${quickAddress.value.trim()}; зелёный победитель будет применён автоматически.`,
+    message: quickProfile.value === 5
+      ? `Будут проверены QUIC/HTTP3-стратегии профиля 5 на живом nfqws2 (раундов: ${quicRounds.value}); победитель применится автоматически.`
+      : `Будут проверены стратегии профиля ${quickProfile.value} для ${quickAddress.value.trim()}; зелёный победитель будет применён автоматически.`,
   })
   if (!ok) return
   try {
@@ -155,6 +165,7 @@ async function startQuickRun() {
         tls_pref: tlsPref.value,
         quick_profile: quickProfile.value,
         address: quickAddress.value,
+        quic_rounds: quickProfile.value === 5 ? quicRounds.value : undefined,
       })
       showToast('Быстрый подбор запущен')
       emit('started')
@@ -213,7 +224,7 @@ defineExpose({ refresh })
           :class="{ 'is-busy': busyButton === 'ss-start' }" @click="startRun">
           Запустить
         </button>
-        <button type="button" :disabled="busyActive || active || !quickAddress.trim()"
+        <button type="button" :disabled="busyActive || active || (quickProfile !== 5 && !quickAddress.trim())"
           :class="{ 'is-busy': busyButton === 'quick-start' }" @click="startQuickRun">
           Быстрый подбор
         </button>
@@ -254,13 +265,28 @@ defineExpose({ refresh })
           <option :value="2">Googlevideo media (2)</option>
           <option :value="3">Домен РКН (3)</option>
           <option :value="4">Discord (4)</option>
+          <option :value="5">YouTube QUIC / HTTP3 (5)</option>
         </select>
       </label>
       <label class="field">
         <span>Адрес проверки</span>
-        <input v-model="quickAddress" :disabled="busyActive || active" placeholder="www.youtube.com" />
+        <input v-model="quickAddress" :disabled="busyActive || active"
+          :placeholder="quickProfile === 5 ? 'Необязательно (видеопоток YouTube QUIC)' : 'www.youtube.com'" />
+      </label>
+      <label class="toggle">
+        <input v-model="includeQuic" type="checkbox" :disabled="busyActive || active">
+        <span>Включить QUIC (профиль 5, live-режим)</span>
+      </label>
+      <label v-if="showQuicOptions" class="field">
+        <span>Раунды QUIC (1–5)</span>
+        <select v-model.number="quicRounds" :disabled="busyActive || active">
+          <option v-for="n in [1, 2, 3, 4, 5]" :key="n" :value="n">{{ n }}</option>
+        </select>
       </label>
     </div>
+    <p v-if="showQuicOptions" class="quic-live-warn" role="note">
+      QUIC-подбор (профиль 5) временно переключает реальный лок на живом nfqws2 и требует установленный <code>h3-curl</code> (см. карточку Профиля 5 во вкладке «Стратегии»).
+    </p>
 
     <p v-if="error" class="supersweep-error" role="alert">Не удалось обновить суперсвип: {{ error }}
       <span v-if="data"> Показаны последние полученные данные — они могут быть устаревшими.</span>
@@ -333,6 +359,13 @@ defineExpose({ refresh })
 .supersweep-ok { color: var(--ok); }
 .supersweep-warn { color: var(--warn); }
 .supersweep-error, .supersweep-fail { color: var(--danger); }
+.quic-live-warn {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  border-radius: var(--radius-sm);
+  color: var(--warn) !important;
+}
 .supersweep-panel summary { cursor: pointer; margin-top: 0.65rem; }
 .supersweep-domains li { margin: 0.45rem 0; }
 </style>

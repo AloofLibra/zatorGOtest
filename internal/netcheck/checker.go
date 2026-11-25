@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/AloofLibra/zator/internal/paths"
 )
 
 // Адреса и метки целей из api_check/profile_check_json.
@@ -60,6 +62,12 @@ type Checker struct {
 	RedirectorURL string
 	// DNS — настройки DNS-серий для профиля 10.
 	DNS DNSSeriesConfig
+
+	// Параметры HTTP/3-проверки профиля 5 (QUIC).
+	Paths      paths.Paths
+	H3Env      H3Env
+	QUICRunner QUICRunner
+	QUICRounds int
 }
 
 // NewChecker создаёт Checker с заданными опциями.
@@ -240,7 +248,9 @@ func (c *Checker) CheckProfile(ctx context.Context, profile int) CheckResponse {
 // + при fail контроль YouTube.
 func (c *Checker) CheckProfileOpts(ctx context.Context, profile int, opts ProfileCheckOptions) CheckResponse {
 	switch profile {
-	case 5, 6:
+	case 5:
+		return c.checkProfileQUIC(ctx, opts)
+	case 6:
 		return CheckResponse{Results: []TargetResult{}, Message: MessageUDPProfile}
 	case 10:
 		return CheckResponse{Results: []TargetResult{c.CheckDNSAntispoof(ctx)}}
@@ -293,6 +303,48 @@ func (c *Checker) checkProfileGooglevideo(ctx context.Context, opts ProfileCheck
 		}
 	}
 	return resp
+}
+
+func (c *Checker) checkProfileQUIC(ctx context.Context, opts ProfileCheckOptions) CheckResponse {
+	st := c.H3Env.Detect(c.Paths)
+	if !st.Found {
+		return CheckResponse{
+			Results: []TargetResult{},
+			Message: "h3-curl не установлен: установите его во вкладке «Стратегии» (Профиль 5) или через CLI (`zator h3-curl install`) для HTTP/3-проверки.",
+		}
+	}
+	videoID := strings.TrimSpace(opts.VideoID)
+	if videoID == "" {
+		videoID = DefaultYouTubeVideoID
+	}
+	resolver := c.MediaResolver
+	if resolver == nil {
+		resolver = func(ctx context.Context, id string) (YouTubeMedia, error) {
+			return ResolveYouTubeMedia(ctx, id, c.Options)
+		}
+	}
+	media, err := resolver(ctx, videoID)
+	if err != nil {
+		tr := TargetResult{
+			Label:   LabelYouTubeQUIC,
+			Target:  "quic://googlevideo.com",
+			Verdict: VerdictUnknown,
+			Text:    "Медиапоток не получен: " + err.Error(),
+		}
+		return CheckResponse{
+			Results: []TargetResult{tr},
+			Message: "Не удалось получить видеопоток YouTube для QUIC-проверки: " + err.Error(),
+		}
+	}
+	rounds := c.QUICRounds
+	if rounds <= 0 {
+		rounds = 1
+	}
+	res := c.CheckQUICMedia(ctx, st.Path, media, rounds)
+	return CheckResponse{
+		Results: []TargetResult{res},
+		Message: res.Text,
+	}
 }
 
 // --- YouTube / googlevideo ---

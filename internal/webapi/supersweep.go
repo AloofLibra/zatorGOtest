@@ -64,6 +64,7 @@ func (s *Server) sweeperOrDefault() (Sweeper, error) {
 	opts.DialContext = netcheck.BindPortRangeDialer(
 		firewall.SuperSweepPortFirst, firewall.SuperSweepPortLast)
 	checker := netcheck.NewChecker(opts)
+	checker.Paths = s.paths
 	checker.MediaResolver = func(ctx context.Context, videoID string) (netcheck.YouTubeMedia, error) {
 		// Innertube runs outside the test port range; only media GETs enter probe.
 		return netcheck.ResolveYouTubeMedia(ctx, videoID, netcheck.DefaultOptions())
@@ -71,11 +72,13 @@ func (s *Server) sweeperOrDefault() (Sweeper, error) {
 	if base, ok := s.checker.(*netcheck.Checker); ok {
 		checker.RedirectorURL = base.RedirectorURL
 		checker.DNS = base.DNS
+		checker.H3Env = base.H3Env
 	}
 
 	cfg := sweep.Config{
 		Dir:        s.sweepDir(),
 		ArchiveDir: paths.RuntimeTempDir(s.paths.ZatorRoot),
+		Paths:      s.paths,
 		Store:      s.store,
 		ProbeStore: probeStore,
 		Probe:      probe,
@@ -163,11 +166,21 @@ func (s *Server) supersweepAction(p params) (map[string]any, error) {
 		sp.Scope = scope
 		if raw := p.Get("quick_profile"); raw != "" {
 			profile, convErr := strconv.Atoi(raw)
-			if convErr != nil || (profile != 1 && profile != 2 && profile != 3 && profile != 4) {
+			if convErr != nil || profile < 1 || profile > 5 {
 				return nil, errf(http.StatusBadRequest, "Некорректный профиль быстрого подбора")
 			}
 			sp.QuickProfile = profile
 			sp.QuickAddress = p.Raw("address")
+		}
+		if inc := strings.ToLower(p.Get("include_quic")); inc == "1" || inc == "true" {
+			sp.IncludeQUIC = true
+		}
+		if rq := p.Get("quic_rounds"); rq != "" {
+			n, convErr := strconv.Atoi(rq)
+			if convErr != nil || n < 1 || n > 5 {
+				return nil, errf(http.StatusBadRequest, "Число раундов QUIC должно быть от 1 до 5")
+			}
+			sp.QUICRounds = n
 		}
 		if v := p.Get("tls_pref"); v != "" {
 			sp.TLSPref = netcheck.ParseTLSPref(v)

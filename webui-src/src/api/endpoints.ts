@@ -25,6 +25,8 @@ export const supersweepStart = (opts: {
   tls_pref?: string
   quick_profile?: number
   address?: string
+  include_quic?: boolean
+  quic_rounds?: number
 } = {}) => {
   const body: Record<string, string> = { setting: 'supersweep', value: 'start' }
   if (opts.scope) body.scope = opts.scope
@@ -32,6 +34,8 @@ export const supersweepStart = (opts: {
   if (opts.tls_pref) body.tls_pref = opts.tls_pref
   if (opts.quick_profile) body.quick_profile = String(opts.quick_profile)
   if (opts.address?.trim()) body.address = opts.address.trim()
+  if (opts.include_quic) body.include_quic = '1'
+  if (opts.quic_rounds) body.quic_rounds = String(opts.quic_rounds)
   return api<{ ok: boolean; started?: boolean }>('/api/settings', formBody(body))
 }
 
@@ -186,6 +190,9 @@ export const applySetting = {
     api<ApplyResult & WssizeRampSettings>('/api/settings',
       formBody({ setting: 'wssize_ramp', value: settings.enabled ? '1' : '0',
         mode: settings.mode, scale: String(settings.scale) })),
+  wssize_refresh_ips: () =>
+    api<ApplyResult & { ipv4_status?: string; ipv4_count?: number; ipv4_generated?: string; ipv4_error?: string; sni_hosts_added?: number; sni_resolved_ips?: number; local_ips?: number }>(
+      '/api/settings', formBody({ setting: 'wssize_ramp', refresh_ips: '1' })),
   ifaces: (opts: { lan: string; wan: string } | { action: 'redetect' }) =>
     api<ApplyResult & IfacesSettings>('/api/settings',
       formBody('action' in opts
@@ -238,6 +245,90 @@ export const backups = {
   upload: (file: File) => api<{ name: string }>(
     `/api/backups?action=upload&name=${encodeURIComponent(file.name)}`,
     { method: 'POST', headers: { 'Content-Type': 'application/x-tar' }, body: file }),
+}
+
+import type {
+  CustomBlobsPayload, CustomImportResult, CustomListPayload, H3CurlStatus,
+  ZapretReleasesPayload, ZapretSwitchResult,
+} from './types'
+
+export const fetchZapretReleases = (refresh = false) =>
+  api<ZapretReleasesPayload>(
+    refresh ? '/api/settings?setting=zapret_releases&refresh=1' : '/api/settings?setting=zapret_releases',
+  )
+
+export const switchZapretVersion = (source: 'fork' | 'official', version: string, force = false) =>
+  api<ZapretSwitchResult>(
+    '/api/settings',
+    formBody(
+      force
+        ? { setting: 'zapret_version', source, version, force: '1' }
+        : { setting: 'zapret_version', source, version },
+    ),
+  )
+
+export const fetchH3Curl = (signal?: AbortSignal) =>
+  api<H3CurlStatus>('/api/settings?setting=h3_curl', { signal })
+
+export const h3CurlAction = (action: 'install' | 'update' | 'remove') =>
+  api<H3CurlStatus & { ok?: boolean }>('/api/settings', formBody({ setting: 'h3_curl', action }))
+
+export const fetchCustomStrats = (block = '', signal?: AbortSignal) =>
+  api<CustomListPayload>(block ? `/api/custom?${new URLSearchParams({ block })}` : '/api/custom', { signal })
+
+export const customStratsPost = (body: Record<string, string>) =>
+  api<ApplyResult & CustomImportResult>('/api/custom', formBody(body))
+
+export const customStrats = {
+  add: (block: string, value: string, comment: string) =>
+    customStratsPost({ action: 'add', block, value, comment }),
+  edit: (id: string, block: string, value: string, comment: string) =>
+    customStratsPost({ action: 'edit', id, block, value, comment }),
+  enable: (id: string, enabled: boolean) =>
+    customStratsPost({ action: 'enable', id, value: enabled ? '1' : '0' }),
+  remove: (id: string) => customStratsPost({ action: 'delete', id }),
+  import: (block: string, text: string) => customStratsPost({ action: 'import', block, text }),
+  apply: (restart = true) =>
+    customStratsPost(restart ? { action: 'apply' } : { action: 'apply', restart: '0' }),
+}
+
+export const fetchCustomBlobs = (signal?: AbortSignal) =>
+  api<CustomBlobsPayload>('/api/blobs', { signal })
+
+export const customBlobsPost = (body: Record<string, string>) =>
+  api<ApplyResult & { renamed?: boolean }>('/api/blobs', formBody(body))
+
+export const customBlobs = {
+  add: (name: string, file: string, comment: string) =>
+    customBlobsPost({ action: 'add', value: name, file, comment }),
+  edit: (id: string, name: string, file: string, comment: string) =>
+    customBlobsPost({ action: 'edit', id, value: name, file, comment }),
+  remove: (id: string) => customBlobsPost({ action: 'delete', id }),
+  apply: (restart = true) =>
+    customBlobsPost(restart ? { action: 'apply' } : { action: 'apply', restart: '0' }),
+}
+
+export const customBlobsUpload = (name: string, data: ArrayBuffer) =>
+  api<{ ok?: boolean; file?: string; created?: number | null; apply_required?: boolean }>(
+    `/api/blobs?action=upload&name=${encodeURIComponent(name)}`,
+    { method: 'POST', body: data, headers: { 'Content-Type': 'application/octet-stream' } },
+  )
+
+export const sni = {
+  pin: (profile: string, domain: string) =>
+    customBlobsPost({ action: 'sni_pin', profile, value: domain }),
+  assignSet: (profile: string, name: string) =>
+    customBlobsPost({ action: 'sni_pool_assign', profile, value: name }),
+  customList: (profile: string, list: string) =>
+    customBlobsPost({ action: 'sni_pool_custom', profile, list }),
+  clearPool: (profile: string) =>
+    customBlobsPost({ action: 'sni_pool_clear', profile }),
+  policy: (profile: string, value: string) =>
+    customBlobsPost({ action: 'sni_pool_policy', profile, value }),
+  writeSet: (name: string, list: string) =>
+    customBlobsPost({ action: 'sni_set_write', name, list }),
+  deleteSet: (name: string) =>
+    customBlobsPost({ action: 'sni_set_delete', name }),
 }
 
 export type { ProfileInfo, PortInfo }

@@ -17,11 +17,15 @@ import (
 )
 
 var (
-	gvMu         sync.Mutex
-	gvListener   *googlevideo.Manager
-	gvCollect    *googlevideo.Collector
-	gvUploadStop context.CancelFunc
-	gvUploadDone chan struct{}
+	gvMu                sync.Mutex
+	gvListener          *googlevideo.Manager
+	gvCollect           *googlevideo.Collector
+	gvUploadStop        context.CancelFunc
+	gvUploadDone        chan struct{}
+	gvRefreshStop       context.CancelFunc
+	gvRefreshDone       chan struct{}
+	gvLookupIPv4Hook    func(ctx context.Context, host string) ([]string, error)
+	gvSyncKernelIPsHook func(ctx context.Context, ips []string) error
 )
 
 // GooglevideoHosts возвращает обёртку над lists/googlevideo-hosts.txt.
@@ -48,7 +52,8 @@ func (a *App) newGooglevideoCollector() *googlevideo.Collector {
 func (a *App) GooglevideoCollector() *googlevideo.Collector {
 	gvMu.Lock()
 	defer gvMu.Unlock()
-	if gvCollect == nil {
+	wantLocal := filepath.Join(a.Paths.GooglevideoStateDir(), googlevideo.LocalFileName)
+	if gvCollect == nil || gvCollect.LocalFile() != wantLocal {
 		gvCollect = a.newGooglevideoCollector()
 	}
 	return gvCollect
@@ -93,13 +98,15 @@ func (a *App) GooglevideoCollectionStatus() string {
 	return "enabled"
 }
 
-// StartGooglevideoCollection поднимает DNS-listener (если доступен) и
+// StartGooglevideoCollection поднимает DNS-listener (если доступен),
+// фоновое обновление центрального списка и DNS-резолвинг SNI-хостов, а также
 // один раз сливает уже накопленные host в файл. Также стартует seed-воркер
 // и mid-stream sync (ipv4/WSSIZE).
 func (a *App) StartGooglevideoCollection(ctx context.Context) error {
 	_, _ = a.SyncGooglevideoHosts()
 	a.EnsureGooglevideoMidstream(ctx)
 	a.StartGooglevideoSeeder(ctx)
+	a.startGooglevideoRefresher(ctx)
 	// The zapret2 custom daemon already owns these same UBus/events and state
 	// files. Avoid a second writer/uploader; keep Go listener as fallback.
 	if nativeGooglevideoCollectorRunning() {
@@ -154,9 +161,12 @@ func nativeGooglevideoCollectorRunningAt(pidFile, procRoot string) bool {
 	return err == nil && strings.Contains(string(cmdline), "googlevideo-dns-sniffer") && strings.Contains(string(cmdline), "--collector")
 }
 
-func (a *App) addGooglevideoIPToKernelSet(obs googlevideo.Observation, result googlevideo.ObserveResult) error {
-	if result.Central {
+func (a *App) syncGooglevideoIPsToKernelSet(ctx context.Context, ips []string) error {
+	if len(ips) == 0 {
 		return nil
+	}
+	if gvSyncKernelIPsHook != nil {
+		return gvSyncKernelIPsHook(ctx, ips)
 	}
 	cfg, err := config.Load(a.Paths.ZapretConfig)
 	if err != nil {
@@ -166,9 +176,49 @@ func (a *App) addGooglevideoIPToKernelSet(obs googlevideo.Observation, result go
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if !wcfg.Active() {
+		return nil
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return firewall.NewWssize(wcfg, firewall.ExecRunner{}).AddIPs(ctx, []string{obs.IP})
+	return firewall.NewWssize(wcfg, firewall.ExecRunner{}).AddIPs(syncCtx, ips)
+}
+
+func (a *App) addGooglevideoIPToKernelSet(obs googlevideo.Observation, result googlevideo.ObserveResult) error {
+	if result.Central {
+		return nil
+	}
+	return a.syncGooglevideoIPsToKernelSet(context.Background(), []string{obs.IP})
+}
+
+// ResolveGooglevideoHosts резолвит SNI-собранные хосты из lists/googlevideo-hosts.txt
+// через системный DNS роутера, записывает в Collector и добавляет IPv4 в z2r_googlevideo4.
+func (a *App) ResolveGooglevideoHosts(ctx context.Context, force bool) (googlevideo.ResolveResult, error) {
+	hosts, err := a.GooglevideoHosts().List()
+	if err != nil {
+		return googlevideo.ResolveResult{}, err
+	}
+	res := googlevideo.ResolveHosts(ctx, hosts, googlevideo.ResolveConfig{
+		Collector:  a.GooglevideoCollector(),
+		LookupIPv4: gvLookupIPv4Hook,
+		Force:      force,
+	})
+	if len(res.LiveIPs) > 0 {
+		_ = a.syncGooglevideoIPsToKernelSet(ctx, res.LiveIPs)
+	}
+	return res, nil
+}
+
+// GooglevideoLocalIPCount возвращает число уникальных актуальных локальных IPv4.
+func (a *App) GooglevideoLocalIPCount() int {
+	now := time.Now().Unix()
+	seen := make(map[string]struct{})
+	for _, r := range a.GooglevideoCollector().Local() {
+		if r.Expires > now && googlevideo.PublicIPv4(r.IP) {
+			seen[r.IP] = struct{}{}
+		}
+	}
+	return len(seen)
 }
 
 // StopGooglevideoCollection останавливает listener (для тестов/shutdown).
@@ -177,17 +227,62 @@ func (a *App) StopGooglevideoCollection() {
 	gvMu.Lock()
 	stopUpload, uploadDone := gvUploadStop, gvUploadDone
 	gvUploadStop, gvUploadDone = nil, nil
-	defer gvMu.Unlock()
+	stopRefresh, refreshDone := gvRefreshStop, gvRefreshDone
+	gvRefreshStop, gvRefreshDone = nil, nil
+	gvMu.Unlock()
+	if stopRefresh != nil {
+		stopRefresh()
+	}
 	if stopUpload != nil {
 		stopUpload()
 	}
-	if gvListener != nil {
-		_ = gvListener.Stop()
-		gvListener = nil
+	gvMu.Lock()
+	l := gvListener
+	gvListener = nil
+	gvMu.Unlock()
+	if l != nil {
+		_ = l.Stop()
+	}
+	if refreshDone != nil {
+		<-refreshDone
 	}
 	if uploadDone != nil {
 		<-uploadDone
 	}
+}
+
+func (a *App) startGooglevideoRefresher(parent context.Context) {
+	gvMu.Lock()
+	if gvRefreshStop != nil {
+		gvMu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	gvRefreshStop, gvRefreshDone = cancel, done
+	gvMu.Unlock()
+
+	runOnce := func() {
+		rctx, rcancel := context.WithTimeout(ctx, 25*time.Second)
+		defer rcancel()
+		_, _ = a.RefreshGooglevideoIPv4(rctx, false)
+		_, _ = a.SyncGooglevideoHosts()
+		_, _ = a.ResolveGooglevideoHosts(rctx, false)
+	}
+	go func() {
+		defer close(done)
+		runOnce()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runOnce()
+			}
+		}
+	}()
 }
 
 func (a *App) startGooglevideoUploader(parent context.Context, collector *googlevideo.Collector) {
@@ -233,12 +328,12 @@ func (a *App) startGooglevideoUploader(parent context.Context, collector *google
 }
 
 // GooglevideoCentralList — кеш lists/googlevideo-ipv4.txt для WSSIZE mark/ipset.
-// По умолчанию только локальный файл (из assets); удалённый feed — через
-// Z2R_GOOGLEVIDEO_IPS_URL.
+// Использует Z2R_GOOGLEVIDEO_IPS_URL (по умолчанию LegacyRemoteListURL; "off" отключает feed).
 func (a *App) GooglevideoCentralList() *googlevideo.CentralList {
 	return &googlevideo.CentralList{
-		File: filepath.Join(a.Paths.ListsDir, googlevideo.ListFileName),
-		URL:  strings.TrimSpace(os.Getenv(googlevideo.EnvListURL)),
+		File:     filepath.Join(a.Paths.ListsDir, googlevideo.ListFileName),
+		URL:      googlevideo.ListURLFromEnv(),
+		OnUpdate: func(ips []string) error { return a.syncGooglevideoIPsToKernelSet(context.Background(), ips) },
 	}
 }
 

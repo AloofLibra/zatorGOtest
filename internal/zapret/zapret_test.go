@@ -7,10 +7,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -524,5 +526,177 @@ func TestInstallWrapperOpenWRTEmbedded(t *testing.T) {
 		Options{Version: ver,
 			ReleaseBase: srv.URL, Client: fastClient(), Variant: VariantOpenWRTEmbedded}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type fakeSymlink struct {
+	name string
+	link string
+}
+
+func buildArchiveWithSymlinks(t *testing.T, top string, files []fakeFile, symlinks ...fakeSymlink) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	all := []fakeFile{
+		{top + "/binaries/linux-x86_64/nfqws2", "BIN:linux-x86_64:nfqws2", 0o755},
+	}
+	all = append(all, files...)
+	for _, f := range all {
+		if err := tw.WriteHeader(&tar.Header{Name: f.name, Typeflag: tar.TypeReg, Mode: f.mode, Size: int64(len(f.body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(f.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, s := range symlinks {
+		if err := tw.WriteHeader(&tar.Header{Name: s.name, Typeflag: tar.TypeSymlink, Linkname: s.link, Mode: 0o777}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestDownloadAndInstallPreservesInitSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		probeDir := t.TempDir()
+		if err := os.Symlink("target", filepath.Join(probeDir, "link")); err != nil {
+			t.Skip("Windows symlink creation needs elevated privileges")
+		}
+	}
+	ver := "1.0.7"
+	top := "zapret2-v" + ver
+	arch := buildArchiveWithSymlinks(t, top,
+		[]fakeFile{
+			{top + "/init.d/sysv/functions", "# sysv functions\n", 0o644},
+			{top + "/init.d/openrc/zapret2", "#!/sbin/openrc-run\n", 0o755},
+		},
+		fakeSymlink{name: top + "/init.d/openrc/functions", link: "../sysv/functions"},
+	)
+	srv := newServer(t, ver, arch, false, nil)
+	root := filepath.Join(t.TempDir(), "opt", "zapret2")
+	if _, err := DownloadAndInstall(context.Background(), Options{
+		Root: root, Arch: platform.ArchX86_64, Version: ver, ReleaseBase: srv.URL, Client: fastClient(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fnLink := filepath.Join(root, "init.d", "openrc", "functions")
+	linkTarget, err := os.Readlink(fnLink)
+	if err != nil {
+		t.Fatalf("openrc/functions должен быть симлинком: %v", err)
+	}
+	if filepath.ToSlash(linkTarget) != "../sysv/functions" {
+		t.Fatalf("link target = %q, want ../sysv/functions", linkTarget)
+	}
+	got, err := os.ReadFile(fnLink)
+	if err != nil || string(got) != "# sysv functions\n" {
+		t.Fatalf("read via symlink failed: %q, %v", got, err)
+	}
+}
+
+func TestDownloadAndInstallRejectsUnsafeInitSymlink(t *testing.T) {
+	ver := "1.0.7"
+	top := "zapret2-v" + ver
+	arch := buildArchiveWithSymlinks(t, top, nil,
+		fakeSymlink{name: top + "/init.d/openrc/evil", link: "../../../etc/passwd"},
+	)
+	srv := newServer(t, ver, arch, false, nil)
+	root := filepath.Join(t.TempDir(), "opt", "zapret2")
+	_, err := DownloadAndInstall(context.Background(), Options{
+		Root: root, Arch: platform.ArchX86_64, Version: ver, ReleaseBase: srv.URL, Client: fastClient(),
+	})
+	if !errors.Is(err, fetch.ErrUnsafePath) {
+		t.Fatalf("expected ErrUnsafePath, got %v", err)
+	}
+}
+
+func TestPreserveCustomInitSkipsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		probeDir := t.TempDir()
+		if err := os.Symlink("target", filepath.Join(probeDir, "link")); err != nil {
+			t.Skip("Windows symlink creation needs elevated privileges")
+		}
+	}
+	root, stage := t.TempDir(), t.TempDir()
+	sysvSrc := filepath.Join(root, "init.d", "sysv", "custom.d")
+	openrcSrc := filepath.Join(root, "init.d", "openrc", "custom.d")
+	if err := os.MkdirAll(sysvSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(openrcSrc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sysvSrc, "50-hook"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../sysv/custom.d", openrcSrc); err != nil {
+		t.Fatal(err)
+	}
+
+	sysvDst := filepath.Join(stage, "init.d", "sysv", "custom.d")
+	openrcDst := filepath.Join(stage, "init.d", "openrc", "custom.d")
+	if err := os.MkdirAll(sysvDst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(openrcDst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../sysv/custom.d", openrcDst); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := preserveCustomInit(root, stage); err != nil {
+		t.Fatal(err)
+	}
+	if link, err := os.Readlink(openrcDst); err != nil || filepath.ToSlash(link) != "../sysv/custom.d" {
+		t.Fatalf("openrc/custom.d symlink overwritten: %q, %v", link, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(sysvDst, "50-hook")); err != nil || string(got) != "ok\n" {
+		t.Fatalf("sysv/custom.d hook missing: %q, %v", got, err)
+	}
+}
+
+func TestCopyTreeSymlinkSafety(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		probeDir := t.TempDir()
+		if err := os.Symlink("target", filepath.Join(probeDir, "link")); err != nil {
+			t.Skip("Windows symlink creation needs elevated privileges")
+		}
+	}
+	src, dst := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "sysv"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "openrc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "sysv", "functions"), []byte("fn"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../sysv/functions", filepath.Join(src, "openrc", "functions")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(filepath.Join(dst, "openrc", "functions")); err != nil || filepath.ToSlash(got) != "../sysv/functions" {
+		t.Fatalf("copied symlink = %q, %v", got, err)
+	}
+
+	// Ссылка наружу должна отвергаться.
+	badSrc, badDst := t.TempDir(), t.TempDir()
+	if err := os.Symlink("../outside", filepath.Join(badSrc, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyTree(badSrc, badDst); !errors.Is(err, fetch.ErrUnsafePath) {
+		t.Fatalf("expected ErrUnsafePath for escape symlink, got %v", err)
 	}
 }

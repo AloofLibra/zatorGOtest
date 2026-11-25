@@ -4,6 +4,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -122,14 +123,67 @@ func (p Paths) GooglevideoHostsFile() string {
 	return filepath.Join(p.ListsDir, "googlevideo-hosts.txt")
 }
 
-// GooglevideoStateDir — tmpfs-состояние коллектора/SNI-лога.
+// GooglevideoStateDir — tmpfs-состояние коллектора/SNI-лога (Z2R_GV_TMPDIR).
 func (p Paths) GooglevideoStateDir() string {
+	if v := strings.TrimSpace(os.Getenv("Z2R_GV_TMPDIR")); v != "" {
+		return filepath.Clean(v)
+	}
 	return "/tmp/z2r-googlevideo"
 }
 
 // GooglevideoSNILog — лог SNI из Lua (nobody).
 func (p Paths) GooglevideoSNILog() string {
 	return filepath.Join(p.GooglevideoStateDir(), "sni-hosts.log")
+}
+
+// CustomBlobDir — каталог пользовательских фейк-блобов (files/fake/custom_blob).
+func (p Paths) CustomBlobDir() string {
+	return filepath.Join(p.FakeDir, "custom_blob")
+}
+
+// ToolsBinDir — каталог скачиваемых бинарных утилит (tools/bin).
+func (p Paths) ToolsBinDir() string {
+	return filepath.Join(p.ZatorRoot, "tools", "bin")
+}
+
+// CustomStrategiesTSV — TSV пользовательских стратегий.
+func (p Paths) CustomStrategiesTSV() string {
+	return filepath.Join(p.StateOrchestraDir(), "custom_strategies.tsv")
+}
+
+// CustomBlobsTSV — TSV пользовательских блобов.
+func (p Paths) CustomBlobsTSV() string {
+	return filepath.Join(p.StateOrchestraDir(), "custom_blobs.tsv")
+}
+
+// BlobFilesTSV — TSV выбранных файлов блобов (maxru / z2r_prof_N).
+func (p Paths) BlobFilesTSV() string {
+	return filepath.Join(p.StateOrchestraDir(), "blob_files.tsv")
+}
+
+// SNIPoolTSV — TSV назначенных SNI-пулов профилей.
+func (p Paths) SNIPoolTSV() string {
+	return filepath.Join(p.StateOrchestraDir(), "sni_pool.tsv")
+}
+
+// SNIPoolPolicyTSV — TSV политик чередования SNI-пула (rr|rand).
+func (p Paths) SNIPoolPolicyTSV() string {
+	return filepath.Join(p.StateOrchestraDir(), "sni_pool_policy.tsv")
+}
+
+// SNIPoolPin — временная метка фиксации пула при прогонах стратегий.
+func (p Paths) SNIPoolPin() string {
+	return filepath.Join(p.StateOrchestraDir(), "sni_pool.pin")
+}
+
+// SNIZatorTxt — проектные SNI-наборы клон-режима.
+func (p Paths) SNIZatorTxt() string {
+	return filepath.Join(p.ExtraStratsDir, "sni_zator.txt")
+}
+
+// SNIUserTxt — пользовательские SNI-наборы клон-режима.
+func (p Paths) SNIUserTxt() string {
+	return filepath.Join(p.ExtraStratsDir, "sni_user.txt")
 }
 
 // Dirs возвращает список каталогов, которые необходимо создать при установке.

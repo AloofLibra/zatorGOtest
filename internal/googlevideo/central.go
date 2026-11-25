@@ -41,6 +41,22 @@ const (
 	ListFileName = "googlevideo-ipv4.txt"
 )
 
+// ListURLFromEnv возвращает URL центрального списка googlevideo IPv4:
+// Z2R_GOOGLEVIDEO_IPS_URL если задан, иначе LegacyRemoteListURL (как в zator 1.6.0).
+// Значения off|none|0|false|disabled отключают удалённый feed (только локальный файл).
+func ListURLFromEnv() string {
+	v := strings.TrimSpace(os.Getenv(EnvListURL))
+	if v == "" {
+		return LegacyRemoteListURL
+	}
+	switch strings.ToLower(v) {
+	case "off", "none", "0", "false", "disabled":
+		return ""
+	default:
+		return v
+	}
+}
+
 // Ошибки проверки списка.
 var (
 	// ErrListEmpty — список пуст.

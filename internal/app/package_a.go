@@ -110,6 +110,23 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 	if ok, e := cfg.EnsureLuaInit(gvLua); e == nil && ok {
 		dirty = true
 	}
+	sniLua := filepath.ToSlash(filepath.Join(a.Paths.LuaDir, "sni-pool.lua"))
+	if ok, e := cfg.EnsureLuaInit(sniLua); e == nil && ok {
+		dirty = true
+	}
+	if ok, e := cfg.EnsureSlotBlob("z2r_prof_5", "quic_initial_www_google_com.bin"); e == nil && ok {
+		dirty = true
+	}
+	if ok, e := a.ReapplyConfigOverlays(cfg); e != nil {
+		return "", fmt.Errorf("оверлеи блобов и стратегий: %w", e)
+	} else if ok {
+		dirty = true
+	}
+	if ok, e := cfg.CollapseDuplicateNew(); e != nil {
+		return "", fmt.Errorf("санация --new: %w", e)
+	} else if ok {
+		dirty = true
+	}
 	if dirty {
 		if err := cfg.Save(); err != nil {
 			return "", err
@@ -117,6 +134,7 @@ func (a *App) ApplyZapretRuntime() (fwHook string, err error) {
 		defPath := filepath.Join(a.Paths.ConfigDir, "config.default")
 		if def, e := config.Load(defPath); e == nil {
 			_ = a.migratePackageA(def)
+			_, _ = def.CollapseDuplicateNew()
 			_ = def.Save()
 		}
 	}

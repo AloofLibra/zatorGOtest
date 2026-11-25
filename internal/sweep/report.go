@@ -89,12 +89,12 @@ func IdleReport() Report {
 }
 
 var workerLabels = map[string]string{
-	WorkerYT: "YouTube", WorkerGV: "Googlevideo", WorkerDS: "Discord", WorkerRKN: "РКН",
+	WorkerYT: "YouTube", WorkerGV: "Googlevideo", WorkerDS: "Discord", WorkerRKN: "РКН", WorkerQUIC: "YouTube QUIC",
 }
 
-var workerProfiles = map[string]int{WorkerYT: 1, WorkerGV: 2, WorkerDS: 4, WorkerRKN: 3}
+var workerProfiles = map[string]int{WorkerYT: 1, WorkerGV: 2, WorkerDS: 4, WorkerRKN: 3, WorkerQUIC: 5}
 
-var profileWorkers = map[int]string{1: WorkerYT, 2: WorkerGV, 4: WorkerDS, 3: WorkerRKN}
+var profileWorkers = map[int]string{1: WorkerYT, 2: WorkerGV, 4: WorkerDS, 3: WorkerRKN, 5: WorkerQUIC}
 
 // ReportOptions — параметры чтения отчёта.
 type ReportOptions struct {

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/AloofLibra/zator/internal/app"
+	"github.com/AloofLibra/zator/internal/googlevideo"
 	"github.com/AloofLibra/zator/internal/netcheck"
 	"github.com/AloofLibra/zator/internal/paths"
 	"github.com/AloofLibra/zator/internal/platform"
@@ -139,7 +140,13 @@ type envOpts struct {
 
 func newEnv(t *testing.T, o envOpts) *env {
 	t.Helper()
+	if os.Getenv(googlevideo.EnvListURL) == "" {
+		t.Setenv(googlevideo.EnvListURL, "off")
+	}
 	root := t.TempDir()
+	if os.Getenv("Z2R_GV_TMPDIR") == "" {
+		t.Setenv("Z2R_GV_TMPDIR", filepath.Join(root, "gv-state"))
+	}
 	p := paths.New(filepath.Join(root, "zator"), filepath.Join(root, "zapret2"))
 	a := app.NewWith(p, platform.Platform{})
 	if !o.skipInstall {

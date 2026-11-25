@@ -89,16 +89,21 @@ func DefaultDir(p paths.Paths) string {
 }
 
 // stateOrchestraFiles — файлы orchestra, входящие в бэкап (как в
-// z2r_backup_state_files shell-версии).
+// z2r_backup_state_files shell-версии 1.6.0).
 func stateOrchestraFiles() []string {
 	return []string{
 		orchestra.LockedFileName,
 		orchestra.LockedManualFileName,
 		autoLockedTSV,
 		orchestra.BlobOverrideFileName,
+		orchestra.BlobFilesFileName,
 		orchestra.SNIOverrideFileName,
 		orchestra.ModeOverrideFileName,
 		orchestra.CloneSizeFileName,
+		"custom_strategies.tsv",
+		"custom_blobs.tsv",
+		orchestra.SNIPoolFileName,
+		orchestra.SNIPoolPolicyFileName,
 	}
 }
 
@@ -271,6 +276,18 @@ func (m *Manager) collect(opts CreateOptions) ([]fileEntry, error) {
 			for _, e := range ents {
 				if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".tsv") {
 					add(entryOrch+"/"+orchestra.ScopesDirName+"/"+e.Name(), filepath.Join(orchDir, orchestra.ScopesDirName, e.Name()))
+				}
+			}
+		}
+	}
+	if !opts.IncludeExtraStrats {
+		add("extra_strats/sni_user.txt", m.Paths.SNIUserTxt())
+	}
+	if blobDir := m.Paths.CustomBlobDir(); blobDir != "" {
+		if ents, err := os.ReadDir(blobDir); err == nil {
+			for _, e := range ents {
+				if e.Type().IsRegular() && !strings.Contains(e.Name(), "/") && !strings.Contains(e.Name(), "..") {
+					add("files/fake/custom_blob/"+e.Name(), filepath.Join(blobDir, e.Name()))
 				}
 			}
 		}
@@ -712,6 +729,12 @@ var smartVars = []string{
 	"CLIENT_SCOPE_CHAIN", "CLIENT_SCOPE_TABLE",
 }
 
+var wssizeSmartVars = []string{
+	"Z2R_WSSIZE_RAMP_ENABLE",
+	"Z2R_WSSIZE_RAMP_MODE",
+	"Z2R_WSSIZE_RAMP_SCALE",
+}
+
 // Restore восстанавливает состояние из архива по имени.
 func (m *Manager) Restore(name string, opts RestoreOptions) (*Result, error) {
 	p, err := m.Resolve(name)
@@ -899,6 +922,12 @@ func (m *Manager) destFor(name string) string {
 		return filepath.Join(m.Paths.ListsDir, path.Base(name))
 	case strings.HasPrefix(name, "extra_strats/"):
 		return filepath.Join(m.Paths.ExtraStratsDir, filepath.FromSlash(strings.TrimPrefix(name, "extra_strats/")))
+	case strings.HasPrefix(name, "files/fake/custom_blob/"):
+		rel := strings.TrimPrefix(name, "files/fake/custom_blob/")
+		if rel == "" || strings.Contains(rel, "/") || strings.Contains(rel, "..") {
+			return ""
+		}
+		return filepath.Join(m.Paths.CustomBlobDir(), filepath.FromSlash(rel))
 	}
 	return ""
 }
@@ -966,6 +995,22 @@ func (m *Manager) smartApply(oldPath, livePath string) ([]string, error) {
 			return nil, err
 		}
 		applied = append(applied, name)
+	}
+	liveText := live.String()
+	if strings.Contains(liveText, "wssize_ramp") || strings.Contains(liveText, "Z2R_WSSIZE_RAMP_") {
+		for _, name := range wssizeSmartVars {
+			raw, ok := old.GetRaw(name)
+			if !ok {
+				continue
+			}
+			if cur, has := live.GetRaw(name); has && cur == raw {
+				continue
+			}
+			if err := live.Set(name, raw); err != nil {
+				return nil, err
+			}
+			applied = append(applied, name)
+		}
 	}
 	// Флаг авторотации (#Z2R_AUTO_MODE).
 	if oldOn, ok := old.AutoModeFlag(); ok {

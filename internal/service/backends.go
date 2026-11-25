@@ -7,25 +7,98 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/AloofLibra/zator/internal/sysprofile"
 )
 
 // ---------------------------------------------------------------- вспомогательное
 
 func (m *manager) writeFile(path, content string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("service: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+	// Не переходим по старому симлинку при записи — иначе испортим целевой файл в ZapretRoot.
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("service: удалить старую ссылку %s: %w", path, err)
+		}
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
 		return fmt.Errorf("service: %w", err)
 	}
-	// WriteFile не меняет права существующего файла.
-	if err := os.Chmod(path, mode); err != nil {
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("service: %w", err)
 	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("service: %w", err)
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		return fmt.Errorf("service: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("service: %w", err)
+	}
+	cleanup = false
 	return nil
 }
 
-// exitCode разделяет «команда вернула ненулевой код» и «команду не удалось запустить».
+// atomicSymlink атомарно создаёт символическую ссылку link → target
+// (с откатом на копию, если ФС/ОС не разрешает символические ссылки).
+func (m *manager) atomicSymlink(target, link string) error {
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return fmt.Errorf("service: %w", err)
+	}
+	if info, err := os.Lstat(link); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if cur, rerr := os.Readlink(link); rerr == nil && cur == target {
+			return nil
+		}
+	}
+	tmp := link + ".new"
+	_ = os.Remove(tmp)
+	if err := os.Symlink(target, tmp); err == nil {
+		if err := os.Rename(tmp, link); err != nil {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("service: %w", err)
+		}
+		return nil
+	}
+	_ = os.Remove(tmp)
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return fmt.Errorf("service: %w", err)
+	}
+	return m.writeFile(link, string(data), 0o755)
+}
+
+func inspectInstalledFile(path string) (exists, brokenSymlink bool, err error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if _, serr := os.Stat(path); os.IsNotExist(serr) {
+			return true, true, nil
+		}
+	}
+	return true, false, nil
+}
+
+// queryResult разделяет «команда вернула ненулевой код» и «команду не удалось запустить».
 func queryResult(err error) (bool, error) {
 	if err == nil {
 		return true, nil
@@ -42,12 +115,36 @@ func (m *manager) queryCmd(ctx context.Context, name string, args ...string) (bo
 	return queryResult(err)
 }
 
+func (m *manager) uninstallProfileManaged(ctx context.Context, u Unit, scriptOnDisk string) error {
+	exists, broken, err := inspectInstalledFile(scriptOnDisk)
+	if err != nil {
+		return fmt.Errorf("service: чтение %s: %w", u, err)
+	}
+	if !exists {
+		return nil
+	}
+	if !broken {
+		if err := m.runOps(ctx, m.profile.DisableOps(string(u), m.cfg.Paths)); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(scriptOnDisk); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("service: %w", err)
+	}
+	return m.runOps(ctx, m.profile.PostUninstallOps(string(u), m.cfg.Paths))
+}
+
+func regularFile(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
+}
+
 // ---------------------------------------------------------------- systemd
 
 type systemdBackend struct{ m *manager }
 
 func (b systemdBackend) unitFile(u Unit) string {
-	return b.m.sys(systemdDir + "/" + string(u) + ".service")
+	return b.m.sys(b.m.profile.ServiceScriptPath(string(u), b.m.cfg.Paths))
 }
 
 func (b systemdBackend) install(ctx context.Context, u Unit) error {
@@ -61,14 +158,12 @@ func (b systemdBackend) install(ctx context.Context, u Unit) error {
 	if err := b.m.writeFile(b.unitFile(u), content, 0o644); err != nil {
 		return err
 	}
-	if err := b.m.run(ctx, "systemctl", "daemon-reload"); err != nil {
-		return err
-	}
-	return b.m.run(ctx, "systemctl", "enable", string(u)+".service")
+	return b.m.runOps(ctx, b.m.profile.EnableOps(string(u), b.m.cfg.Paths))
 }
 
 func (b systemdBackend) installNativeZapret(ctx context.Context) error {
-	src := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "systemd", "zapret2.service")
+	nat := b.m.profile.NativeZapret(b.m.cfg.Paths)
+	src := filepath.Join(b.m.cfg.Paths.ZapretRoot, filepath.FromSlash(nat.UpstreamRel))
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return fmt.Errorf("service: upstream zapret2 systemd unit: %w", err)
@@ -76,44 +171,133 @@ func (b systemdBackend) installNativeZapret(ctx context.Context) error {
 	if err := b.m.writeFile(b.unitFile(UnitZapret2), string(data), 0o644); err != nil {
 		return err
 	}
-	if err := b.m.run(ctx, "systemctl", "daemon-reload"); err != nil {
-		return err
-	}
-	return b.m.run(ctx, "systemctl", "enable", "zapret2.service")
+	return b.m.runOps(ctx, b.m.profile.EnableOps(string(UnitZapret2), b.m.cfg.Paths))
 }
 
 func (b systemdBackend) uninstall(ctx context.Context, u Unit) error {
-	unitFile := b.unitFile(u)
-	if _, err := os.Stat(unitFile); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("service: чтение unit %s: %w", u, err)
-	}
-	if err := b.m.run(ctx, "systemctl", "disable", "--now", string(u)+".service"); err != nil {
-		return fmt.Errorf("service: disable/stop %s: %w", u, err)
-	}
-	if err := os.Remove(unitFile); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("service: %w", err)
-	}
-	if err := b.m.run(ctx, "systemctl", "daemon-reload"); err != nil {
-		return fmt.Errorf("service: systemctl daemon-reload: %w", err)
-	}
-	return nil
+	return b.m.uninstallProfileManaged(ctx, u, b.unitFile(u))
 }
 
 func (b systemdBackend) control(ctx context.Context, u Unit, action string) error {
-	return b.m.run(ctx, "systemctl", action, string(u)+".service")
+	return b.m.runSpec(ctx, b.m.profile.ControlCmd(string(u), action, b.m.cfg.Paths))
 }
 
 func (b systemdBackend) query(ctx context.Context, u Unit) (bool, error) {
-	return b.m.queryCmd(ctx, "systemctl", "is-active", "--quiet", string(u)+".service")
+	spec := b.m.profile.QueryCmd(string(u), b.m.cfg.Paths)
+	return b.m.queryCmd(ctx, spec.Name, spec.Args...)
+}
+
+// ---------------------------------------------------------------- OpenRC (Alpine / Gentoo)
+
+type openrcBackend struct{ m *manager }
+
+func (b openrcBackend) script(u Unit) string {
+	return b.m.profile.ServiceScriptPath(string(u), b.m.cfg.Paths)
+}
+
+func (b openrcBackend) install(ctx context.Context, u Unit) error {
+	if u == UnitZapret2 {
+		return b.installNativeZapret(ctx)
+	}
+	dst := b.m.sys(b.script(u))
+	var (
+		content string
+		err     error
+	)
+	if b.m.profile.OpenRCActive() {
+		b.stopLegacySysVIfPresent(ctx, u, dst)
+		content, err = RenderOpenRC(b.m.templateData(u))
+	} else {
+		content, err = RenderSysV(b.m.templateData(u))
+	}
+	if err != nil {
+		return err
+	}
+	if err := b.m.writeFile(dst, content, 0o755); err != nil {
+		return err
+	}
+	return b.m.runOps(ctx, b.m.profile.EnableOps(string(u), b.m.cfg.Paths))
+}
+
+func (b openrcBackend) stopLegacySysVIfPresent(ctx context.Context, u Unit, dst string) {
+	info, err := os.Lstat(dst)
+	if err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		return
+	}
+	text := string(data)
+	if !strings.HasPrefix(text, "#!") || strings.HasPrefix(text, "#!/sbin/openrc-run") {
+		return
+	}
+	_ = b.m.run(ctx, b.script(u), "stop")
+}
+
+func (b openrcBackend) installNativeZapret(ctx context.Context) error {
+	dst := b.m.sys(b.script(UnitZapret2))
+	if !b.m.profile.OpenRCActive() {
+		src := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "sysv", "zapret2")
+		if !regularFile(src) {
+			return fmt.Errorf("service: upstream zapret2 SysV init not found at %s", src)
+		}
+		if err := os.Chmod(src, 0o755); err != nil {
+			return fmt.Errorf("service: %w", err)
+		}
+		if err := b.m.atomicSymlink(src, dst); err != nil {
+			return err
+		}
+		return b.m.runOps(ctx, b.m.profile.EnableOps(string(UnitZapret2), b.m.cfg.Paths))
+	}
+
+	openrcSrc := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "openrc", "zapret2")
+	if sysprofile.ValidOpenRCZapretScript(b.m.cfg.Paths.ZapretRoot, openrcSrc) {
+		if err := os.Chmod(openrcSrc, 0o755); err != nil {
+			return fmt.Errorf("service: %w", err)
+		}
+		if err := b.m.atomicSymlink(openrcSrc, dst); err != nil {
+			return err
+		}
+	} else {
+		sysvSrc := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "sysv", "zapret2")
+		if !regularFile(sysvSrc) {
+			return fmt.Errorf("service: upstream zapret2 OpenRC/SysV init not found in %s", b.m.cfg.Paths.ZapretRoot)
+		}
+		if err := os.Chmod(sysvSrc, 0o755); err != nil {
+			return fmt.Errorf("service: %w", err)
+		}
+		wrapper, err := RenderOpenRCZapretWrapper(sysvSrc)
+		if err != nil {
+			return err
+		}
+		if err := b.m.writeFile(dst, wrapper, 0o755); err != nil {
+			return err
+		}
+	}
+	return b.m.runOps(ctx, b.m.profile.EnableOps(string(UnitZapret2), b.m.cfg.Paths))
+}
+
+func (b openrcBackend) uninstall(ctx context.Context, u Unit) error {
+	return b.m.uninstallProfileManaged(ctx, u, b.m.sys(b.script(u)))
+}
+
+func (b openrcBackend) control(ctx context.Context, u Unit, action string) error {
+	return b.m.runSpec(ctx, b.m.profile.ControlCmd(string(u), action, b.m.cfg.Paths))
+}
+
+func (b openrcBackend) query(ctx context.Context, u Unit) (bool, error) {
+	spec := b.m.profile.QueryCmd(string(u), b.m.cfg.Paths)
+	return b.m.queryCmd(ctx, spec.Name, spec.Args...)
 }
 
 // ---------------------------------------------------------------- procd (OpenWrt)
 
 type procdBackend struct{ m *manager }
 
-func (b procdBackend) script(u Unit) string { return initDir + "/" + string(u) }
+func (b procdBackend) script(u Unit) string {
+	return b.m.profile.ServiceScriptPath(string(u), b.m.cfg.Paths)
+}
 
 func (b procdBackend) install(ctx context.Context, u Unit) error {
 	if u == UnitZapret2 {
@@ -126,53 +310,153 @@ func (b procdBackend) install(ctx context.Context, u Unit) error {
 	if err := b.m.writeFile(b.m.sys(b.script(u)), content, 0o755); err != nil {
 		return err
 	}
-	return b.m.run(ctx, b.script(u), "enable")
+	return b.m.runOps(ctx, b.m.profile.EnableOps(string(u), b.m.cfg.Paths))
 }
 
 func (b procdBackend) installNativeZapret(ctx context.Context) error {
 	src := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "openwrt", "zapret2")
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("service: upstream OpenWrt zapret2 init: %w", err)
+	if !regularFile(src) {
+		return fmt.Errorf("service: upstream OpenWrt zapret2 init not found at %s", src)
 	}
-	if err := b.m.writeFile(b.m.sys(b.script(UnitZapret2)), string(data), 0o755); err != nil {
+	if err := os.Chmod(src, 0o755); err != nil {
+		return fmt.Errorf("service: %w", err)
+	}
+	dst := b.m.sys(b.script(UnitZapret2))
+	if err := b.m.registerOpenWrtInit(src, dst); err != nil {
 		return err
 	}
-	return b.m.run(ctx, b.script(UnitZapret2), "enable")
+	if err := cleanupOpenWrtInitLinks(dst, b.m.sys("/etc/rc.d")); err != nil {
+		return err
+	}
+	return b.m.runOps(ctx, b.m.profile.EnableOps(string(UnitZapret2), b.m.cfg.Paths))
 }
 
-func (b procdBackend) uninstall(ctx context.Context, u Unit) error {
-	script := b.m.sys(b.script(u))
-	if _, err := os.Stat(script); os.IsNotExist(err) {
+func (m *manager) registerOpenWrtInit(upstreamPath, systemPath string) error {
+	info, err := os.Lstat(systemPath)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, readErr := os.Readlink(systemPath)
+			if readErr == nil && link == upstreamPath {
+				return nil
+			}
+			if regularFile(systemPath) {
+				return nil // сохраняем локально настроенный симлинк
+			}
+			// Битый симлинк заменяем на актуальный upstream.
+		} else if info.Mode().IsRegular() {
+			content, readErr := os.ReadFile(systemPath)
+			if readErr != nil {
+				return readErr
+			}
+			if !strings.Contains(string(content), "(создано zator)") {
+				return nil // сохраняем локально изменённый init-скрипт
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return m.atomicSymlink(upstreamPath, systemPath)
+}
+
+func cleanupOpenWrtInitLinks(systemPath, rcDir string) error {
+	data, err := os.ReadFile(systemPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	start, stop := "", ""
+	for _, line := range strings.Split(string(data), "\n") {
+		t := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(t, "START="):
+			start = strings.TrimPrefix(t, "START=")
+		case strings.HasPrefix(t, "STOP="):
+			stop = strings.TrimPrefix(t, "STOP=")
+		}
+	}
+	if stop == "" {
+		stop = "10" // значение по умолчанию в rc.common, если STOP= не задан
+	}
+	if !validInitPriority(start) || !validInitPriority(stop) {
 		return nil
-	} else if err != nil {
-		return fmt.Errorf("service: чтение init %s: %w", u, err)
 	}
-	if err := b.m.run(ctx, b.script(u), "stop"); err != nil {
-		return fmt.Errorf("service: stop %s: %w", u, err)
+	startNum, _ := strconv.Atoi(start)
+	stopNum, _ := strconv.Atoi(stop)
+	expected := map[string]bool{
+		"S" + fmt.Sprintf("%02d", startNum) + "zapret2": true,
+		"K" + fmt.Sprintf("%02d", stopNum) + "zapret2":  true,
 	}
-	if err := b.m.run(ctx, b.script(u), "disable"); err != nil {
-		return fmt.Errorf("service: disable %s: %w", u, err)
+	entries, err := os.ReadDir(rcDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
-	if err := os.Remove(script); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("service: %w", err)
+	cleanSystem := filepath.Clean(systemPath)
+	for _, entry := range entries {
+		name := entry.Name()
+		if expected[name] {
+			continue
+		}
+		if !(strings.HasSuffix(name, "zapret2") && (strings.HasPrefix(name, "S") || strings.HasPrefix(name, "K"))) {
+			continue
+		}
+		linkPath := filepath.Join(rcDir, name)
+		if entry.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		link, err := os.Readlink(linkPath)
+		if err != nil {
+			return err
+		}
+		resolved := filepath.Clean(filepath.Join(rcDir, link))
+		if filepath.IsAbs(link) {
+			resolved = filepath.Clean(link)
+		}
+		if resolved == cleanSystem {
+			if err := os.Remove(linkPath); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
+func validInitPriority(value string) bool {
+	if value == "" || len(value) > 2 {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func (b procdBackend) uninstall(ctx context.Context, u Unit) error {
+	return b.m.uninstallProfileManaged(ctx, u, b.m.sys(b.script(u)))
+}
+
 func (b procdBackend) control(ctx context.Context, u Unit, action string) error {
-	return b.m.run(ctx, b.script(u), action)
+	return b.m.runSpec(ctx, b.m.profile.ControlCmd(string(u), action, b.m.cfg.Paths))
 }
 
 func (b procdBackend) query(ctx context.Context, u Unit) (bool, error) {
-	return b.m.queryCmd(ctx, b.script(u), "running")
+	spec := b.m.profile.QueryCmd(string(u), b.m.cfg.Paths)
+	return b.m.queryCmd(ctx, spec.Name, spec.Args...)
 }
 
 // ---------------------------------------------------------------- SysV
 
 type sysvBackend struct{ m *manager }
 
-func (b sysvBackend) script(u Unit) string { return initDir + "/" + string(u) }
+func (b sysvBackend) script(u Unit) string {
+	return b.m.profile.ServiceScriptPath(string(u), b.m.cfg.Paths)
+}
 
 func (b sysvBackend) install(ctx context.Context, u Unit) error {
 	if u == UnitZapret2 {
@@ -185,56 +469,34 @@ func (b sysvBackend) install(ctx context.Context, u Unit) error {
 	if err := b.m.writeFile(b.m.sys(b.script(u)), content, 0o755); err != nil {
 		return err
 	}
-	// Включение автозапуска зависит от дистрибутива: пробуем доступные
-	// утилиты, ошибки не фатальны.
-	if err := b.m.run(ctx, "update-rc.d", string(u), "defaults"); err != nil {
-		_ = b.m.run(ctx, "chkconfig", "--add", string(u))
-	}
-	return nil
+	return b.m.runOps(ctx, b.m.profile.EnableOps(string(u), b.m.cfg.Paths))
 }
 
 func (b sysvBackend) installNativeZapret(ctx context.Context) error {
 	src := filepath.Join(b.m.cfg.Paths.ZapretRoot, "init.d", "sysv", "zapret2")
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("service: upstream zapret2 SysV init: %w", err)
+	if !regularFile(src) {
+		return fmt.Errorf("service: upstream zapret2 SysV init not found at %s", src)
 	}
-	if err := b.m.writeFile(b.m.sys(b.script(UnitZapret2)), string(data), 0o755); err != nil {
+	if err := os.Chmod(src, 0o755); err != nil {
+		return fmt.Errorf("service: %w", err)
+	}
+	if err := b.m.atomicSymlink(src, b.m.sys(b.script(UnitZapret2))); err != nil {
 		return err
 	}
-	if err := b.m.run(ctx, "update-rc.d", string(UnitZapret2), "defaults"); err != nil {
-		_ = b.m.run(ctx, "chkconfig", "--add", string(UnitZapret2))
-	}
-	return nil
+	return b.m.runOps(ctx, b.m.profile.EnableOps(string(UnitZapret2), b.m.cfg.Paths))
 }
 
 func (b sysvBackend) uninstall(ctx context.Context, u Unit) error {
-	script := b.m.sys(b.script(u))
-	if _, err := os.Stat(script); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("service: чтение init %s: %w", u, err)
-	}
-	if err := b.m.run(ctx, b.script(u), "stop"); err != nil {
-		return fmt.Errorf("service: stop %s: %w", u, err)
-	}
-	if err := b.m.run(ctx, "update-rc.d", "-f", string(u), "remove"); err != nil {
-		if fallbackErr := b.m.run(ctx, "chkconfig", "--del", string(u)); fallbackErr != nil {
-			return fmt.Errorf("service: disable %s: update-rc.d: %v; chkconfig: %w", u, err, fallbackErr)
-		}
-	}
-	if err := os.Remove(script); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("service: %w", err)
-	}
-	return nil
+	return b.m.uninstallProfileManaged(ctx, u, b.m.sys(b.script(u)))
 }
 
 func (b sysvBackend) control(ctx context.Context, u Unit, action string) error {
-	return b.m.run(ctx, b.script(u), action)
+	return b.m.runSpec(ctx, b.m.profile.ControlCmd(string(u), action, b.m.cfg.Paths))
 }
 
 func (b sysvBackend) query(ctx context.Context, u Unit) (bool, error) {
-	return b.m.queryCmd(ctx, b.script(u), "status")
+	spec := b.m.profile.QueryCmd(string(u), b.m.cfg.Paths)
+	return b.m.queryCmd(ctx, spec.Name, spec.Args...)
 }
 
 // ---------------------------------------------------------------- Entware
@@ -244,13 +506,7 @@ type entwareBackend struct{ sysvBackend }
 // initScriptFor возвращает путь init-скрипта, который вызывается для службы
 // (для zapret2 — скрипт в каталоге zapret2, на который указывает S90-симлинк).
 func (m *manager) initScriptFor(u Unit) string {
-	switch {
-	case m.cfg.Backend == BackendEntware && u == UnitZapret2:
-		return filepath.Join(m.cfg.Paths.ZapretRoot, "init.d", "sysv", "zapret2")
-	case m.cfg.Backend == BackendEntware:
-		return entwareInitDir + "/S92" + string(u)
-	}
-	return initDir + "/" + string(u)
+	return m.profile.ServiceScriptPath(string(u), m.cfg.Paths)
 }
 
 func (b entwareBackend) s90Link() string {
@@ -270,7 +526,7 @@ func (b entwareBackend) install(ctx context.Context, u Unit) error {
 	if u != UnitZapret2 {
 		scriptOnDisk = b.m.sys(script)
 	}
-	// zapret2 always uses the upstream init unpacked with its release archive.
+	// zapret2 всегда использует штатный init-скрипт из архива релиза.
 	if u == UnitZapret2 {
 		if _, err := os.Stat(scriptOnDisk); err != nil {
 			return fmt.Errorf("service: upstream zapret2 init is required: %w", err)
@@ -292,19 +548,7 @@ func (b entwareBackend) install(ctx context.Context, u Unit) error {
 // linkS90 создаёт /opt/etc/init.d/S90-zapret2 → init-скрипт (копия, если
 // символические ссылки недоступны).
 func (b entwareBackend) linkS90(target string) error {
-	link := b.s90Link()
-	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-		return fmt.Errorf("service: %w", err)
-	}
-	_ = os.Remove(link)
-	if err := os.Symlink(target, link); err == nil {
-		return nil
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return fmt.Errorf("service: %w", err)
-	}
-	return b.m.writeFile(link, string(data), 0o755)
+	return b.m.atomicSymlink(target, b.s90Link())
 }
 
 func (b entwareBackend) installHook(d TemplateData) error {
@@ -370,9 +614,10 @@ func (b entwareBackend) uninstall(ctx context.Context, u Unit) error {
 }
 
 func (b entwareBackend) control(ctx context.Context, u Unit, action string) error {
-	return b.m.run(ctx, filepath.ToSlash(b.m.initScriptFor(u)), action)
+	return b.m.runSpec(ctx, b.m.profile.ControlCmd(string(u), action, b.m.cfg.Paths))
 }
 
 func (b entwareBackend) query(ctx context.Context, u Unit) (bool, error) {
-	return b.m.queryCmd(ctx, filepath.ToSlash(b.m.initScriptFor(u)), "status")
+	spec := b.m.profile.QueryCmd(string(u), b.m.cfg.Paths)
+	return b.m.queryCmd(ctx, spec.Name, spec.Args...)
 }

@@ -201,3 +201,87 @@ func TestModuleLoadedSysfs(t *testing.T) {
 		t.Fatal("expected sysfs module")
 	}
 }
+
+func TestModuleLoadedBuiltin(t *testing.T) {
+	root := t.TempDir()
+	for path, body := range map[string]string{
+		filepath.Join(root, "proc", "sys", "kernel", "osrelease"):         "6.6.58-0-lts\n",
+		filepath.Join(root, "lib", "modules", "6.6.58-0-lts", "modules.builtin"): "kernel/net/netfilter/nfnetlink_queue.ko\nkernel/net/netfilter/nft_queue.ko.xz\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts := Options{Root: root}
+	if !moduleLoaded(opts, "nfnetlink_queue") {
+		t.Fatal("expected nfnetlink_queue from modules.builtin")
+	}
+	if !moduleLoaded(opts, "nft_queue") {
+		t.Fatal("expected nft_queue.ko.xz from modules.builtin")
+	}
+	if moduleLoaded(opts, "xt_NFQUEUE") {
+		t.Fatal("xt_NFQUEUE should not be reported loaded")
+	}
+}
+
+func TestEnsureAlpineNftablesAndIptables(t *testing.T) {
+	t.Run("nftables", func(t *testing.T) {
+		root := t.TempDir()
+		nft := filepath.Join(root, "usr", "sbin", "nft")
+		if err := os.MkdirAll(filepath.Dir(nft), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(nft, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		proc := filepath.Join(root, "proc")
+		if err := os.MkdirAll(proc, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(proc, "modules"), []byte("nfnetlink_queue 1 0 - Live 0x0\nnft_queue 1 0 - Live 0x0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		rep := Check(platform.Platform{
+			Kind: platform.KindVPS, OSID: "alpine", InitSystem: platform.InitOpenRC, FWType: platform.FWNftables,
+		}, Options{Root: root})
+		if !rep.OK() {
+			t.Fatalf("expected Alpine nftables deps OK without iptables/ipset/xt_NFQUEUE: %s", rep.Summary())
+		}
+		for _, it := range rep.Items {
+			if it.Name == "iptables" || it.Name == "ipset" || it.Name == "xt_NFQUEUE" {
+				t.Fatalf("Alpine nftables should not require %s: %+v", it.Name, rep.Items)
+			}
+		}
+	})
+
+	t.Run("iptables", func(t *testing.T) {
+		root := t.TempDir()
+		for _, bin := range []string{"iptables", "ipset"} {
+			p := filepath.Join(root, "sbin", bin)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		proc := filepath.Join(root, "proc")
+		if err := os.MkdirAll(proc, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(proc, "modules"), []byte("xt_NFQUEUE 1 0 - Live 0x0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		rep := Check(platform.Platform{
+			Kind: platform.KindVPS, OSID: "alpine", InitSystem: platform.InitOpenRC, FWType: platform.FWIptables,
+		}, Options{Root: root})
+		if !rep.OK() {
+			t.Fatalf("expected Alpine iptables deps OK: %s", rep.Summary())
+		}
+	})
+}

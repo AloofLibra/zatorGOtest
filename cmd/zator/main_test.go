@@ -348,3 +348,51 @@ func TestWebHandlerWarnsWithoutAuth(t *testing.T) {
 		t.Errorf("нет сообщения об открытом доступе: %q", warn.String())
 	}
 }
+
+func Test160CLISubcommands(t *testing.T) {
+	setupEnv(t)
+	zatorRoot := os.Getenv("ZATOR_ROOT")
+	zapretRoot := os.Getenv("ZAPRET2_ROOT")
+	_ = os.MkdirAll(filepath.Join(zatorRoot, "state", "orchestra"), 0o755)
+	_ = os.MkdirAll(filepath.Join(zatorRoot, "files", "fake", "custom_blob"), 0o755)
+	_ = os.MkdirAll(filepath.Join(zatorRoot, "extra_strats"), 0o755)
+	_ = os.MkdirAll(zapretRoot, 0o755)
+
+	cfgRaw := "NFQWS2_OPT=\"\n--blob=maxru:@/opt/zator/files/fake/tls_clienthello_max_ru.bin\n--template=z2r_tcp_tls_common\n--lua-desync=fake:blob=maxru:strategy=43\n--lua-desync=circular_locked:key=1:strategy=1\n\"\n"
+	_ = os.WriteFile(filepath.Join(zapretRoot, "config"), []byte(cfgRaw), 0o644)
+	_ = os.WriteFile(filepath.Join(zatorRoot, "files", "fake", "custom_blob", "cli.bin"), []byte("BLOB"), 0o644)
+	_ = os.WriteFile(filepath.Join(zatorRoot, "extra_strats", "sni_zator.txt"), []byte("# set: google\nwww.google.com\n"), 0o644)
+
+	// h3-curl status works even without binary installed.
+	if code, out, errOut := runCmd(t, "h3-curl", "status"); code != 0 || !strings.Contains(out, `"found"`) {
+		t.Fatalf("h3-curl status failed: code=%d out=%s err=%s", code, out, errOut)
+	}
+
+	// blobs add -> list -> apply.
+	if code, out, errOut := runCmd(t, "blobs", "add", "cli_blob", "cli.bin", "cli"); code != 0 || !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("blobs add: code=%d out=%s err=%s", code, out, errOut)
+	}
+	// custom add -> list -> apply.
+	if code, out, errOut := runCmd(t, "custom", "add", "tpl", "fake:blob=cli_blob:repeats=2", "note"); code != 0 || !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("custom add: code=%d out=%s err=%s", code, out, errOut)
+	}
+	if code, out, errOut := runCmd(t, "blobs", "apply", "--no-restart"); code != 0 || !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("blobs apply: code=%d out=%s err=%s", code, out, errOut)
+	}
+	// sni set-write -> pool-set -> status -> pool-clear -> set-delete.
+	if code, _, errOut := runCmd(t, "sni", "set-write", "cli_sni", "one.example", "two.example"); code != 0 {
+		t.Fatalf("sni set-write: %d %s", code, errOut)
+	}
+	if code, _, errOut := runCmd(t, "sni", "pool-set", "1", "@cli_sni"); code != 0 {
+		t.Fatalf("sni pool-set: %d %s", code, errOut)
+	}
+	if code, out, _ := runCmd(t, "sni", "status"); code != 0 || !strings.Contains(out, "cli_sni") {
+		t.Fatalf("sni status: %d %s", code, out)
+	}
+	if code, _, errOut := runCmd(t, "sni", "pool-clear", "1"); code != 0 {
+		t.Fatalf("sni pool-clear: %d %s", code, errOut)
+	}
+	if code, _, errOut := runCmd(t, "sni", "set-delete", "cli_sni"); code != 0 {
+		t.Fatalf("sni set-delete: %d %s", code, errOut)
+	}
+}

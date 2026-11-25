@@ -159,3 +159,35 @@ func (s *Server) CLIStartQuickSweep(ctx context.Context, profile int, address, s
 	values := map[string]string{"quick_profile": fmt.Sprint(profile), "address": address, "scope": scope, "tls_pref": tlsPref}
 	return s.CLISupersweep(ctx, "start", values)
 }
+
+// CLICustom invokes GET/POST /api/custom directly for CLI and interactive menus.
+func (s *Server) CLICustom(ctx context.Context, action string, values map[string]string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if action == "" || action == "list" {
+		return s.customListPayload(values["block"])
+	}
+	form := make(url.Values, len(values)+1)
+	form.Set("action", action)
+	for k, v := range values {
+		form.Set(k, v)
+	}
+	return s.customPost((&http.Request{}).WithContext(ctx), params(form))
+}
+
+// CLIBlobs invokes GET/POST /api/blobs directly for CLI and interactive menus.
+func (s *Server) CLIBlobs(ctx context.Context, action string, values map[string]string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if action == "" || action == "list" {
+		return s.blobsListPayload()
+	}
+	form := make(url.Values, len(values)+1)
+	form.Set("action", action)
+	for k, v := range values {
+		form.Set(k, v)
+	}
+	return s.blobsAction((&http.Request{}).WithContext(ctx), params(form))
+}

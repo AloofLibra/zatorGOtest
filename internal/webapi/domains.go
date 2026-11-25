@@ -622,12 +622,16 @@ func (s *Server) googlevideoAction(p params) (map[string]any, error) {
 		return map[string]any{"ok": true, "added": n}, nil
 	case "refresh_ips":
 		force := p.Get("force") == "1" || strings.EqualFold(p.Get("force"), "true")
-		res, err := s.app.RefreshGooglevideoIPv4(context.Background(), force)
+		ctx := context.Background()
+		res, err := s.app.RefreshGooglevideoIPv4(ctx, force)
 		if err != nil {
 			return nil, errf(http.StatusInternalServerError, "Не удалось обновить googlevideo-ipv4: "+err.Error())
 		}
+		sniAdded, _ := s.app.SyncGooglevideoHosts()
+		sniRes, _ := s.app.ResolveGooglevideoHosts(ctx, force)
 		return map[string]any{
 			"ok": true, "status": res.Status, "count": res.Count, "generated": res.Generated,
+			"sni_hosts_added": sniAdded, "sni_resolved_ips": sniRes.Resolved, "local_ips": len(sniRes.LiveIPs),
 		}, nil
 	case "add":
 		host, ok := googlevideoNormalize(p.Get("domain"))

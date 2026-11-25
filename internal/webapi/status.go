@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/AloofLibra/zator"
 	"github.com/AloofLibra/zator/internal/config"
@@ -239,11 +240,14 @@ func pathExists(path string) bool {
 	return err == nil
 }
 
-func (s *Server) versionPayload() map[string]any {
-	zv := ""
-	if in, err := zapret.ReadInstalled(s.paths.ZapretRoot); err == nil {
-		zv = in.Version
+func (s *Server) versionPayload(ctx context.Context) map[string]any {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	dctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	in, _ := zapret.DetectInstalled(dctx, s.paths.ZapretRoot)
+	cancel()
+
 	ver := zator.Version()
 	date := fileDate(filepath.Join(s.paths.ConfigDir, "zator.json"))
 	cfgDate := fileDate(s.paths.ZapretConfig)
@@ -255,7 +259,9 @@ func (s *Server) versionPayload() map[string]any {
 		}
 	}
 	out := map[string]any{
-		"zapret2_version":       zv,
+		"zapret2_version":       in.Version,
+		"zapret2_source":        string(in.Source),
+		"zapret2_arch":          in.ArchDir,
 		"zator_version":         ver,
 		"zator_date":            date,
 		"webui_version":         ver,
@@ -328,7 +334,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request, p params) {
 	out := map[string]any{
 		"auth_required": s.app.Config.AuthRequired(),
 		"status":        s.statusPayload(r.Context(), scope),
-		"version":       s.versionPayload(),
+		"version":       s.versionPayload(r.Context()),
 		"scopes":        s.scopesPayload(cfg),
 		"tls_blob":      section(""),
 		"wg_blob":       section("wg_blob"),
